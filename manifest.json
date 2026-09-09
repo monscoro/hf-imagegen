@@ -1,0 +1,17 @@
+{
+  "type": "plugin",
+  "runner": "node",
+  "owner": "altra",
+  "name": "image",
+  "revision": 15,
+  "tags": [
+    "lmstudio",
+    "lmstudio-plugin",
+    "image-generation",
+    "text-to-image",
+    "hugging-face",
+    "diffusion",
+    "stable-diffusion",
+    "ai-art"
+  ]
+}

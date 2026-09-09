@@ -41,6 +41,7 @@ const promises_1 = require("fs/promises");
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const config_1 = require("./config");
+const hfApi_1 = require("./hfApi");
 function json(obj) {
     return JSON.stringify(obj, null, 2);
 }
@@ -74,43 +75,6 @@ function timestampedFilename(ext) {
     const ts = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
     return `hf-${ts}.${ext}`;
 }
-const POPULAR_MODELS = [
-    {
-        id: "black-forest-labs/FLUX.1-schnell",
-        description: "FLUX.1 Schnell — fast, high-quality, state-of-the-art. Free tier friendly via Fal.ai provider.",
-        style: "photorealistic, artistic",
-        speed: "fast",
-        access: "free",
-    },
-    {
-        id: "black-forest-labs/FLUX.1-dev",
-        description: "FLUX.1 Dev — higher quality than schnell, ~50 steps. Requires HF Pro credits. Non-commercial license.",
-        style: "photorealistic, artistic",
-        speed: "medium",
-        access: "pro",
-    },
-    {
-        id: "black-forest-labs/FLUX.2-klein",
-        description: "FLUX.2 Klein — latest FLUX, real-time generation under 1s. Apache 2.0 (fully open). Free tier.",
-        style: "photorealistic, artistic",
-        speed: "fast",
-        access: "free",
-    },
-    {
-        id: "black-forest-labs/FLUX.2-dev",
-        description: "FLUX.2 Dev — 32B parameter flagship. Best quality. Requires HF Pro credits. Non-commercial license.",
-        style: "photorealistic, artistic",
-        speed: "slow",
-        access: "pro",
-    },
-    {
-        id: "stabilityai/stable-diffusion-xl-base-1.0",
-        description: "SDXL — Stability AI flagship 1024px model. Stable and reliable, free tier.",
-        style: "photorealistic, artistic, illustration",
-        speed: "medium",
-        access: "free",
-    },
-];
 const toolsProvider = async (ctl) => {
     const cfg = ctl.getPluginConfig(config_1.pluginConfigSchematics);
     const getToken = () => cfg.get("hfApiToken").trim();
@@ -191,58 +155,129 @@ const toolsProvider = async (ctl) => {
         (0, sdk_1.tool)({
             name: "list_models",
             description: (0, sdk_1.text) `
-        Return the list of popular Hugging Face text-to-image models you can use with generate_image.
-        Shows model ID, description, style, and speed.
+        Return available Hugging Face text-to-image models.
 
-        Use when the user asks what models are available or wants to pick a different model.
+        Use the 'source' parameter to control which models to show:
+        - "curated" (default): Expert-verified models with detailed descriptions and LoRA compatibility info
+        - "provider": Models from a specific inference provider (e.g. "fal-ai", "nscale")
+        - "trending": Currently popular models on HuggingFace
+        - "downloads": Most downloaded models
+
+        When source="provider", you must also specify the provider name.
+        Each model includes compatible_loras_count when available.
       `,
-            parameters: {},
-            implementation: safe_impl("list_models", async () => {
+            parameters: {
+                source: zod_1.z.enum(["curated", "provider", "trending", "downloads"])
+                    .default("curated")
+                    .describe("Which model list to return. Default: curated (expert-verified models)."),
+                provider: zod_1.z.string()
+                    .default("")
+                    .describe("Inference provider name (required when source='provider'). " +
+                    "Examples: fal-ai, nscale, replicate, wavespeed."),
+                limit: zod_1.z.number()
+                    .min(5)
+                    .max(50)
+                    .default(20)
+                    .describe("Maximum number of models to return (only for provider/trending/downloads)."),
+                include_loras: zod_1.z.boolean()
+                    .default(false)
+                    .describe("Include compatible LoRAs for each model (slower, requires API calls)."),
+            },
+            implementation: safe_impl("list_models", async ({ source, provider, limit, include_loras }, ctx) => {
+                const token = getToken();
                 const currentDefault = getModel();
+                ctx.status(`Fetching ${source} models...`);
+                let models;
+                switch (source) {
+                    case "curated":
+                        models = (0, hfApi_1.getCuratedModels)();
+                        break;
+                    case "provider":
+                        if (!provider.trim()) {
+                            throw new Error("provider parameter is required when source='provider'. " +
+                                "Examples: fal-ai, nscale, replicate.");
+                        }
+                        models = await (0, hfApi_1.getProviderModels)(provider.trim(), limit, token || undefined);
+                        break;
+                    case "trending":
+                        models = await (0, hfApi_1.getTrendingModels)(limit, token || undefined);
+                        break;
+                    case "downloads":
+                        models = await (0, hfApi_1.getDownloadedModels)(limit, token || undefined);
+                        break;
+                    default:
+                        models = (0, hfApi_1.getCuratedModels)();
+                }
+                if (include_loras && models.length > 0) {
+                    ctx.status("Loading compatible LoRAs...");
+                    for (const model of models) {
+                        try {
+                            const loras = await (0, hfApi_1.getDefaultLoRAs)(model.id, 5, token || undefined);
+                            model.compatible_loras = loras;
+                            model.compatible_loras_count = loras.length;
+                        }
+                        catch {
+                            // LoRA query failed, continue
+                        }
+                    }
+                }
                 return json({
+                    source,
                     current_default_model: currentDefault,
-                    models: POPULAR_MODELS.map((m) => ({
+                    models: models.map((m) => ({
                         ...m,
                         is_default: m.id === currentDefault,
                     })),
-                    note: "Change the default model in plugin settings, or pass model_id directly to generate_image.",
+                    note: source === "curated"
+                        ? "Expert-verified models. Use list_loras with base_model to find compatible LoRAs."
+                        : "Pass model_id to generate_image to use a model.",
                 });
             }),
         }),
         (0, sdk_1.tool)({
             name: "list_loras",
             description: (0, sdk_1.text) `
-        Search HuggingFace for LoRA adapters compatible with a base model (default: FLUX.1).
-        Returns model IDs you can pass as lora_id in generate_image.
+        Search HuggingFace for LoRA adapters.
 
-        Use when the user asks about LoRAs, styles, or wants to customize the image generation style.
+        Use 'base_model' to find only LoRAs compatible with a specific model.
+        Use 'search' to filter by keyword (e.g. 'anime', 'portrait', 'watercolor').
+
+        When base_model is provided, only compatible LoRAs are returned.
+        The base_model should be a model ID from list_models (e.g. 'black-forest-labs/FLUX.1-dev').
       `,
             parameters: {
-                search: zod_1.z.string().default("").describe("Optional keyword to filter LoRAs (e.g. 'anime', 'portrait', 'watercolor'). " +
-                    "Leave blank to list popular FLUX LoRAs."),
+                base_model: zod_1.z.string()
+                    .default("")
+                    .describe("Filter LoRAs by compatible base model. " +
+                    "Use model IDs from list_models (e.g. 'black-forest-labs/FLUX.1-dev', " +
+                    "'stabilityai/stable-diffusion-xl-base-1.0'). " +
+                    "Leave blank to search all LoRAs."),
+                search: zod_1.z.string()
+                    .default("")
+                    .describe("Optional keyword to filter LoRAs (e.g. 'anime', 'portrait', 'watercolor'). " +
+                    "Can be combined with base_model."),
+                limit: zod_1.z.number()
+                    .min(5)
+                    .max(30)
+                    .default(15)
+                    .describe("Maximum number of results to return."),
             },
-            implementation: safe_impl("list_loras", async ({ search }) => {
+            implementation: safe_impl("list_loras", async ({ base_model, search, limit }, ctx) => {
                 const token = getToken();
-                const query = search.trim() ? `${search.trim()} lora` : "flux lora";
-                const url = `https://huggingface.co/api/models?search=${encodeURIComponent(query)}&filter=lora&sort=downloads&limit=15`;
-                const headers = { "Accept": "application/json" };
-                if (token)
-                    headers["Authorization"] = `Bearer ${token}`;
-                const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
-                if (!res.ok)
-                    throw new Error(`HF API error: ${res.status} ${res.statusText}`);
-                const models = await res.json();
-                const results = models.map((m) => ({
-                    id: m.id,
-                    downloads: m.downloads ?? 0,
-                    likes: m.likes ?? 0,
-                    base_model: m.cardData?.base_model ?? "unknown",
-                    tags: (m.tags ?? []).filter((t) => ["lora", "flux", "sdxl", "stable-diffusion"].includes(t)),
-                }));
+                const cleanBaseModel = base_model.trim();
+                const cleanSearch = search.trim();
+                ctx.status(cleanBaseModel
+                    ? `Finding LoRAs for ${cleanBaseModel}...`
+                    : "Searching LoRAs...");
+                const results = await (0, hfApi_1.getLoRAsForModel)(cleanBaseModel, cleanSearch, limit, token || undefined);
                 return json({
-                    query,
+                    query: cleanSearch || "all",
+                    base_model_filter: cleanBaseModel || "none (showing all)",
                     results,
-                    usage: "Pass the 'id' field as lora_id in generate_image. Pair FLUX LoRAs with a FLUX base model.",
+                    count: results.length,
+                    usage: cleanBaseModel
+                        ? `These LoRAs are compatible with ${cleanBaseModel}. Pass the 'id' field as lora_id in generate_image.`
+                        : "Pass the 'id' field as lora_id in generate_image. Use base_model to filter for specific models.",
                     note: "LoRA generation uses fal-ai provider. lora_scale default is 1.0; try 0.6–0.9 for subtle effects.",
                 });
             }),

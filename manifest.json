@@ -1,9 +1,9 @@
 {
   "type": "plugin",
   "runner": "node",
-  "owner": "altra",
-  "name": "image",
-  "revision": 15,
+  "owner": "krone",
+  "name": "hf-image-gen",
+  "revision": 16,
   "tags": [
     "lmstudio",
     "lmstudio-plugin",

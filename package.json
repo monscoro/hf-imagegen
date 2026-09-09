@@ -1,7 +1,7 @@
 {
-  "name": "image",
-  "version": "1.0.0",
-  "description": "Text-to-image generation via Hugging Face Inference API.",
+  "name": "hf-image-gen",
+  "version": "1.1.0",
+  "description": "Image Generation Plugin for LM Studio — Text-to-Image via Hugging Face Inference API with dynamic model selection and LoRA support.",
   "main": "index.js",
   "scripts": {
     "dev": "lms dev",
@@ -14,11 +14,14 @@
     "image-generation",
     "text-to-image",
     "hugging-face",
+    "flux",
+    "sdxl",
     "diffusion",
     "stable-diffusion",
+    "lora",
     "ai-art"
   ],
-  "author": "thrilok",
+  "author": "krone",
   "license": "MIT",
   "dependencies": {
     "@huggingface/inference": "^4.13.15",

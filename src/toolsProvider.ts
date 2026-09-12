@@ -63,6 +63,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     dailyCap: Number(cfg.get("rateLimitDailyCap")) || 50,
   });
 
+  let isGenerating = false;
+
   const tools: Tool[] = [
 
     tool({
@@ -115,53 +117,62 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           throw new Error(rateLimitResult.error);
         }
 
-        const modelToUse = model_id.trim() || getModel();
-        const cleanNegative = negative_prompt.trim();
-        const cleanLora = lora_id.trim();
-        const outputDir = getOutputDir();
+        if (isGenerating) {
+          throw new Error("Another generation is already in progress. Wait for it to finish.");
+        }
+        isGenerating = true;
 
-        await mkdir(outputDir, { recursive: true });
+        try {
+          const modelToUse = model_id.trim() || getModel();
+          const cleanNegative = negative_prompt.trim();
+          const cleanLora = lora_id.trim();
+          const outputDir = getOutputDir();
 
-        const hf = new InferenceClient(token);
+          await mkdir(outputDir, { recursive: true });
 
-        const parameters: Record<string, unknown> = {};
-        if (cleanNegative) parameters.negative_prompt = cleanNegative;
-        if (cleanLora) parameters.loras = [{ path: cleanLora, scale: lora_scale }];
+          const hf = new InferenceClient(token);
 
-        ctx.status(`Calling ${modelToUse}…`);
-        const blob = await hf.textToImage({
-          provider: cleanLora ? "fal-ai" : "auto",
-          model: modelToUse,
-          inputs: prompt,
-          parameters,
-        }) as unknown as Blob;
+          const parameters: Record<string, unknown> = {};
+          if (cleanNegative) parameters.negative_prompt = cleanNegative;
+          if (cleanLora) parameters.loras = [{ path: cleanLora, scale: lora_scale }];
 
-        const mimeType = blob.type || "image/png";
-        const ext: "png" | "jpeg" = mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpeg" : "png";
-        const filename = timestampedFilename(ext);
-        const filePath = path.join(outputDir, filename);
+          ctx.status(`Calling ${modelToUse}…`);
+          const blob = await hf.textToImage({
+            provider: cleanLora ? "fal-ai" : "auto",
+            model: modelToUse,
+            inputs: prompt,
+            parameters,
+          }) as unknown as Blob;
 
-        const buffer = Buffer.from(await blob.arrayBuffer());
-        await writeFile(filePath, buffer);
+          const mimeType = blob.type || "image/png";
+          const ext: "png" | "jpeg" = mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpeg" : "png";
+          const filename = timestampedFilename(ext);
+          const filePath = path.join(outputDir, filename);
 
-        recordGeneration();
-        const remaining = checkRateLimit(getRateLimitConfig());
-        const remainingCount = remaining.ok ? remaining.remaining : 0;
+          const buffer = Buffer.from(await blob.arrayBuffer());
+          await writeFile(filePath, buffer);
 
-        return json({
-          success: true,
-          file_path: filePath,
-          filename,
-          model_used: modelToUse,
-          lora_used: cleanLora || null,
-          lora_scale: cleanLora ? lora_scale : null,
-          prompt,
-          negative_prompt: cleanNegative || null,
-          file_size_bytes: buffer.length,
-          mime_type: mimeType,
-          generations_remaining_today: remainingCount,
-          message: `Image saved to ${filePath}`,
-        });
+          recordGeneration();
+          const remaining = checkRateLimit(getRateLimitConfig());
+          const remainingCount = remaining.ok ? remaining.remaining : 0;
+
+          return json({
+            success: true,
+            file_path: filePath,
+            filename,
+            model_used: modelToUse,
+            lora_used: cleanLora || null,
+            lora_scale: cleanLora ? lora_scale : null,
+            prompt,
+            negative_prompt: cleanNegative || null,
+            file_size_bytes: buffer.length,
+            mime_type: mimeType,
+            generations_remaining_today: remainingCount,
+            message: `Image saved to ${filePath}`,
+          });
+        } finally {
+          isGenerating = false;
+        }
       }),
     }),
 
@@ -228,9 +239,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             models = getCuratedModels();
         }
 
+        const LORA_CAP = 10;
+        let loraTruncated = false;
         if (include_loras && models.length > 0) {
-          ctx.status("Loading compatible LoRAs...");
-          for (const model of models) {
+          const targets = models.slice(0, LORA_CAP);
+          loraTruncated = models.length > LORA_CAP;
+          ctx.status(`Loading compatible LoRAs for ${targets.length} models...`);
+          for (const model of targets) {
             try {
               const loras = await getDefaultLoRAs(model.id, 5, token || undefined);
               model.compatible_loras = loras;
@@ -248,9 +263,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             ...m,
             is_default: m.id === currentDefault,
           })),
-          note: source === "curated"
-            ? "Expert-verified models. Use list_loras with base_model to find compatible LoRAs."
-            : "Pass model_id to generate_image to use a model.",
+          note: loraTruncated
+            ? `LoRA lookup capped to first ${LORA_CAP} models to avoid API flood. Use list_loras with base_model for others.`
+            : source === "curated"
+              ? "Expert-verified models. Use list_loras with base_model to find compatible LoRAs."
+              : "Pass model_id to generate_image to use a model.",
         });
       }),
     }),

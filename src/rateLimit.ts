@@ -1,3 +1,7 @@
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+
 export interface RateLimitConfig {
   cooldownMs: number;
   dailyCap: number;
@@ -9,7 +13,33 @@ interface Entry {
   dayStart: number;
 }
 
-const entry: Entry = { lastCall: 0, count: 0, dayStart: 0 };
+const RATE_LIMIT_FILE = path.join(os.homedir(), ".cache", "hf-image-gen", "rateLimit.json");
+
+function loadEntry(): Entry {
+  try {
+    if (fs.existsSync(RATE_LIMIT_FILE)) {
+      const raw = fs.readFileSync(RATE_LIMIT_FILE, "utf-8");
+      const parsed = JSON.parse(raw) as Entry;
+      if (typeof parsed.lastCall === "number" && typeof parsed.count === "number" && typeof parsed.dayStart === "number") {
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore corrupt file
+  }
+  return { lastCall: 0, count: 0, dayStart: 0 };
+}
+
+function saveEntry(e: Entry): void {
+  try {
+    fs.mkdirSync(path.dirname(RATE_LIMIT_FILE), { recursive: true });
+    fs.writeFileSync(RATE_LIMIT_FILE, JSON.stringify(e), "utf-8");
+  } catch {
+    // persistence is best-effort
+  }
+}
+
+const entry: Entry = loadEntry();
 
 function currentDay(): number {
   const now = Date.now();
@@ -22,6 +52,7 @@ export function checkRateLimit(cfg: RateLimitConfig): { ok: true; remaining: num
   if (currentDay() !== entry.dayStart) {
     entry.dayStart = currentDay();
     entry.count = 0;
+    saveEntry(entry);
   }
 
   if (entry.count >= cfg.dailyCap) {
@@ -42,4 +73,5 @@ export function checkRateLimit(cfg: RateLimitConfig): { ok: true; remaining: num
 export function recordGeneration(): void {
   entry.lastCall = Date.now();
   entry.count++;
+  saveEntry(entry);
 }

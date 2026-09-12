@@ -13,6 +13,7 @@ import {
   getLoRAsForModel,
   getDefaultLoRAs,
 } from "./hfApi";
+import { checkRateLimit, recordGeneration } from "./rateLimit";
 
 function json(obj: unknown): string {
   return JSON.stringify(obj, null, 2);
@@ -57,6 +58,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const getToken = () => cfg.get("hfApiToken").trim();
   const getModel = () => cfg.get("defaultModel").trim() || "black-forest-labs/FLUX.1-schnell";
   const getOutputDir = () => resolvePath(cfg.get("outputDirectory").trim() || "~/hf-images");
+  const getRateLimitConfig = () => ({
+    cooldownMs: Number(cfg.get("rateLimitCooldown")) || 5000,
+    dailyCap: Number(cfg.get("rateLimitDailyCap")) || 50,
+  });
 
   const tools: Tool[] = [
 
@@ -105,6 +110,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           );
         }
 
+        const rateLimitResult = checkRateLimit(getRateLimitConfig());
+        if (!rateLimitResult.ok) {
+          throw new Error(rateLimitResult.error);
+        }
+
         const modelToUse = model_id.trim() || getModel();
         const cleanNegative = negative_prompt.trim();
         const cleanLora = lora_id.trim();
@@ -134,6 +144,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         const buffer = Buffer.from(await blob.arrayBuffer());
         await writeFile(filePath, buffer);
 
+        recordGeneration();
+        const remaining = checkRateLimit(getRateLimitConfig());
+        const remainingCount = remaining.ok ? remaining.remaining : 0;
+
         return json({
           success: true,
           file_path: filePath,
@@ -145,6 +159,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           negative_prompt: cleanNegative || null,
           file_size_bytes: buffer.length,
           mime_type: mimeType,
+          generations_remaining_today: remainingCount,
           message: `Image saved to ${filePath}`,
         });
       }),

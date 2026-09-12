@@ -20,4 +20,16 @@ export const pluginConfigSchematics = createConfigSchematics()
       "Directory where generated images are saved. " +
       "Use ~ for home directory (e.g. ~/hf-images). Created automatically if it does not exist.",
   }, "~/hf-images")
+  .field("rateLimitCooldown", "numeric", {
+    displayName: "Generation Cooldown (ms)",
+    subtitle:
+      "Minimum milliseconds between image generations. " +
+      "Prevents rapid credit consumption. Default: 5000 (5 seconds).",
+  }, 5000)
+  .field("rateLimitDailyCap", "numeric", {
+    displayName: "Daily Generation Limit",
+    subtitle:
+      "Maximum number of images that can be generated per day. " +
+      "Resets at midnight. Default: 50.",
+  }, 50)
   .build();

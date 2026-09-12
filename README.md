@@ -119,6 +119,7 @@ You can also pass any HuggingFace text-to-image model ID directly to `generate_i
 ### `list_loras` — Search LoRA adapters
 
 Searches HuggingFace for LoRA adapters, optionally filtered by compatible base model.
+Avoid the `search` keyword filter — it's too strict and often returns nothing. Just use `base_model`.
 
 ```
 list_loras(base_model?, search?, limit?)

@@ -137,23 +137,29 @@ export async function getLoRAsForModel(
 
   const models = (await res.json()) as HFModel[];
 
+  function extractBaseModel(m: HFModel): string {
+    if (m.cardData?.base_model) return m.cardData.base_model;
+    const tag = (m.tags ?? []).find((t) => t.startsWith("base_model:"));
+    return tag ? tag.replace("base_model:", "") : "unknown";
+  }
+
   return models
-    .filter((m) => {
-      if (!baseModel) return true;
-      const loraBase = m.cardData?.base_model?.toLowerCase() || "";
-      const searchBase = baseModel.toLowerCase();
-      const modelShort = searchBase.split("/").pop() || "";
-      return loraBase.includes(searchBase) || loraBase.includes(modelShort);
-    })
     .map((m) => ({
       id: m.id,
       downloads: m.downloads ?? 0,
       likes: m.likes ?? 0,
-      base_model: m.cardData?.base_model ?? "unknown",
+      base_model: extractBaseModel(m),
       tags: (m.tags ?? []).filter((t) =>
         ["lora", "flux", "sdxl", "stable-diffusion", "krea", "qwen"].includes(t)
       ),
-    }));
+    }))
+    .filter((m) => {
+      if (!baseModel) return true;
+      const loraBase = m.base_model.toLowerCase();
+      const searchBase = baseModel.toLowerCase();
+      const modelShort = searchBase.split("/").pop() || "";
+      return loraBase.includes(searchBase) || loraBase.includes(modelShort);
+    });
 }
 
 export async function getDefaultLoRAs(

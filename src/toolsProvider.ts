@@ -245,10 +245,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       description: text`
         Search HuggingFace for LoRA adapters.
 
-        Use 'base_model' to find only LoRAs compatible with a specific model.
-        Use 'search' to filter by keyword (e.g. 'anime', 'portrait', 'watercolor').
+        IMPORTANT: Avoid using the 'search' keyword filter! It often returns zero results because HuggingFace search is very strict.
+        Instead, use only 'base_model' to find all compatible LoRAs, then pick from the results.
+        Only use 'search' as a last resort with a very broad term (e.g. 'anime') if the result list is too large to browse.
 
-        When base_model is provided, only compatible LoRAs are returned.
+        Use 'base_model' to find LoRAs compatible with a specific model.
         The base_model should be a model ID from list_models (e.g. 'black-forest-labs/FLUX.1-dev').
       `,
       parameters: {
@@ -263,8 +264,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         search: z.string()
           .default("")
           .describe(
-            "Optional keyword to filter LoRAs (e.g. 'anime', 'portrait', 'watercolor'). " +
-            "Can be combined with base_model."
+            "AVOID using this — HuggingFace search is strict and often returns no results. " +
+            "Only use as a last resort with a broad keyword (e.g. 'anime'). " +
+            "Prefer using only base_model."
           ),
         limit: z.number()
           .min(5)

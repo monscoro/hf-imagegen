@@ -129,8 +129,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           Blank model_id = 'klein'. Optional width/height/seed (pollinations only;
           portrait e.g. 768x1152 for fashion editorial). No negative_prompt (ignored),
           no lora_id (rejected with error). Anonymous tier ~1 request/15s.
-          Free images may carry a watermark. If a community/* model fails (alpha proxies),
-          retry with 'klein' or 'flux'.
+Free images may carry a watermark. If a community/* model fails (alpha proxies),
+           retry with 'klein' or 'flux'.
+
+        FILES: the image is saved under the plugin output directory (config 'Output Directory',
+        returned as output_dir). Use the returned absolute file_path when handing the image to
+        other tools — do NOT strip it to a bare filename; other tools may not search the output
+        directory automatically. Find results via list_output_images. quota.remaining counts the
+        plugin's own daily limit (config 'Daily Generation Limit'), not HF credits.
       `,
       parameters: {
         prompt: z.string().min(1).describe(
@@ -277,13 +283,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           const { filePath, filename } = await saveImageBuffer(buffer, mimeType, outputDir);
 
           recordGeneration();
-          const remaining = checkRateLimit(getRateLimitConfig());
-          const remainingCount = remaining.ok ? remaining.remaining : 0;
+          const quota = checkRateLimit(getRateLimitConfig());
 
           return json({
             success: true,
             file_path: filePath,
             filename,
+            output_dir: outputDir,
             backend: usePollinations ? "pollinations" : "hf",
             model_used: modelToUse,
             lora_used: cleanLora || null,
@@ -292,9 +298,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             negative_prompt: cleanNegative || null,
             file_size_bytes: buffer.length,
             mime_type: mimeType,
-            generations_remaining_today: remainingCount,
+            quota: {
+              guard: "plugin daily limit (config), not HF credits",
+              limit: quota.limit,
+              used: quota.used,
+              remaining: quota.remaining,
+              resets_in_hours: quota.resetInHours,
+            },
             notes: notes.length > 0 ? notes : undefined,
-            message: `Image saved to ${filePath}`,
+            message: `Image saved to ${filePath}${quota.remaining === 0 ? " — daily generation quota reached; next generation is blocked until local midnight." : ""}`,
           });
         } finally {
           isGenerating = false;
@@ -324,6 +336,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         An active Neigungsprompt guides how the change is formulated, same as generate_image.
         Optional lora_id (FLUX base models, fal-ai passthrough — effectiveness on image-to-image
         is currently being verified, report what you observe).
+
+        FILES: the edited image is saved under the plugin output directory (config
+        'Output Directory', returned as output_dir). Use the returned absolute file_path when
+        handing the image to other tools — do NOT strip it to a bare filename. Find results via
+        list_output_images. quota.remaining counts the plugin's own daily limit, not HF credits.
       `,
       parameters: {
         image: z.string().min(1).describe(
@@ -425,13 +442,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           const { filePath, filename } = await saveImageBuffer(outBuffer, mimeType, outputDir);
 
           recordGeneration();
-          const remaining = checkRateLimit(getRateLimitConfig());
-          const remainingCount = remaining.ok ? remaining.remaining : 0;
+          const quota = checkRateLimit(getRateLimitConfig());
 
           return json({
             success: true,
             file_path: filePath,
             filename,
+            output_dir: outputDir,
             backend: "hf",
             model_used: modelToUse,
             input_image: image,
@@ -442,8 +459,18 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             lora_scale: cleanLora ? lora_scale : null,
             file_size_bytes: outBuffer.length,
             mime_type: mimeType,
-            generations_remaining_today: remainingCount,
-            message: `Edited image saved to ${filePath}`,
+            quota: {
+              guard: "plugin daily limit (config), not HF credits",
+              limit: quota.limit,
+              used: quota.used,
+              remaining: quota.remaining,
+              resets_in_hours: quota.resetInHours,
+            },
+            message:
+              `Edited image saved to ${filePath}` +
+              (quota.remaining === 0
+                ? " — daily generation quota reached; next generation is blocked until local midnight."
+                : ""),
           });
         } finally {
           isGenerating = false;

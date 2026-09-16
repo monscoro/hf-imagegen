@@ -39,7 +39,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 | Pollinations API Key | _(blank)_ | **Optional.** From enter.pollinations.ai. Blank = anonymous (1 req/15s, possible watermark). With key: higher limits, no watermark, paid models. Never share `sk_…` keys. |
 | Output Directory | `~/hf-images` | Where images are saved. Created automatically. Supports `~/` prefix. Also the search base for bare filenames in `image_edit` and the scope of `list_output_images`. |
 | Generation Cooldown (ms) | `5000` | Minimum gap between generations (both backends). |
-| Daily Generation Limit | `50` | Max images per day, resets at midnight. |
+| Daily Generation Limit | `50` | Max images per day, resets at **local** midnight. This is the plugin's own guard — it does **not** track HF credits. |
 
 ---
 
@@ -79,7 +79,7 @@ generate_image(prompt, model_id?, backend?, negative_prompt?, lora_id?, lora_sca
 | `width` / `height` | `0` (= default) | Pollinations only (0–2048). Portrait e.g. 768×1152 for fashion editorial. |
 | `seed` | `0` (= random) | Pollinations only, for reproducible results. |
 
-Returns `file_path`, `backend`, `model_used`, sizes, remaining quota, and `notes` (ignored params, watermark hints).
+Returns `file_path`, `output_dir`, `backend`, `model_used`, sizes, a `quota` block (plugin daily limit → `remaining`, `used`, `limit`, `resets_in_hours` — *plugin guard, not HF credits*), and `notes` (ignored params, watermark hints). Use `file_path` as-is when handing images to other tools — other plugins may not find bare filenames.
 
 ### `image_edit` — Edit a reference image (HF only)
 
@@ -87,7 +87,7 @@ Returns `file_path`, `backend`, `model_used`, sizes, remaining quota, and `notes
 image_edit(image, prompt, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?)
 ```
 
-Reference image = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` accepts a local path, a bare filename (looked up in the output directory first), or a public URL. Default model is `defaultEditModel` (Kontext-dev). **Important:** only editing-native models work — base T2I models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping and fail; the error message says exactly that. `lora_id` is passed through to fal-ai (I2I effectiveness under verification — report observations).
+Reference image = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` accepts a local path, a bare filename (looked up in the output directory first), or a public URL. Default model is `defaultEditModel` (Kontext-dev). **Important:** only editing-native models work — base T2I models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping and fail; the error message says exactly that. `lora_id` is passed through to fal-ai (I2I effectiveness under verification — report observations). Returns `file_path`, `output_dir`, the full `quota` block, and a clear warning when the plugin's daily limit is hit.
 
 ### `list_models` — Browse models per backend
 
@@ -218,6 +218,8 @@ Active profiles are injected as system context every turn and act **indirectly**
 
 **LoRAs via fal-ai.** `generate_image` routes LoRA calls to `fal-ai`; I2I LoRA passthrough exists and is honestly marked "under verification". Curated prompts stay under ~150 words to bound token cost on every-turn injection.
 
-**Output browsing instead of directory dumps.** LLMs choke on large folders — `list_output_images` paginates the single output directory (the only place the plugin reads), and bare filenames resolve against it.
+**Output browsing instead of directory dumps.** LLMs choke on large folders — `list_output_images` paginates the single output directory (the only place the plugin reads), and bare filenames resolve against it. Tools return the absolute `output_dir`/`file_path`, explicitly telling the LLM *not* to strip paths to bare filenames when handing results to other plugins.
+
+**Daily guard is local, and it's not HF credits.** The quota block (`limit/used/remaining/resets_in_hours`) reflects the config'd `Daily Generation Limit`. After a live-test confusion ("0 remaining despite HF credits!"), the counter was rebuilt on the **local calendar day** (ready to reset at local midnight) and the response now labels itself a *plugin guard*, names the reset, and appends a clear warning at `remaining: 0`.
 
 **Accepting model licenses:** some models (FLUX.1-dev/-Kontext-dev, SD3.5) need a one-time license accept on their huggingface.co page (e.g. `huggingface.co/black-forest-labs/FLUX.1-dev`) with a `read`-scope token. Once per model per account.

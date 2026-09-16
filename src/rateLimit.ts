@@ -10,7 +10,7 @@ export interface RateLimitConfig {
 interface Entry {
   lastCall: number;
   count: number;
-  dayStart: number;
+  dayKey: string;
 }
 
 const RATE_LIMIT_FILE = path.join(os.homedir(), ".cache", "hf-image-gen", "rateLimit.json");
@@ -19,15 +19,16 @@ function loadEntry(): Entry {
   try {
     if (fs.existsSync(RATE_LIMIT_FILE)) {
       const raw = fs.readFileSync(RATE_LIMIT_FILE, "utf-8");
-      const parsed = JSON.parse(raw) as Entry;
-      if (typeof parsed.lastCall === "number" && typeof parsed.count === "number" && typeof parsed.dayStart === "number") {
-        return parsed;
+      const parsed = JSON.parse(raw) as Partial<Entry>;
+      if (typeof parsed.lastCall === "number" && typeof parsed.count === "number") {
+        // dayKey may be missing from pre-2026 configs; a blank dayKey forces an immediate reset.
+        return { lastCall: parsed.lastCall, count: parsed.count, dayKey: parsed.dayKey ?? "" };
       }
     }
   } catch {
     // ignore corrupt file
   }
-  return { lastCall: 0, count: 0, dayStart: 0 };
+  return { lastCall: 0, count: 0, dayKey: "" };
 }
 
 function saveEntry(e: Entry): void {
@@ -41,33 +42,71 @@ function saveEntry(e: Entry): void {
 
 const entry: Entry = loadEntry();
 
-function currentDay(): number {
-  const now = Date.now();
-  return Math.floor(now / 86_400_000);
+// Local calendar date key ("2026-09-16") — the daily counter resets at local midnight,
+// not at the UTC epoch boundary (which would land mid-day or mid-evening for many timezones).
+function currentDayKey(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-export function checkRateLimit(cfg: RateLimitConfig): { ok: true; remaining: number } | { ok: false; error: string } {
-  const now = Date.now();
+// Milliseconds of the next local midnight.
+function nextLocalMidnight(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime() + 86_400_000;
+}
 
-  if (currentDay() !== entry.dayStart) {
-    entry.dayStart = currentDay();
+export interface RateLimitStatus {
+  ok: boolean;
+  remaining: number;
+  used: number;
+  limit: number;
+  resetInHours: number;
+  error?: string;
+}
+
+export function checkRateLimit(cfg: RateLimitConfig): RateLimitStatus {
+  const now = Date.now();
+  const used = entry.count;
+  const remaining = Math.max(0, cfg.dailyCap - used);
+  const resetInHours = Math.ceil((nextLocalMidnight() - now) / 3600_000);
+
+  if (currentDayKey() !== entry.dayKey) {
+    entry.dayKey = currentDayKey();
     entry.count = 0;
     saveEntry(entry);
+    return { ok: true, remaining: cfg.dailyCap, used: 0, limit: cfg.dailyCap, resetInHours };
   }
 
   if (entry.count >= cfg.dailyCap) {
-    const tomorrow = (entry.dayStart + 1) * 86_400_000;
-    const resetIn = Math.ceil((tomorrow - now) / 3600_000);
-    return { ok: false, error: `Daily generation limit reached (${cfg.dailyCap}). Resets in ~${resetIn}h.` };
+    return {
+      ok: false,
+      remaining: 0,
+      used,
+      limit: cfg.dailyCap,
+      resetInHours,
+      error: `Daily generation limit reached (${cfg.dailyCap}). Resets at local midnight (~${resetInHours}h). ` +
+        "This is the plugin's own guard (config 'Daily Generation Limit'), not your HF credits.",
+    };
   }
 
   const elapsed = now - entry.lastCall;
   if (elapsed < cfg.cooldownMs) {
     const waitSec = Math.ceil((cfg.cooldownMs - elapsed) / 1000);
-    return { ok: false, error: `Generation cooldown. Wait ${waitSec}s before next generation.` };
+    return {
+      ok: false,
+      remaining,
+      used,
+      limit: cfg.dailyCap,
+      resetInHours,
+      error: `Generation cooldown. Wait ${waitSec}s before next generation.`,
+    };
   }
 
-  return { ok: true, remaining: cfg.dailyCap - entry.count };
+  return { ok: true, remaining, used, limit: cfg.dailyCap, resetInHours };
 }
 
 export function recordGeneration(): void {

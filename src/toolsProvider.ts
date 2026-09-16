@@ -311,6 +311,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         The 'image' parameter accepts a local file path (also from earlier generate_image
         results) or a public image URL. To generate from scratch, use generate_image instead.
         An active Neigungsprompt guides how the change is formulated, same as generate_image.
+        Optional lora_id (FLUX base models, fal-ai passthrough — effectiveness on image-to-image
+        is currently being verified, report what you observe).
       `,
       parameters: {
         image: z.string().min(1).describe(
@@ -327,8 +329,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         negative_prompt: z.string().default("").describe(
           "What to exclude from the image (e.g. 'blurry, low quality, text, watermark')."
         ),
+        lora_id: z.string().default("").describe(
+          "HuggingFace LoRA adapter ID (e.g. 'alvdansen/flux-koda'). FLUX base models only, " +
+          "passed through to fal-ai — I2I effectiveness under verification."
+        ),
+        lora_scale: z.number().min(0).max(2).default(1.0).describe(
+          "Strength of the LoRA adapter. 0.5–1.0 is typical; higher = stronger effect."
+        ),
       },
-      implementation: safe_impl("image_edit", async ({ image, prompt, model_id, negative_prompt }, ctx) => {
+      implementation: safe_impl("image_edit", async ({ image, prompt, model_id, negative_prompt, lora_id, lora_scale }, ctx) => {
         ctx.status("Reading reference image…");
         const token = getToken();
         if (!token) {
@@ -353,6 +362,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             await resolveImageInput(image);
           const modelToUse = model_id.trim() || getModel();
           const cleanNegative = negative_prompt.trim();
+          const cleanLora = lora_id.trim();
           const outputDir = getOutputDir();
 
           await mkdir(outputDir, { recursive: true });
@@ -363,6 +373,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
           const parameters: Record<string, unknown> = {};
           if (cleanNegative) parameters.negative_prompt = cleanNegative;
+          if (cleanLora) parameters.loras = [{ path: cleanLora, scale: lora_scale }];
 
           ctx.status(`Editing with ${modelToUse}…`);
           const blob = await hf.imageToImage({
@@ -393,6 +404,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             input_source: inputSource,
             prompt,
             negative_prompt: cleanNegative || null,
+            lora_used: cleanLora || null,
+            lora_scale: cleanLora ? lora_scale : null,
             file_size_bytes: outBuffer.length,
             mime_type: mimeType,
             generations_remaining_today: remainingCount,

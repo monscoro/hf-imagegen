@@ -103,22 +103,28 @@ async function getLoRAsForModel(baseModel, search = "", limit = 15, token) {
     if (!res.ok)
         throw new Error(`HF API error: ${res.status} ${res.statusText}`);
     const models = (await res.json());
+    function extractBaseModel(m) {
+        if (m.cardData?.base_model)
+            return m.cardData.base_model;
+        const tag = (m.tags ?? []).find((t) => t.startsWith("base_model:"));
+        return tag ? tag.replace("base_model:", "") : "unknown";
+    }
     return models
-        .filter((m) => {
-        if (!baseModel)
-            return true;
-        const loraBase = m.cardData?.base_model?.toLowerCase() || "";
-        const searchBase = baseModel.toLowerCase();
-        const modelShort = searchBase.split("/").pop() || "";
-        return loraBase.includes(searchBase) || loraBase.includes(modelShort);
-    })
         .map((m) => ({
         id: m.id,
         downloads: m.downloads ?? 0,
         likes: m.likes ?? 0,
-        base_model: m.cardData?.base_model ?? "unknown",
+        base_model: extractBaseModel(m),
         tags: (m.tags ?? []).filter((t) => ["lora", "flux", "sdxl", "stable-diffusion", "krea", "qwen"].includes(t)),
-    }));
+    }))
+        .filter((m) => {
+        if (!baseModel)
+            return true;
+        const loraBase = m.base_model.toLowerCase();
+        const searchBase = baseModel.toLowerCase();
+        const modelShort = searchBase.split("/").pop() || "";
+        return loraBase.includes(searchBase) || loraBase.includes(modelShort);
+    });
 }
 async function getDefaultLoRAs(baseModel, limit = 10, token) {
     return getLoRAsForModel(baseModel, "", limit, token);

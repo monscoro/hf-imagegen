@@ -14,6 +14,17 @@ import {
   getDefaultLoRAs,
 } from "./hfApi";
 import { checkRateLimit, recordGeneration } from "./rateLimit";
+import {
+  getAllDirectives,
+  getActiveDirective,
+  getActiveId,
+  setActiveDirective,
+  createDirective,
+  updateDirective,
+  deleteDirective,
+  getDirectiveById,
+  parseConfigDirectives,
+} from "./directiveStore";
 
 function json(obj: unknown): string {
   return JSON.stringify(obj, null, 2);
@@ -62,6 +73,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     cooldownMs: Number(cfg.get("rateLimitCooldown")) || 5000,
     dailyCap: Number(cfg.get("rateLimitDailyCap")) || 50,
   });
+  const getCustomDirectivesText = () => {
+    try {
+      return (cfg.get("customDirectives") as unknown as string) ?? "";
+    } catch {
+      return "";
+    }
+  };
 
   let isGenerating = false;
 
@@ -289,16 +307,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           .default("")
           .describe(
             "Filter LoRAs by compatible base model. " +
-            "Use model IDs from list_models (e.g. 'black-forest-labs/FLUX.1-dev', " +
-            "'stabilityai/stable-diffusion-xl-base-1.0'). " +
-            "Leave blank to search all LoRAs."
+              "Use model IDs from list_models (e.g. 'black-forest-labs/FLUX.1-dev', " +
+              "'stabilityai/stable-diffusion-xl-base-1.0'). " +
+              "Leave blank to search all LoRAs."
           ),
         search: z.string()
           .default("")
           .describe(
             "AVOID using this — HuggingFace search is strict and often returns no results. " +
-            "Only use as a last resort with a broad keyword (e.g. 'anime'). " +
-            "Prefer using only base_model."
+              "Only use as a last resort with a broad keyword (e.g. 'anime'). " +
+              "Prefer using only base_model."
           ),
         limit: z.number()
           .min(5)
@@ -334,6 +352,133 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             : "Pass the 'id' field as lora_id in generate_image. Use base_model to filter for specific models.",
           note: "LoRA generation uses fal-ai provider. lora_scale default is 1.0; try 0.6–0.9 for subtle effects.",
         });
+      }),
+    }),
+
+    tool({
+      name: "list_image_directives",
+      description: text`
+        List all available ImageGen Stimmungsprompts / Systemprompts (profile set).
+
+        Returns curated examples (read-only, source=curated) + user config (source=config, in plugin settings editable, per entry [ro]/[rw] switchable) + LLM-created (source=user).
+        Each entry has id (short name), description (first line), prompt (indirect style/mood), source, readonly flag.
+        Curated are only examples (few, not exhaustive) – main library is user config.
+
+        Use this to discover available moods before calling set_image_system_prompt.
+        The active profile is highlighted and also injected into the LLM system context to guide generate_image prompt creation.
+      `,
+      parameters: {
+        filter: z.string().default("").describe("Optional substring to filter by id or description. Leave blank for all."),
+      },
+      implementation: safe_impl("list_image_directives", async ({ filter }, _ctx) => {
+        const text_ = getCustomDirectivesText();
+        const all = getAllDirectives(text_);
+        const activeId = getActiveId();
+        const active = getActiveDirective(text_);
+        const f = filter.trim().toLowerCase();
+        const filtered = f ? all.filter((d) => d.id.includes(f) || d.description.toLowerCase().includes(f)) : all;
+        return json({
+          active_id: activeId,
+          active_directive: active,
+          count: filtered.length,
+          total_count: all.length,
+          directives: filtered.map((d) => ({
+            ...d,
+            is_active: d.id === activeId,
+          })),
+          note: "Use set_image_system_prompt({name}) to activate. Curated=examples read-only, config RO=[ro] locked / RW=[rw] LLM-editable, user=via manage_image_directive.",
+          config_hint: "Config 'Eigene Stimmungsprompts': 'name: Beschreibung [ro|rw]' Zeile 1, dann Prompt. Leerzeile/--- trennt. [ro]=read-only (default), [rw]=LLM darf ändern. Beispiele: siehe curated.",
+        });
+      }),
+    }),
+
+    tool({
+      name: "set_image_system_prompt",
+      description: text`
+        Activate or clear the ImageGen Systemprompt (Stimmungsprompt) for indirect prompt guidance.
+
+        Manages the whole profile set by simple name. The active prompt is injected as system context
+        and guides the Tool LLM to create stylistically aligned generate_image prompts (Mood, Kunststil, Ausrichtung, Inszenierung).
+
+        - Pass a name from list_image_directives to activate (e.g. "cinematic", "noir").
+        - Pass empty string or "none"/"clear" to deactivate.
+        Use list_image_directives first to discover available profiles.
+      `,
+      parameters: {
+        name: z.string().describe("Profile id to activate (e.g. 'cinematic'). Use '' or 'none' to clear/deactivate."),
+      },
+      implementation: safe_impl("set_image_system_prompt", async ({ name }, _ctx) => {
+        const text_ = getCustomDirectivesText();
+        const clean = name.trim().toLowerCase();
+        if (!clean || clean === "none" || clean === "clear") {
+          setActiveDirective(null, text_);
+          return json({
+            success: true,
+            active_id: null,
+            active_directive: null,
+            message: "Image Systemprompt deaktiviert. generate_image nutzt wieder neutralen Stil.",
+          });
+        }
+        const activated = setActiveDirective(clean, text_);
+        return json({
+          success: true,
+          active_id: activated!.id,
+          active_directive: activated,
+          message: `Aktiviert: ${activated!.id} — ${activated!.description}. Wird jetzt indirekt bei generate_image berücksichtigt.`,
+        });
+      }),
+    }),
+
+    tool({
+      name: "manage_image_directive",
+      description: text`
+        Create, update, delete, or get custom ImageGen Stimmungsprompts (LLM-managed, persisted in ~/.cache/hf-image-gen/directives.json).
+
+        Curated (source=curated) are examples only, always read-only.
+        Config (source=config) profiles are user-written in plugin settings: with [ro] read-only (default, cannot be changed via tool), with [rw] RW (LLM darf via update ändern -> shadowed in user store). Delete of config base never via tool, only shadow revert.
+        User (source=user) profiles are fully manageable here.
+
+        Use when the user wants a new mood/style or the LLM wants to create a tailored Stimmungsprompt dynamically.
+        After create/update, use set_image_system_prompt to activate it.
+      `,
+      parameters: {
+        action: z.enum(["create", "update", "delete", "get"]).describe("Action to perform."),
+        name: z.string().describe("Profile id (a-z,0-9,-,_). Required for all actions."),
+        description: z.string().default("").describe("Kurzbeschreibung (Zeile 1). Required for create, optional for update."),
+        prompt: z.string().default("").describe("Stimmungsprompt (indirekter Style/Mood, nicht direkter Bildinhalt). Required for create, optional for update."),
+      },
+      implementation: safe_impl("manage_image_directive", async ({ action, name, description, prompt }, _ctx) => {
+        const text_ = getCustomDirectivesText();
+        const cleanName = name.trim().toLowerCase();
+        if (!cleanName) throw new Error("name is required.");
+
+        switch (action) {
+          case "create": {
+            if (!description.trim()) throw new Error("description is required for create.");
+            if (!prompt.trim()) throw new Error("prompt is required for create.");
+            const created = createDirective(cleanName, description, prompt, text_);
+            return json({ success: true, action, directive: created, message: `Erstellt: ${created.id}. Aktiviere mit set_image_system_prompt({name:"${created.id}"}).` });
+          }
+          case "update": {
+            const hasDesc = description.trim().length > 0;
+            const hasPrompt = prompt.trim().length > 0;
+            if (!hasDesc && !hasPrompt) throw new Error("For update, provide at least description or prompt.");
+            const updated = updateDirective(cleanName, hasDesc ? description : undefined, hasPrompt ? prompt : undefined, text_);
+            return json({ success: true, action, directive: updated, message: `Aktualisiert: ${updated.id}.` });
+          }
+          case "delete": {
+            deleteDirective(cleanName, text_);
+            return json({ success: true, action, deleted_id: cleanName, message: `Gelöscht: ${cleanName}.` });
+          }
+          case "get": {
+            const found = getDirectiveById(cleanName, text_);
+            if (!found) throw new Error(`Profil "${cleanName}" nicht gefunden.`);
+            const activeId = getActiveId();
+            return json({ success: true, action, directive: found, is_active: found.id === activeId });
+          }
+          default:
+            throw new Error(`Unknown action ${action}`);
+        }
       }),
     }),
 

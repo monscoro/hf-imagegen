@@ -32,4 +32,18 @@ export const pluginConfigSchematics = createConfigSchematics()
       "Maximum number of images that can be generated per day. " +
       "Resets at midnight. Default: 50.",
   }, 50)
+  .field("customDirectives", "string", {
+    displayName: "Eigene Stimmungsprompts (Profile)",
+    subtitle:
+      "Eigene ImageGen-Stimmungsprompts – leicht selbst zu schreiben/warten. Format pro Eintrag (Leerzeile oder --- getrennt): " +
+      "Zeile 1: \"name: Kurzbeschreibung [ro|rw]\"  |  Zeile 2..n: Stimmungsprompt. " +
+      "Flag [ro] = read-only (LLM kann nicht ändern, default), [rw] = RW (LLM darf via manage_image_directive ändern). " +
+      "Beispiel:\n" +
+      "my-cinematic: Episch-kinoreif, dramatisch [ro]\n" +
+      "cinematic volumetric lighting, 35mm film, dramatic shadows\n\n" +
+      "my-test: Zum Experimentieren [rw]\n" +
+      "dreamy pastel haze, soft pink\n\n" +
+      "Vordefinierte Beispiele (curated, read-only) liefert das Plugin via list_image_directives – nur Beispiele, nicht editierbar.",
+    isParagraph: true,
+  }, "")
   .build();

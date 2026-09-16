@@ -36,3 +36,13 @@ export interface LoRAListResult {
   usage: string;
   note?: string;
 }
+
+export type DirectiveSource = "curated" | "config" | "user";
+
+export interface ImageDirective {
+  id: string;
+  description: string;
+  prompt: string;
+  source: DirectiveSource;
+  readonly: boolean;
+}

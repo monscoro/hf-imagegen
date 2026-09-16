@@ -29,22 +29,9 @@ exports.pluginConfigSchematics = (0, sdk_1.createConfigSchematics)()
     subtitle: "Maximum number of images that can be generated per day. " +
         "Resets at midnight. Default: 50.",
 }, 50)
-    .field("customDirectives", "string", {
-    displayName: "Eigene Stimmungsprompts / Beeinflussungsprompts (Profile)",
-    subtitle: "Eigene Stimmungsprompts / Beeinflussungsprompts (synonym) – leicht selbst zu schreiben/warten. Format pro Eintrag (Leerzeile oder --- getrennt): " +
-        "Zeile 1: \"name: Kurzbeschreibung [ro|rw]\"  |  Zeile 2..n: Stimmungsprompt / Beeinflussungsprompt (synonym). " +
-        "Flag [ro] = read-only (LLM kann nicht ändern, default), [rw] = RW (LLM darf via manage_image_directive ändern). " +
-        "Beispiel:\n" +
-        "my-cinematic: Episch-kinoreif, dramatisch [ro]\n" +
-        "cinematic volumetric lighting, 35mm film, dramatic shadows\n\n" +
-        "my-test: Zum Experimentieren [rw]\n" +
-        "dreamy pastel haze, soft pink\n\n" +
-        "Vordefinierte Beispiele (curated, read-only) via List-Button unten oder list_image_directives – nur Beispiele, nicht editierbar.",
-    isParagraph: true,
-}, "")
     .field("exampleDirectivePicker", "select", {
     displayName: "List-Button: Kuratierte Beispiele auswählen",
-    subtitle: "Wähle ein kuratiertes Beispiel (Stimmungsprompt / Beeinflussungsprompt, synonym) zum Inspizieren/Kopieren. Der Text erscheint in der Vorschau darunter und kann per Copy in Eigene Stimmungsprompts / Beeinflussungsprompts übernommen werden. Quelle: src/curatedDirectives.ts (nur Beispiele, 5 Stück). Vollständige Liste via Tool list_image_directives.",
+    subtitle: "Wähle ein kuratiertes Beispiel (Stimmungsprompt / Beeinflussungsprompt, synonym) – der zugehörige Prompt erscheint im Textfeld direkt darunter zum Inspizieren/Kopieren. Quelle: src/curatedDirectives.ts (nur Beispiele, 5 Stück). Vollständige Liste via Tool list_image_directives. Nach Auswahl per Copy in das Feld darunter übernehmen.",
     options: [
         { value: "none", displayName: "— bitte wählen —" },
         { value: "pose-action", displayName: "pose-action – Pose/Action dynamisch" },
@@ -54,9 +41,9 @@ exports.pluginConfigSchematics = (0, sdk_1.createConfigSchematics)()
         { value: "camera-intimate", displayName: "camera-intimate – Kameratechnik intim" },
     ],
 }, "none")
-    .field("activeDirectivePreview", "string", {
-    displayName: "Stimmungsprompt / Beeinflussungsprompt – Vorschau aktuell ausgewählt",
-    subtitle: "Zeigt den Prompt des oben gewählten kuratierten Beispiels (Stimmungsprompt / Beeinflussungsprompt, synonym, read-only Vorschau zum Kopieren) bzw. des aktuell aktiven Systemprompts. Wird nicht automatisch gespeichert – zum Übernehmen in Eigene Stimmungsprompts / Beeinflussungsprompts kopieren. Aktivierung via Tool set_image_system_prompt({name}). Per-Eintrag read-only Schaltung via [ro]/[rw] Flag.",
+    .field("customDirectives", "string", {
+    displayName: "Stimmungsprompt / Beeinflussungsprompt – Textfeld (aktuell ausgewählt)",
+    subtitle: "Einziges Prompt-Textfeld direkt unter dem List-Button (synonym Stimmungsprompt / Beeinflussungsprompt). Zeigt nach Selektion den Prompt des gewählten Beispiels – direkt editierbar und speicherbar. Format pro Eintrag (Leerzeile oder --- getrennt): Zeile 1: \"name: Kurzbeschreibung [ro|rw]\" | Zeile 2..n: Prompt (synonym). Flag [ro]=read-only (LLM kann nicht ändern, default), [rw]=RW (LLM darf via manage_image_directive ändern). Beispiel:\nmy-cinematic: Episch-kinoreif, dramatisch [ro]\ncinematic volumetric lighting, 35mm film, dramatic shadows",
     isParagraph: true,
 }, "")
     .build();

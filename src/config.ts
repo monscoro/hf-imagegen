@@ -11,9 +11,10 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: "Default Model",
     subtitle:
       "HuggingFace model ID for text-to-image generation. " +
-      "Examples: black-forest-labs/FLUX.1-schnell, black-forest-labs/FLUX.1-dev, " +
+      "Current: black-forest-labs/FLUX.2-dev (32B, SOTA quality, non-commercial). " +
+      "Alternatives: FLUX.2-klein-9B (fast), FLUX.1-schnell (free, fast, lower quality), " +
       "stabilityai/stable-diffusion-xl-base-1.0. Use list_models tool to see all options.",
-  }, "black-forest-labs/FLUX.1-schnell")
+  }, "black-forest-labs/FLUX.2-dev")
   .field("outputDirectory", "string", {
     displayName: "Output Directory",
     subtitle:

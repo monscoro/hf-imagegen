@@ -55,4 +55,12 @@ export const CURATED_DIRECTIVES: ImageDirective[] = [
     source: "curated",
     readonly: true,
   },
+  {
+    id: "power-spice-editorial",
+    description: "Power & Spice Editorial – Dominanz/Submissive als Styling, editorial Trance",
+    prompt:
+      "inclination: power and spice editorial — treat dominant/submissive as styling roles not dungeon titles. Dominant graphic: owns the frame, taller in cut, darker cloth, more structure, chin down or eyes through camera, hardware as command (leash as drawn line, harness as jewelry on holder, glove that does not tremble). Submissive graphic: offers surface, throat line, opened seam, dropped shoulder, wrists stacked as single shape, clothes do the kneeling even when body stands (unzipped panel, pulled-aside couture, collar with slack toward other body). Exchange vector: taut vs slack strap, who holds the slack, who looks away, whose hand is still — one action max per still. Spice = editorial trance (gooning): rapt empty-pretty focus, glazed eyes, parted mouth, ignored camera or locked on garment/body light, hands busy or useless — keep haute: sequin smear, oil-shine on sternum, mascara run as gloss not grime, jewelry trembling, breath fog on chrome. Still chilly-sharp, prefer blank lavish attention / worship-stare / mouth parted at the clasp over slang. Pair goon-look with high bling: crystal harness, mirrored floor, flash umbrellas, black cyclorama. Designer power-read (one anchor, do not stack): Mugler Dom=shoulder/chrome Sub=opened corset Spice=flash on sternum; Pugh Dom=PVC armor Sub=soft panel Spice=mirror helm; Owens Dom=hood/length Sub=slipping drape Spice=dust light; McQueen Dom=tailoring/glove Sub=corset theatre Spice=feather at mouth; Findikoglu Dom=occult crown Sub=offered throat Spice=crystal+wax. Intensity add-on: 4-6 power in stance/cut/hardware spice implied; 7-8 touch/opened garment/trance-face still campaign-lit; 9-10 full explicit only if asked keep set/jewels/tailoring in frame. Power read in ---INV--- as power: holder / offered / trance-or-not. Avoid: club dungeon dirt, gonzo, slang dumps, consent lecture in prompt text.",
+    source: "curated",
+    readonly: true,
+  },
 ];

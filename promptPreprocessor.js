@@ -62,11 +62,12 @@ async function promptPreprocessor(ctl, userMessage) {
         }
         return `${fullRules}\n\n${userMessage.getText()}`;
     }
-    // For follow-up turns, inject active directive as well if present (otherwise LLM loses context)
+    // For follow-up turns, keep SYSTEM_RULES + active directive visible (otherwise LLM loses routing/guidelines)
+    const msgText = userMessage.getText();
     if (activeBlock) {
-        const msgText = userMessage.getText();
-        // Prepend as hidden system context – LLM sees it as part of user message prefix, but keeps directive visible
-        return `${activeBlock}\n\n${msgText}`;
+        // activeBlock already contains fullRules prefix, but we ensure SYSTEM_RULES stays
+        return `${fullRules}\n\n${msgText}`;
     }
-    return userMessage;
+    // Even without active directive, re-inject routing on follow-ups to avoid loss after turn 1
+    return `${SYSTEM_RULES}\n\n${msgText}`;
 }

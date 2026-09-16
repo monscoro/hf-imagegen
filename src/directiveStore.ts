@@ -166,12 +166,15 @@ export function parseConfigDirectives(text: string): ImageDirective[] {
     }
 
     if (!id) continue;
-    if (!/^[a-z0-9_-]{1,64}$/.test(id)) {
-      id = slugify(id);
-      if (!id) continue;
+    // Normalize id: if not valid, slugify; then re-check for collisions (handles "my test" vs "my-test")
+    let normalizedId = id;
+    if (!/^[a-z0-9_-]{1,64}$/.test(normalizedId)) {
+      normalizedId = slugify(normalizedId);
+      if (!normalizedId) continue;
     }
-    if (seen.has(id)) continue;
-    seen.add(id);
+    if (seen.has(normalizedId)) continue;
+    seen.add(normalizedId);
+    id = normalizedId;
 
     // If still no promptLines, try to use description as prompt fallback? No, need prompt.
     // If block was single line with "id: description", prompt is empty -> use description as prompt? Instead keep empty and skip if empty.
@@ -224,7 +227,13 @@ export function getActiveDirective(configText: string): ImageDirective | null {
   const activeId = cache.activeId;
   if (!activeId) return null;
   const all = getAllDirectives(configText);
-  return all.find((d) => d.id === activeId) ?? null;
+  const found = all.find((d) => d.id === activeId) ?? null;
+  if (!found) {
+    // Dangling activeId (e.g., config entry removed) – clear zombie
+    cache.activeId = null;
+    savePersisted(cache);
+  }
+  return found;
 }
 
 export function getActiveId(): string | null {

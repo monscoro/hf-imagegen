@@ -23,7 +23,6 @@ import {
   updateDirective,
   deleteDirective,
   getDirectiveById,
-  parseConfigDirectives,
 } from "./directiveStore";
 
 function json(obj: unknown): string {

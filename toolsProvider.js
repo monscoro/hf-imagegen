@@ -86,14 +86,6 @@ const toolsProvider = async (ctl) => {
         cooldownMs: Number(cfg.get("rateLimitCooldown")) || 5000,
         dailyCap: Number(cfg.get("rateLimitDailyCap")) || 50,
     });
-    const getCustomDirectivesText = () => {
-        try {
-            return cfg.get("customDirectives") ?? "";
-        }
-        catch {
-            return "";
-        }
-    };
     let isGenerating = false;
     const tools = [
         (0, sdk_1.tool)({
@@ -339,7 +331,7 @@ const toolsProvider = async (ctl) => {
                 filter: zod_1.z.string().default("").describe("Optional substring to filter by id or description. Leave blank for all."),
             },
             implementation: safe_impl("inclination_prompt_list", async ({ filter }, _ctx) => {
-                const text_ = getCustomDirectivesText();
+                const text_ = "";
                 const all = (0, directiveStore_1.getAllDirectives)(text_);
                 const activeId = (0, directiveStore_1.getActiveId)();
                 const active = (0, directiveStore_1.getActiveDirective)(text_);
@@ -354,8 +346,8 @@ const toolsProvider = async (ctl) => {
                         ...d,
                         is_active: d.id === activeId,
                     })),
-                    note: "Use inclination_prompt_set({name}) to activate. Curated=examples read-only, config RO=[ro] locked / RW=[rw] LLM-editable, user=via inclination_prompt_manage.",
-                    config_hint: "Config 'Neigungsprompt-Katalog': 'name: Beschreibung [ro|rw]' Zeile 1, dann Prompt. Leerzeile/--- trennt. [ro]=read-only (default), [rw]=LLM darf ändern. Beispiele: siehe curated.",
+                    note: "Use inclination_prompt_set({name}) to activate. Curated=read-only examples, user=via inclination_prompt_manage.",
+                    config_hint: "Eigene Prompts via inclination_prompt_manage(action:create). Aktivierung via inclination_prompt_set.",
                 });
             }),
         }),
@@ -375,7 +367,7 @@ const toolsProvider = async (ctl) => {
                 name: zod_1.z.string().describe("Profile id to activate (e.g. 'pose-action'). Use '' or 'none' to clear/deactivate."),
             },
             implementation: safe_impl("inclination_prompt_set", async ({ name }, _ctx) => {
-                const text_ = getCustomDirectivesText();
+                const text_ = "";
                 const clean = name.trim().toLowerCase();
                 if (!clean || clean === "none" || clean === "clear") {
                     (0, directiveStore_1.setActiveDirective)(null, text_);
@@ -398,14 +390,12 @@ const toolsProvider = async (ctl) => {
         (0, sdk_1.tool)({
             name: "inclination_prompt_manage",
             description: (0, sdk_1.text) `
-        Create, update, delete, get, or list Neigungsprompts (Stimmungsprompts / Beeinflussungsprompts, synonym) – einheitlicher Prefix inclination_prompt_, LLM-managed, persisted in ~/.cache/hf-image-gen/directives.json. Vereinheitlicht list+manage via action:"list".
+        Create, update, delete, get, or list Neigungsprompts (Stimmungsprompts / Beeinflussungsprompts, synonym) – einheitlicher Prefix inclination_prompt_, LLM-managed, persisted in tmp/directives.json (projektlokal). Vereinheitlicht list+manage via action:"list".
 
         Curated (source=curated) are examples only, always read-only.
-        Config (source=config) profiles are user-written in plugin settings: with [ro] read-only (default, cannot be changed via tool), with [rw] RW (LLM darf via update ändern -> shadowed in user store). Delete of config base never via tool, only shadow revert.
         User (source=user) profiles are fully manageable here.
 
-        Use when the user wants a new mood/style or the LLM wants to create a tailored Neigungsprompt dynamically.
-        After create/update, use inclination_prompt_set to activate it. Use action:"list" to list (alternative to inclination_prompt_list).
+        Typical workflow: User provides one or more prompt texts, LLM creates entries with fitting name/description/prompt via action:"create", then activates via inclination_prompt_set.
       `,
             parameters: {
                 action: zod_1.z.enum(["create", "update", "delete", "get", "list"]).describe("Action to perform. Use list to list all (unified with inclination_prompt_list)."),
@@ -415,7 +405,7 @@ const toolsProvider = async (ctl) => {
                 filter: zod_1.z.string().default("").describe("Optional filter for list (substring of id/description). Only for action list."),
             },
             implementation: safe_impl("inclination_prompt_manage", async ({ action, name, description, prompt, filter }, _ctx) => {
-                const text_ = getCustomDirectivesText();
+                const text_ = "";
                 if (action === "list") {
                     const all = (0, directiveStore_1.getAllDirectives)(text_);
                     const activeId = (0, directiveStore_1.getActiveId)();

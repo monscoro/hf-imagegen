@@ -85,14 +85,14 @@ Für uns: `description` = Variable `MOOD`, `prompt` = Template. `inclination_pro
 ### 3.4 Inclination-Anwendung im Plugin
 
 - **Aktivierung:** `inclination_prompt_list` → `inclination_prompt_set({name:"pose-action"})` → `promptPreprocessor.ts:32` injiziert `== ACTIVE IMAGE SYSTEM PROMPT ==` bei jedem Turn (nicht stures Präfix, Anweisung: *stilistisch verweben*). `inclination_prompt_manage({action:"list"})` ist Alias für `list`.
-- **Schutz:** `[ro]` → `update` reject, `[rw]` → Shadow in `~/.cache/hf-image-gen/directives.json` erlaubt (`directiveStore.ts:259`).
+- **Schutz:** `[ro]` → `update` reject, `[rw]` → Shadow in `tmp/directives.json` erlaubt (`directiveStore.ts`).
 - **Qualität-Levers gezielt:** `photorealistic` direkt nennen aktiviert Photoreal-Modus (OpenAI Guide), technische Levers wie `film grain, subsurface scattering` nur wenn nötig.
 
 ---
 
 ## 4. Erweiterter Beispielsatz – zum Kopieren & Anpassen
 
-> Alle als `name: Beschreibung [ro|rw]` in `customDirectives` (Neigungsprompt-Katalog) nutzbar, oder via `inclination_prompt_manage({action:"create"})`. Bewusst inklinationsartig formuliert (`inclination: ...`), damit LLM sie *auslegt* statt kopiert.
+> Alle via `inclination_prompt_manage({action:"create"})` erstellbar. LLM generiert automatisch passende id, description und prompt. Bewusst inklinationsartig formuliert (`inclination: ...`), damit LLM sie *auslegt* statt kopiert.
 
 ### Pose/Action (exemplarisch + erweitert)
 

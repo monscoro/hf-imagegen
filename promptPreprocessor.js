@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.promptPreprocessor = promptPreprocessor;
-const config_1 = require("./config");
 const directiveStore_1 = require("./directiveStore");
 const SYSTEM_RULES = `\
 [System: Image Generation Plugin]
@@ -24,9 +23,11 @@ You have tools to generate images via Hugging Face.
 - If you get a 403 on FLUX.1, tell the user to accept the model license at huggingface.co first.
 
 == IMAGE SYSTEM PROMPT / STIMMUNG ==
-- Ein aktiver Neigungsprompt (Stimmungsprompt / Beeinflussungsprompt, synonym, siehe unten) soll INDIREKT wirken: leite daraus ab wie du generate_image prompts formulierst
+- Ein aktiver Neigungsprompt (Stimmungsprompt / Beeinflussungsprompt, synonym) soll INDIREKT wirken: leite daraus ab wie du generate_image prompts formulierst
   (Mood, Stil, Ausrichtung, theatralische Inszenierung). Nicht wortwörtlich präfixen, sondern stilistisch einweben.
-- Nutze inclination_prompt_list um verfügbare Profile zu sehen, inclination_prompt_set zum Aktivieren.
+- Eigene Prompts: Userbeschreibungen in vollständige Neigungsprompts umwandeln via inclination_prompt_manage(action:create).
+  LLM generiert automatisch passende id, description und prompt.
+- Aktivierung/Deaktivierung: inclination_prompt_set({name}). Liste: inclination_prompt_list.
 
 == AFTER GENERATION ==
 Always report the full file path where the image was saved and the model used.`;
@@ -43,16 +44,7 @@ function buildActiveDirectiveBlock(configText) {
 }
 async function promptPreprocessor(ctl, userMessage) {
     const history = await ctl.pullHistory();
-    const cfg = ctl.getPluginConfig(config_1.pluginConfigSchematics);
-    const customDirectivesText = (() => {
-        try {
-            return cfg.get("customDirectives");
-        }
-        catch {
-            return "";
-        }
-    })();
-    const activeBlock = buildActiveDirectiveBlock(customDirectivesText ?? "");
+    const activeBlock = buildActiveDirectiveBlock("");
     const fullRules = `${SYSTEM_RULES}${activeBlock}`;
     if (history.length === 0) {
         if (await ctl.needsNaming()) {
@@ -65,7 +57,6 @@ async function promptPreprocessor(ctl, userMessage) {
     // For follow-up turns, keep SYSTEM_RULES + active directive visible (otherwise LLM loses routing/guidelines)
     const msgText = userMessage.getText();
     if (activeBlock) {
-        // activeBlock already contains fullRules prefix, but we ensure SYSTEM_RULES stays
         return `${fullRules}\n\n${msgText}`;
     }
     // Even without active directive, re-inject routing on follow-ups to avoid loss after turn 1

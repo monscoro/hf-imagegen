@@ -4,7 +4,17 @@ import * as os from "os";
 import type { ImageDirective, DirectiveSource } from "./types";
 import { CURATED_DIRECTIVES } from "./curatedDirectives";
 
-const STORE_FILE = path.join(os.homedir(), ".cache", "hf-image-gen", "directives.json");
+const PROJECT_TMP = path.join(__dirname, "tmp");
+const CACHE_DIR = path.join(os.homedir(), ".cache", "hf-image-gen");
+const STORE_FILE = (() => {
+  // Try project-local tmp/ first (dev/test), fall back to ~/.cache/ (production)
+  try {
+    fs.mkdirSync(PROJECT_TMP, { recursive: true });
+    return path.join(PROJECT_TMP, "directives.json");
+  } catch {
+    return path.join(CACHE_DIR, "directives.json");
+  }
+})();
 
 interface PersistedStore {
   activeId: string | null;

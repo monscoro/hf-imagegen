@@ -33,10 +33,10 @@ export const pluginConfigSchematics = createConfigSchematics()
       "Resets at midnight. Default: 50.",
   }, 50)
   .field("customDirectives", "string", {
-    displayName: "Eigene Stimmungsprompts (Profile)",
+    displayName: "Eigene Stimmungsprompts / Beeinflussungsprompts (Profile)",
     subtitle:
-      "Eigene ImageGen-Stimmungsprompts – leicht selbst zu schreiben/warten. Format pro Eintrag (Leerzeile oder --- getrennt): " +
-      "Zeile 1: \"name: Kurzbeschreibung [ro|rw]\"  |  Zeile 2..n: Stimmungsprompt. " +
+      "Eigene Stimmungsprompts / Beeinflussungsprompts (synonym) – leicht selbst zu schreiben/warten. Format pro Eintrag (Leerzeile oder --- getrennt): " +
+      "Zeile 1: \"name: Kurzbeschreibung [ro|rw]\"  |  Zeile 2..n: Stimmungsprompt / Beeinflussungsprompt (synonym). " +
       "Flag [ro] = read-only (LLM kann nicht ändern, default), [rw] = RW (LLM darf via manage_image_directive ändern). " +
       "Beispiel:\n" +
       "my-cinematic: Episch-kinoreif, dramatisch [ro]\n" +
@@ -49,7 +49,7 @@ export const pluginConfigSchematics = createConfigSchematics()
   .field("exampleDirectivePicker", "select", {
     displayName: "List-Button: Kuratierte Beispiele auswählen",
     subtitle:
-      "Wähle ein kuratiertes Beispiel zum Inspizieren/Kopieren. Der Text erscheint in der Vorschau darunter und kann per Copy in Eigene Stimmungsprompts übernommen werden. Quelle: src/curatedDirectives.ts (nur Beispiele, 5 Stück). Vollständige Liste via Tool list_image_directives.",
+      "Wähle ein kuratiertes Beispiel (Stimmungsprompt / Beeinflussungsprompt, synonym) zum Inspizieren/Kopieren. Der Text erscheint in der Vorschau darunter und kann per Copy in Eigene Stimmungsprompts / Beeinflussungsprompts übernommen werden. Quelle: src/curatedDirectives.ts (nur Beispiele, 5 Stück). Vollständige Liste via Tool list_image_directives.",
     options: [
       { value: "none", displayName: "— bitte wählen —" },
       { value: "pose-action", displayName: "pose-action – Pose/Action dynamisch" },
@@ -60,9 +60,9 @@ export const pluginConfigSchematics = createConfigSchematics()
     ],
   }, "none")
   .field("activeDirectivePreview", "string", {
-    displayName: "Beeinflussungsprompt Textfeld – Vorschau aktuell ausgewählt",
+    displayName: "Stimmungsprompt / Beeinflussungsprompt – Vorschau aktuell ausgewählt",
     subtitle:
-      "Zeigt den Prompt des oben gewählten kuratierten Beispiels (read-only Vorschau zum Kopieren) bzw. des aktuell aktiven Systemprompts. Wird nicht automatisch gespeichert – zum Übernehmen in Eigene Stimmungsprompts kopieren. Aktivierung via Tool set_image_system_prompt({name}). Per-Eintrag read-only Schaltung via [ro]/[rw] Flag in Eigene Stimmungsprompts.",
+      "Zeigt den Prompt des oben gewählten kuratierten Beispiels (Stimmungsprompt / Beeinflussungsprompt, synonym, read-only Vorschau zum Kopieren) bzw. des aktuell aktiven Systemprompts. Wird nicht automatisch gespeichert – zum Übernehmen in Eigene Stimmungsprompts / Beeinflussungsprompts kopieren. Aktivierung via Tool set_image_system_prompt({name}). Per-Eintrag read-only Schaltung via [ro]/[rw] Flag.",
     isParagraph: true,
   }, "")
   .build();

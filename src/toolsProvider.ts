@@ -66,7 +66,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const cfg = ctl.getPluginConfig(pluginConfigSchematics);
 
   const getToken = () => cfg.get("hfApiToken").trim();
-  const getModel = () => cfg.get("defaultModel").trim() || "black-forest-labs/FLUX.2-dev";
+  const getModel = () => cfg.get("defaultModel").trim() || "black-forest-labs/FLUX.1-dev";
   const getOutputDir = () => resolvePath(cfg.get("outputDirectory").trim() || "~/hf-images");
   const getRateLimitConfig = () => ({
     cooldownMs: Number(cfg.get("rateLimitCooldown")) || 5000,
@@ -89,7 +89,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         LoRA support: pass a lora_id (HuggingFace model ID of a LoRA adapter) to apply a style or
         character LoRA on top of the base model. Uses fal-ai provider which supports FLUX LoRAs.
 
-        Note: FLUX.2-dev requires accepting the license at huggingface.co first.
+        Note: FLUX.2-dev requires accepting the license at huggingface.co first. FLUX.1-dev works without extra steps.
         HF free tier may take 20-60s to warm up inactive models on the first call.
       `,
       parameters: {

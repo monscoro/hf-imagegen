@@ -99,6 +99,31 @@ export const CURATED_MODELS: ModelInfo[] = [
     license: "Stability Community",
   },
   {
+    id: "black-forest-labs/FLUX.1-Kontext-dev",
+    description:
+      "FLUX.1-Kontext-dev — DAS Edit-Modell: instruction-based image-to-image " +
+      "(Pose behalten, Outfit/Licht tauschen). fal-ai/replicate/wavespeed. " +
+      "Default für image_edit; Basis-T2I-Modelle haben kein I2I-Mapping. Freischaltung nötig.",
+    style: "image-editing, photorealistic",
+    speed: "medium",
+    access: "pro",
+    source: "curated",
+    parameters: "12B",
+    license: "Non-Commercial",
+  },
+  {
+    id: "Qwen/Qwen-Image-Edit",
+    description:
+      "Qwen-Image-Edit — Präzise Bildbearbeitung (Apache 2.0). Alternative zu Kontext-dev " +
+      "für image_edit. fal-ai/replicate/wavespeed.",
+    style: "image-editing, photorealistic",
+    speed: "medium",
+    access: "free",
+    source: "curated",
+    parameters: "20B",
+    license: "Apache 2.0",
+  },
+  {
     id: "Tongyi-MAI/Z-Image-Turbo",
     description:
       "Z-Image-Turbo — Schnelle Turbo-Variante, Apache 2.0 (kommerziell nutzbar). " +

@@ -309,6 +309,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Reference image = KEEP, prompt = CHANGE — mirrors the Neigungsprompt gates:
         pose/composition stay, the instruction transforms material, light, or details.
 
+        MODELS — important: use editing-native models, NOT text-to-image base models.
+        Base models (FLUX.1-dev, SDXL, Qwen-Image) have NO image-to-image provider mapping
+        and fail with "not supported for task image-to-image". Working models:
+        - "black-forest-labs/FLUX.1-Kontext-dev" (default): instruction editing, fal-ai/replicate/wavespeed
+        - "Qwen/Qwen-Image-Edit": precise edits, fal-ai/replicate/wavespeed
+        Browse them with list_models source='curated'.
+
         The 'image' parameter accepts a local file path (also from earlier generate_image
         results) or a public image URL. To generate from scratch, use generate_image instead.
         An active Neigungsprompt guides how the change is formulated, same as generate_image.
@@ -324,8 +331,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "Be specific — everything not mentioned tends to stay as in the reference."
         ),
         model_id: z.string().default("").describe(
-          "HuggingFace model ID override (e.g. 'black-forest-labs/FLUX.1-dev'). " +
-          "Leave blank to use the default model from plugin config."
+          "Editing-native model ID. Blank = 'black-forest-labs/FLUX.1-Kontext-dev'. " +
+          "Alternative: 'Qwen/Qwen-Image-Edit'. Do NOT use text-to-image base models " +
+          "(FLUX.1-dev, SDXL, Qwen-Image) — they have no image-to-image mapping."
+        ),
+        provider: z.string().default("auto").describe(
+          "HF inference sub-provider (auto, fal-ai, replicate, wavespeed). " +
+          "Default auto resolves via the model's image-to-image mapping."
         ),
         negative_prompt: z.string().default("").describe(
           "What to exclude from the image (e.g. 'blurry, low quality, text, watermark')."
@@ -338,7 +350,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "Strength of the LoRA adapter. 0.5–1.0 is typical; higher = stronger effect."
         ),
       },
-      implementation: safe_impl("image_edit", async ({ image, prompt, model_id, negative_prompt, lora_id, lora_scale }, ctx) => {
+      implementation: safe_impl("image_edit", async ({ image, prompt, model_id, provider, negative_prompt, lora_id, lora_scale }, ctx) => {
         ctx.status("Reading reference image…");
         const token = getToken();
         if (!token) {
@@ -361,7 +373,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         try {
           const { buffer: inputBuffer, mimeType: inputMime, source: inputSource } =
             await resolveImageInput(image);
-          const modelToUse = model_id.trim() || getModel();
+          // Editing-native default: base T2I models have no image-to-image mapping.
+          const modelToUse = model_id.trim() || "black-forest-labs/FLUX.1-Kontext-dev";
+          const providerToUse = (provider.trim() || "auto") as
+            "auto" | "fal-ai" | "replicate" | "wavespeed" | "together" | "nscale";
           const cleanNegative = negative_prompt.trim();
           const cleanLora = lora_id.trim();
           const outputDir = getOutputDir();
@@ -377,15 +392,28 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           if (cleanLora) parameters.loras = [{ path: cleanLora, scale: lora_scale }];
 
           ctx.status(`Editing with ${modelToUse}…`);
-          const blob = await hf.imageToImage({
-            provider: "auto",
-            model: modelToUse,
-            inputs: inputBlob,
-            parameters: {
-              prompt,
-              ...parameters,
-            },
-          }) as unknown as Blob;
+          let blob: Blob;
+          try {
+            blob = await hf.imageToImage({
+              provider: providerToUse,
+              model: modelToUse,
+              inputs: inputBlob,
+              parameters: {
+                prompt,
+                ...parameters,
+              },
+            }) as unknown as Blob;
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (/not supported for task image-to-image/i.test(msg)) {
+              throw new Error(
+                `${msg} — use an editing-native model instead: ` +
+                `'black-forest-labs/FLUX.1-Kontext-dev' (default) or 'Qwen/Qwen-Image-Edit'. ` +
+                `Base text-to-image models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping.`
+              );
+            }
+            throw err;
+          }
 
           const mimeType = blob.type || "image/png";
           const outBuffer = Buffer.from(await blob.arrayBuffer());

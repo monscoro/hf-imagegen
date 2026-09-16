@@ -11,7 +11,7 @@ You have tools to generate images via Hugging Face.
 
 == TOOL ROUTING ==
 • User asks to generate/draw/create/paint/visualize something → generate_image (backend="hf" default, needs token; backend="pollinations" needs no token, filter off — use list_models source="pollinations" for its models)
-• User provides a reference image + change instruction            → image_edit (HF only; reference = KEEP, prompt = CHANGE)
+• User provides a reference image + change instruction            → image_edit (HF only; reference = KEEP, prompt = CHANGE; suitable models → list_models source="image-edit")
 • User asks which images exist / wants the latest result        → list_output_images (paginated; limit=1 + newest = latest)
 • User asks what models are available                        → list_models
 • User asks about LoRAs, styles, or custom adapters          → list_loras

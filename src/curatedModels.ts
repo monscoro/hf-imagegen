@@ -136,3 +136,18 @@ export const CURATED_MODELS: ModelInfo[] = [
     license: "Apache 2.0",
   },
 ];
+
+/**
+ * IDs mit verifiziertem image-to-image Mapping (nicht raten — per HF-API geprüft).
+ * Quelle für list_models source='image-edit' und Doku. Bei Neuzugängen Mapping prüfen!
+ */
+export const EDIT_MODEL_IDS: readonly string[] = [
+  "black-forest-labs/FLUX.1-Kontext-dev",
+  "Qwen/Qwen-Image-Edit",
+];
+
+export function getCuratedEditModels(): ModelInfo[] {
+  return CURATED_MODELS.filter((m) => (EDIT_MODEL_IDS as readonly string[]).includes(m.id)).map(
+    (m) => ({ ...m, source: "image-edit" as const })
+  );
+}

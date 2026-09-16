@@ -13,6 +13,7 @@ import {
   getLoRAsForModel,
   getDefaultLoRAs,
 } from "./hfApi";
+import { getCuratedEditModels } from "./curatedModels";
 import { checkRateLimit, recordGeneration } from "./rateLimit";
 import { resolveImageInput } from "./imageInput";
 import { listOutputImages } from "./workspace";
@@ -94,6 +95,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     }
   };
   const getModel = () => cfg.get("defaultModel").trim() || "black-forest-labs/FLUX.1-dev";
+  const getEditModel = () =>
+    cfg.get("defaultEditModel").trim() || "black-forest-labs/FLUX.1-Kontext-dev";
   const getOutputDir = () => resolvePath(cfg.get("outputDirectory").trim() || "~/hf-images");
   const getRateLimitConfig = () => ({
     cooldownMs: Number(cfg.get("rateLimitCooldown")) || 5000,
@@ -324,15 +327,17 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       `,
       parameters: {
         image: z.string().min(1).describe(
-          "Reference image: local file path (e.g. from a generate_image file_path) or public http(s) URL."
+          "Reference image: local file path, bare filename (looked up in the output directory first), " +
+          "or public http(s) URL."
         ),
         prompt: z.string().min(1).describe(
           "CHANGE instruction: what to transform (subject, garment, material, light, mood). " +
           "Be specific — everything not mentioned tends to stay as in the reference."
         ),
         model_id: z.string().default("").describe(
-          "Editing-native model ID. Blank = 'black-forest-labs/FLUX.1-Kontext-dev'. " +
-          "Alternative: 'Qwen/Qwen-Image-Edit'. Do NOT use text-to-image base models " +
+          "Editing-native model ID. Blank = defaultEditModel from plugin config " +
+          "('black-forest-labs/FLUX.1-Kontext-dev'). Alternative: 'Qwen/Qwen-Image-Edit' " +
+          "(see list_models source='image-edit'). Do NOT use text-to-image base models " +
           "(FLUX.1-dev, SDXL, Qwen-Image) — they have no image-to-image mapping."
         ),
         provider: z.string().default("auto").describe(
@@ -371,15 +376,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         isGenerating = true;
 
         try {
+          const outputDir = getOutputDir();
           const { buffer: inputBuffer, mimeType: inputMime, source: inputSource } =
-            await resolveImageInput(image);
-          // Editing-native default: base T2I models have no image-to-image mapping.
-          const modelToUse = model_id.trim() || "black-forest-labs/FLUX.1-Kontext-dev";
+            await resolveImageInput(image, [outputDir]);
+          // Editing-native default from config: base T2I models have no image-to-image mapping.
+          const modelToUse = model_id.trim() || getEditModel();
           const providerToUse = (provider.trim() || "auto") as
             "auto" | "fal-ai" | "replicate" | "wavespeed" | "together" | "nscale";
           const cleanNegative = negative_prompt.trim();
           const cleanLora = lora_id.trim();
-          const outputDir = getOutputDir();
 
           await mkdir(outputDir, { recursive: true });
 
@@ -492,6 +497,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Sources (parameter 'source') — which catalog to list:
         - "curated" (default): expert-verified HuggingFace IDs for generate_image backend='hf',
           with descriptions and LoRA compatibility info.
+        - "image-edit": editing-native HuggingFace IDs with verified image-to-image mapping
+          (Kontext-dev, Qwen-Image-Edit) — for the image_edit tool. Do NOT use text-to-image
+          base models from the other sources here; they fail with "not supported for task".
         - "provider": HuggingFace IDs served by one inference sub-provider (needs 'provider',
           e.g. fal-ai, nscale) — for backend='hf'.
         - "trending" / "downloads": live HuggingFace catalog — for backend='hf'.
@@ -500,12 +508,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         Rule of thumb: IDs from curated/provider/trending/downloads only work with
         generate_image backend='hf'; IDs from source='pollinations' only with
-        backend='pollinations'. LoRA lookup (include_loras) and the list_loras tool are HF-only.
+        backend='pollinations'; IDs from source='image-edit' only with image_edit.
+        LoRA lookup (include_loras) and the list_loras tool are HF-only.
       `,
       parameters: {
-        source: z.enum(["curated", "provider", "trending", "downloads", "pollinations"])
+        source: z.enum(["curated", "provider", "trending", "downloads", "pollinations", "image-edit"])
           .default("curated")
-          .describe("Which catalog to list. Default: curated (expert-verified HuggingFace IDs for backend='hf')."),
+          .describe("Which catalog to list. Default: curated (expert-verified HuggingFace IDs for backend='hf'). Use 'image-edit' for image_edit models."),
         provider: z.string()
           .default("")
           .describe(
@@ -525,6 +534,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       implementation: safe_impl("list_models", async ({ source, provider, limit, include_loras }, ctx) => {
         const token = getToken();
         const currentDefault = getModel();
+        const editDefault = getEditModel();
 
         ctx.status(`Fetching ${source} models...`);
 
@@ -557,6 +567,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           case "pollinations":
             models = getPollinationsModels();
             break;
+          case "image-edit":
+            models = getCuratedEditModels();
+            break;
           default:
             models = getCuratedModels();
         }
@@ -585,6 +598,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           ...(source === "pollinations"
             ? { pollinations_default_model: POLLINATIONS_DEFAULT_MODEL }
             : {}),
+          ...(source === "image-edit" ? { image_edit_default_model: editDefault } : {}),
           models: models.map((m) => ({
             ...m,
             is_default: m.id === currentDefault,
@@ -595,6 +609,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               ? "Expert-verified HuggingFace IDs for generate_image backend='hf'. Use list_loras with base_model to find compatible LoRAs."
               : source === "pollinations"
                 ? "Pollinations IDs for generate_image backend='pollinations', no token needed. Snapshot Sep 2026; canonical IDs preferred, aliases (klein, flux, kontext) also work. No LoRAs on this backend. current_default_model is the HF-backend default — use pollinations_default_model here. If a community/* model fails (alpha proxies), retry with klein or flux."
+              : source === "image-edit"
+                ? "Editing-native IDs for the image_edit tool (verified image-to-image mapping). image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing."
                 : "HuggingFace IDs for generate_image backend='hf'. Pass model_id to generate_image to use a model.",
         });
       }),

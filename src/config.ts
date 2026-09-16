@@ -15,6 +15,14 @@ export const pluginConfigSchematics = createConfigSchematics()
       "Alternatives: FLUX.2-dev (32B, best quality, requires license), FLUX.1-schnell (fastest, free), " +
       "stabilityai/stable-diffusion-xl-base-1.0. Use list_models tool to see all options.",
   }, "black-forest-labs/FLUX.1-dev")
+  .field("defaultEditModel", "string", {
+    displayName: "Default Edit Model",
+    subtitle:
+      "HuggingFace model ID for image_edit (image-to-image). Must be an editing-native model: " +
+      "black-forest-labs/FLUX.1-Kontext-dev (default) or Qwen/Qwen-Image-Edit. " +
+      "Text-to-image base models (FLUX.1-dev, SDXL, Qwen-Image) do NOT work for editing. " +
+      "Use list_models with source='image-edit' to see suitable models.",
+  }, "black-forest-labs/FLUX.1-Kontext-dev")
   .field("pollinationsApiKey", "string", {
     displayName: "Pollinations API Key (optional)",
     subtitle:

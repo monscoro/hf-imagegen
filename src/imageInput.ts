@@ -44,9 +44,15 @@ function expandHome(p: string): string {
 
 /**
  * Normalisiert den image_edit-Input zu Bytes: lokaler Pfad (inkl. ~) oder öffentliche URL.
- * Unbekannte/fehlende Dateien, tote URLs und Nicht-Bilder scheitern mit klaren Fehlern.
+ * Bloße Dateinamen werden zusätzlich in extraBases (z.B. Output-Verzeichnis) gesucht —
+ * das deckt Prompts wie "nimm das Bild NAME aus dem Working Dir" ab.
+ * Unbekannte/fehlende Dateien, tote URLs und Nicht-Bilder scheitern mit klaren Fehlern
+ * inkl. der durchsuchten Orte.
  */
-export async function resolveImageInput(input: string): Promise<ResolvedImageInput> {
+export async function resolveImageInput(
+  input: string,
+  extraBases: string[] = []
+): Promise<ResolvedImageInput> {
   const clean = input.trim();
   if (!clean) {
     throw new Error("image parameter is required: local file path or public image URL.");
@@ -68,12 +74,24 @@ export async function resolveImageInput(input: string): Promise<ResolvedImageInp
     return { buffer, mimeType: sniffed ?? headerMime, source: "url" };
   }
 
-  let buffer: Buffer;
-  try {
-    buffer = await readFile(path.resolve(expandHome(clean)));
-  } catch {
+  const expanded = expandHome(clean);
+  const candidates = path.isAbsolute(expanded)
+    ? [expanded]
+    : [path.resolve(expanded), ...extraBases.map((b) => path.join(b, expanded))];
+
+  let buffer: Buffer | null = null;
+  for (const candidate of candidates) {
+    try {
+      buffer = await readFile(candidate);
+      break;
+    } catch {
+      // next candidate
+    }
+  }
+  if (!buffer) {
     throw new Error(
-      `Reference image not found: "${clean}". Use an existing local path or a public http(s) URL.`
+      `Reference image not found: "${clean}". Searched: ${candidates.join(" | ")}. ` +
+      `Use an existing local path, a bare filename from the output directory, or a public http(s) URL.`
     );
   }
   const mimeType = sniffImageMime(buffer, path.extname(clean));

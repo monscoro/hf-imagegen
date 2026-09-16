@@ -314,9 +314,6 @@ export function updateDirective(
         source: "user",
         readonly: false,
       };
-      // if both provided, use provided values; else keep config values
-      if (description?.trim()) shadow.description = description.trim();
-      if (prompt?.trim()) shadow.prompt = prompt.trim();
       cache.directives.push(shadow);
       savePersisted(cache);
       return shadow;

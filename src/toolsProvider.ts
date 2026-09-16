@@ -14,6 +14,7 @@ import {
   getDefaultLoRAs,
 } from "./hfApi";
 import { checkRateLimit, recordGeneration } from "./rateLimit";
+import { resolveImageInput } from "./imageInput";
 import {
   getPollinationsModels,
   buildPollinationsUrl,
@@ -68,6 +69,18 @@ function timestampedFilename(ext: "png" | "jpeg"): string {
   return `hf-${ts}.${ext}`;
 }
 
+async function saveImageBuffer(
+  buffer: Buffer,
+  mimeType: string,
+  outputDir: string
+): Promise<{ filePath: string; filename: string }> {
+  const ext: "png" | "jpeg" = mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpeg" : "png";
+  const filename = timestampedFilename(ext);
+  const filePath = path.join(outputDir, filename);
+  await writeFile(filePath, buffer);
+  return { filePath, filename };
+}
+
 export const toolsProvider: ToolsProvider = async (ctl) => {
   const cfg = ctl.getPluginConfig(pluginConfigSchematics);
 
@@ -97,6 +110,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Generate an image from a text prompt. Saves the image to disk and returns the file path.
 
         Use when the user asks to generate, create, draw, paint, or visualize something.
+        To edit an existing image instead, use image_edit.
 
         Backends (parameter 'backend') — where the image is generated:
         - "hf" (default): HuggingFace Inference Providers. Requires the HF API token from plugin config.
@@ -256,11 +270,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             buffer = Buffer.from(await blob.arrayBuffer());
           }
 
-          const ext: "png" | "jpeg" = mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpeg" : "png";
-          const filename = timestampedFilename(ext);
-          const filePath = path.join(outputDir, filename);
-
-          await writeFile(filePath, buffer);
+          const { filePath, filename } = await saveImageBuffer(buffer, mimeType, outputDir);
 
           recordGeneration();
           const remaining = checkRateLimit(getRateLimitConfig());
@@ -281,6 +291,112 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             generations_remaining_today: remainingCount,
             notes: notes.length > 0 ? notes : undefined,
             message: `Image saved to ${filePath}`,
+          });
+        } finally {
+          isGenerating = false;
+        }
+      }),
+    }),
+
+    tool({
+      name: "image_edit",
+      description: text`
+        Edit an existing image (image-to-image). HF backend only.
+
+        Use when the user provides a reference image plus a change instruction
+        (e.g. a generated portrait + "same pose, latex dress instead of silk").
+        Reference image = KEEP, prompt = CHANGE — mirrors the Neigungsprompt gates:
+        pose/composition stay, the instruction transforms material, light, or details.
+
+        The 'image' parameter accepts a local file path (also from earlier generate_image
+        results) or a public image URL. To generate from scratch, use generate_image instead.
+        An active Neigungsprompt guides how the change is formulated, same as generate_image.
+      `,
+      parameters: {
+        image: z.string().min(1).describe(
+          "Reference image: local file path (e.g. from a generate_image file_path) or public http(s) URL."
+        ),
+        prompt: z.string().min(1).describe(
+          "CHANGE instruction: what to transform (subject, garment, material, light, mood). " +
+          "Be specific — everything not mentioned tends to stay as in the reference."
+        ),
+        model_id: z.string().default("").describe(
+          "HuggingFace model ID override (e.g. 'black-forest-labs/FLUX.1-dev'). " +
+          "Leave blank to use the default model from plugin config."
+        ),
+        negative_prompt: z.string().default("").describe(
+          "What to exclude from the image (e.g. 'blurry, low quality, text, watermark')."
+        ),
+      },
+      implementation: safe_impl("image_edit", async ({ image, prompt, model_id, negative_prompt }, ctx) => {
+        ctx.status("Reading reference image…");
+        const token = getToken();
+        if (!token) {
+          throw new Error(
+            "HuggingFace API token is not set. " +
+            "Go to plugin settings and paste your token from huggingface.co/settings/tokens."
+          );
+        }
+
+        const rateLimitResult = checkRateLimit(getRateLimitConfig());
+        if (!rateLimitResult.ok) {
+          throw new Error(rateLimitResult.error);
+        }
+
+        if (isGenerating) {
+          throw new Error("Another generation is already in progress. Wait for it to finish.");
+        }
+        isGenerating = true;
+
+        try {
+          const { buffer: inputBuffer, mimeType: inputMime, source: inputSource } =
+            await resolveImageInput(image);
+          const modelToUse = model_id.trim() || getModel();
+          const cleanNegative = negative_prompt.trim();
+          const outputDir = getOutputDir();
+
+          await mkdir(outputDir, { recursive: true });
+
+          const hf = new InferenceClient(token);
+          // Copy out of the Node buffer pool so TS accepts it as BlobPart.
+          const inputBlob = new Blob([new Uint8Array(inputBuffer)], { type: inputMime });
+
+          const parameters: Record<string, unknown> = {};
+          if (cleanNegative) parameters.negative_prompt = cleanNegative;
+
+          ctx.status(`Editing with ${modelToUse}…`);
+          const blob = await hf.imageToImage({
+            provider: "auto",
+            model: modelToUse,
+            inputs: inputBlob,
+            parameters: {
+              prompt,
+              ...parameters,
+            },
+          }) as unknown as Blob;
+
+          const mimeType = blob.type || "image/png";
+          const outBuffer = Buffer.from(await blob.arrayBuffer());
+          const { filePath, filename } = await saveImageBuffer(outBuffer, mimeType, outputDir);
+
+          recordGeneration();
+          const remaining = checkRateLimit(getRateLimitConfig());
+          const remainingCount = remaining.ok ? remaining.remaining : 0;
+
+          return json({
+            success: true,
+            file_path: filePath,
+            filename,
+            backend: "hf",
+            model_used: modelToUse,
+            input_image: image,
+            input_source: inputSource,
+            prompt,
+            negative_prompt: cleanNegative || null,
+            file_size_bytes: outBuffer.length,
+            mime_type: mimeType,
+            generations_remaining_today: remainingCount,
+            message: `Edited image saved to ${filePath}`,
           });
         } finally {
           isGenerating = false;

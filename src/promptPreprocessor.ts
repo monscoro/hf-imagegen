@@ -11,6 +11,7 @@ You have tools to generate images via Hugging Face.
 
 == TOOL ROUTING ==
 • User asks to generate/draw/create/paint/visualize something → generate_image (backend="hf" default, needs token; backend="pollinations" needs no token, filter off — use list_models source="pollinations" for its models)
+• User provides a reference image + change instruction            → image_edit (HF only; reference = KEEP, prompt = CHANGE)
 • User asks what models are available                        → list_models
 • User asks about LoRAs, styles, or custom adapters          → list_loras
 • User asks about moods/styles, Neigung/Stimmung, Systemprompt→ inclination_prompt_list / inclination_prompt_set / inclination_prompt_manage

@@ -66,7 +66,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const cfg = ctl.getPluginConfig(pluginConfigSchematics);
 
   const getToken = () => cfg.get("hfApiToken").trim();
-  const getModel = () => cfg.get("defaultModel").trim() || "black-forest-labs/FLUX.1-schnell";
+  const getModel = () => cfg.get("defaultModel").trim() || "black-forest-labs/FLUX.2-dev";
   const getOutputDir = () => resolvePath(cfg.get("outputDirectory").trim() || "~/hf-images");
   const getRateLimitConfig = () => ({
     cooldownMs: Number(cfg.get("rateLimitCooldown")) || 5000,
@@ -89,7 +89,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         LoRA support: pass a lora_id (HuggingFace model ID of a LoRA adapter) to apply a style or
         character LoRA on top of the base model. Uses fal-ai provider which supports FLUX LoRAs.
 
-        Note: FLUX.1-schnell requires accepting the license at huggingface.co first.
+        Note: FLUX.2-dev requires accepting the license at huggingface.co first.
         HF free tier may take 20-60s to warm up inactive models on the first call.
       `,
       parameters: {
@@ -292,14 +292,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Only use 'search' as a last resort with a very broad term (e.g. 'anime') if the result list is too large to browse.
 
         Use 'base_model' to find LoRAs compatible with a specific model.
-        The base_model should be a model ID from list_models (e.g. 'black-forest-labs/FLUX.1-dev').
+        The base_model should be a model ID from list_models (e.g. 
+'black-forest-labs/FLUX.2-dev').
       `,
       parameters: {
         base_model: z.string()
           .default("")
           .describe(
             "Filter LoRAs by compatible base model. " +
-              "Use model IDs from list_models (e.g. 'black-forest-labs/FLUX.1-dev', " +
+              "Use model IDs from list_models (e.g. 'black-forest-labs/FLUX.2-dev', " +
               "'stabilityai/stable-diffusion-xl-base-1.0'). " +
               "Leave blank to search all LoRAs."
           ),

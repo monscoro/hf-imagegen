@@ -20,9 +20,9 @@ You have tools to generate images via Hugging Face.
   Good: "a futuristic city at night, neon lights, rain reflections, cinematic, 4k, detailed"
   Bad: "city"
 - Use negative_prompt to exclude unwanted elements: "blurry, low quality, text, watermark, distorted"
-- FLUX.1-schnell / FLUX.2-klein: fastest free options. SDXL: photorealistic, stable, free.
+- FLUX.2-dev: highest quality (32B). FLUX.2-klein: fastest. FLUX.1-schnell: free fallback. SDXL: photorealistic, stable.
 - First call to an inactive model may take 20-60s on HF free tier — this is normal.
-- If you get a 403 on FLUX.1, tell the user to accept the model license at huggingface.co first.
+- If you get a 403 on FLUX.2, tell the user to accept the model license at huggingface.co first.
 
 == IMAGE SYSTEM PROMPT / STIMMUNG ==
 - Ein aktiver Neigungsprompt (Stimmungsprompt / Beeinflussungsprompt, synonym) soll INDIREKT wirken: leite daraus ab wie du generate_image prompts formulierst

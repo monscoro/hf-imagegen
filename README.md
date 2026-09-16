@@ -1,8 +1,8 @@
 # HF Image Gen — Image Generation Plugin for LM Studio
 
-> **Keywords:** lm studio plugin, image generation ai, text to image, flux lm studio, sdxl lm studio, hugging face image, lora support, ai image generator, stable diffusion
+> **Keywords:** lm studio plugin, image generation ai, text to image, image to image, flux lm studio, sdxl lm studio, hugging face image, pollinations, lora support, ai image generator, stable diffusion, flux kontext
 
-Generate images from text prompts using Hugging Face's Inference API — directly from your LM Studio chat. Supports FLUX, SDXL, Krea, Qwen-Image and other text-to-image models, plus LoRA adapters for style customization.
+Generate and edit images from your LM Studio chat — via **HuggingFace Inference Providers** or **Pollinations.ai**. Supports FLUX, SDXL, Krea, Qwen-Image and other models, LoRA adapters, instruction-based image editing (KEEP/CHANGE), persistent style profiles (Neigungsprompts), and paginated browsing of results.
 
 ---
 
@@ -11,7 +11,8 @@ Generate images from text prompts using Hugging Face's Inference API — directl
 - Users wanting image generation without switching to a separate app or UI
 - Developers testing text-to-image models alongside their LLM workflow
 - Anyone wanting FLUX or SDXL output directly from their LM Studio chat session
-- Creatives who want to iterate on image prompts in the same conversation they use for writing
+- Creatives iterating on image prompts — and on existing images — in the same conversation
+- Editorial/fashion workflows: pose stays, material/light/details change (KEEP/CHANGE)
 
 ---
 
@@ -23,7 +24,8 @@ npm install
 npx tsc
 ```
 
-Load the built plugin in LM Studio.
+Load the built plugin in LM Studio. Rebuild (`npx tsc`) and reload the plugin after every source change.
+Compiled `.js` files are build output and intentionally **not** tracked in git (see `.gitignore`).
 
 ---
 
@@ -31,150 +33,149 @@ Load the built plugin in LM Studio.
 
 | Field | Default | Description |
 |---|---|---|
-| HuggingFace API Token | _(blank)_ | **Required.** Your HF access token from huggingface.co/settings/tokens. Use a token with at least `read` scope. |
-| Default Model | `black-forest-labs/FLUX.1-schnell` | HuggingFace model ID for generation. Overridable per call. |
-| Output Directory | `~/hf-images` | Where generated images are saved. Created automatically. Supports `~/` prefix. |
+| HuggingFace API Token | _(blank)_ | **Required for backend `hf`.** Token from huggingface.co/settings/tokens, at least `read` scope. Not needed for `pollinations`. |
+| Default Model | `black-forest-labs/FLUX.1-dev` | Text-to-image model for `generate_image` (backend `hf`). Overridable per call. |
+| Default Edit Model | `black-forest-labs/FLUX.1-Kontext-dev` | Image-to-image model for `image_edit`. Must be editing-native (Kontext-dev or Qwen-Image-Edit). |
+| Pollinations API Key | _(blank)_ | **Optional.** From enter.pollinations.ai. Blank = anonymous (1 req/15s, possible watermark). With key: higher limits, no watermark, paid models. Never share `sk_…` keys. |
+| Output Directory | `~/hf-images` | Where images are saved. Created automatically. Supports `~/` prefix. Also the search base for bare filenames in `image_edit` and the scope of `list_output_images`. |
+| Generation Cooldown (ms) | `5000` | Minimum gap between generations (both backends). |
+| Daily Generation Limit | `50` | Max images per day, resets at midnight. |
 
 ---
 
-## How It Works
+## Backends
 
-1. You describe what you want in natural language
-2. The plugin calls the HuggingFace Inference API with your prompt
-3. The image is saved locally as a timestamped `.png` or `.jpeg` file
-4. The file path is returned so LM Studio can display it
+|  | `hf` (default) | `pollinations` |
+|---|---|---|
+| Provider | HuggingFace Inference Providers (auto/fal-ai/…) | Pollinations.ai |
+| Token | HF token required | None (optional key for limits + no watermark) |
+| Content filter | Provider-side moderation | Strict filter off by default (`safe=off`); illegal content still moderated |
+| Negative prompt | ✅ supported | ❌ ignored (reported in response notes) |
+| LoRA (`lora_id`) | ✅ FLUX via fal-ai | ❌ rejected with a clear error |
+| Image editing | ✅ `image_edit` tool | ❌ (deferred) |
+| Rate limit | Config cooldown + daily cap | Same, plus 15s anon / 5s with-key tier gap |
+| Best for | Quality, LoRAs, editing, precise control | No-setup start, permissive fashion/editorial takes |
 
-**Free tier note:** HuggingFace free accounts can use FLUX.1-schnell and SDXL. Cold-start on an inactive model may take 20-60 seconds on the first call. Subsequent calls are fast.
-
-**Pro tier note:** FLUX.1-dev requires HuggingFace Pro credits. It produces noticeably higher quality output but costs credits per generation.
+**Rule of thumb:** HuggingFace IDs ↔ `backend="hf"`, Pollinations IDs ↔ `backend="pollinations"`, editing-native IDs ↔ `image_edit`. Mixing them fails — the tools say so explicitly.
 
 ---
 
-## Tools
+## Tools (9)
 
 ### `generate_image` — Generate from text
 
-Creates an image from a text prompt and saves it to disk.
-
 ```
-generate_image(prompt, model_id?, negative_prompt?, lora_id?, lora_scale?)
+generate_image(prompt, model_id?, backend?, negative_prompt?, lora_id?, lora_scale?, width?, height?, seed?)
 ```
 
 | Parameter | Default | Description |
 |---|---|---|
-| `prompt` | _(required)_ | Text description. Be specific — subject, style, lighting, mood, quality terms. |
-| `model_id` | _(config default)_ | Override the default model for this call. |
-| `negative_prompt` | `""` | What to exclude (e.g. `"blurry, low quality, watermark"`). Not all models support this. |
-| `lora_id` | `""` | HuggingFace model ID of a LoRA adapter. FLUX models only. Use `list_loras` to find IDs. |
-| `lora_scale` | `1.0` | LoRA strength. `0.5-1.0` for subtle effects; `1.0-1.5` for strong. |
+| `prompt` | _(required)_ | Specific description — subject, style, lighting, mood, quality terms. |
+| `model_id` | _(config default)_ | HF ID (backend `hf`) or Pollinations model (backend `pollinations`, blank = `klein`). |
+| `backend` | `"hf"` | `"hf"` or `"pollinations"`. |
+| `negative_prompt` | `""` | Exclusions. HF only — ignored on Pollinations. |
+| `lora_id` | `""` | HF LoRA adapter ID. HF + FLUX only. |
+| `lora_scale` | `1.0` | 0.5–1.0 subtle, higher = stronger. |
+| `width` / `height` | `0` (= default) | Pollinations only (0–2048). Portrait e.g. 768×1152 for fashion editorial. |
+| `seed` | `0` (= random) | Pollinations only, for reproducible results. |
 
-**Returns:**
-- `file_path` — absolute path of the saved image
-- `model_used` — which model was used
-- `lora_used` — LoRA adapter applied, if any
-- `file_size_bytes`, `mime_type`
+Returns `file_path`, `backend`, `model_used`, sizes, remaining quota, and `notes` (ignored params, watermark hints).
 
-**LoRA note:** LoRA generation routes through the `fal-ai` provider, which supports FLUX LoRA compositing. Pair FLUX LoRAs with a FLUX base model.
+### `image_edit` — Edit a reference image (HF only)
 
----
+```
+image_edit(image, prompt, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?)
+```
 
-### `list_models` — Show available models
+Reference image = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` accepts a local path, a bare filename (looked up in the output directory first), or a public URL. Default model is `defaultEditModel` (Kontext-dev). **Important:** only editing-native models work — base T2I models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping and fail; the error message says exactly that. `lora_id` is passed through to fal-ai (I2I effectiveness under verification — report observations).
 
-Returns available text-to-image models from different sources.
+### `list_models` — Browse models per backend
 
 ```
 list_models(source?, provider?, limit?, include_loras?)
 ```
 
-| Parameter | Default | Description |
+| Source | For | Notes |
 |---|---|---|
-| `source` | `"curated"` | Which model list to show: `curated`, `provider`, `trending`, or `downloads`. |
-| `provider` | `""` | Inference provider name (required when `source="provider"`). Examples: `fal-ai`, `nscale`, `replicate`. |
-| `limit` | `20` | Maximum number of models to return (5-50). Only for provider/trending/downloads. |
-| `include_loras` | `false` | Include compatible LoRAs for each model. Slower, requires API calls. |
+| `curated` (default) | `generate_image` + `hf` | 10 expert-verified HF IDs, always available offline. |
+| `image-edit` | `image_edit` | Editing-native IDs with verified I2I mapping (Kontext-dev, Qwen-Image-Edit). |
+| `provider` | `generate_image` + `hf` | Needs `provider` (fal-ai, nscale, …). Never `pollinations` — use `source="pollinations"`. |
+| `trending` / `downloads` | `generate_image` + `hf` | Live HF catalog. |
+| `pollinations` | `generate_image` + `pollinations` | 8 models, no token. Response includes `pollinations_default_model`. |
 
-**Model Sources:**
+LoRA lookup (`include_loras`) and `list_loras` are HF-only.
 
-| Source | Description |
-|---|---|
-| `curated` | 5 expert-verified models with detailed descriptions and LoRA compatibility info. |
-| `provider` | Models from a specific inference provider. Useful when you have a preferred provider. |
-| `trending` | Currently popular models on HuggingFace. Good for discovery, but can be unstable. |
-| `downloads` | Most downloaded models. Established, battle-tested models. |
-
-**Curated Models:**
-
-| Model ID | Speed | Access | Notes |
-|---|---|---|---|
-| `black-forest-labs/FLUX.1-dev` | Medium | Pro | Cutting-edge quality, 12B params, non-commercial. |
-| `black-forest-labs/FLUX.1-schnell` | Fast | Free | 1-4 steps, 12B params, Apache 2.0 (commercial). |
-| `krea/Krea-2-Turbo` | Medium | Free | Photorealism-optimized, 13B params, 8 steps. |
-| `Qwen/Qwen-Image` | Medium | Free | Best text rendering, 20B params, Apache 2.0. |
-| `stabilityai/stable-diffusion-xl-base-1.0` | Medium | Free | 9,600+ LoRAs, 3B params, most ecosystem support. |
-
-You can also pass any HuggingFace text-to-image model ID directly to `generate_image` without it appearing in this list.
-
----
-
-### `list_loras` — Search LoRA adapters
-
-Searches HuggingFace for LoRA adapters, optionally filtered by compatible base model.
-Avoid the `search` keyword filter — it's too strict and often returns nothing. Just use `base_model`.
+### `list_loras` — Search LoRA adapters (HF only)
 
 ```
 list_loras(base_model?, search?, limit?)
 ```
 
-| Parameter | Default | Description |
-|---|---|---|
-| `base_model` | `""` | Filter by compatible base model (e.g. `"black-forest-labs/FLUX.1-dev"`). |
-| `search` | `""` | Keyword to filter (e.g. `"anime"`, `"portrait"`, `"watercolor"`). |
-| `limit` | `15` | Maximum number of results (5-30). |
+Avoid `search` (HF search is strict, often empty) — filter by `base_model` only. Pass `id` as `lora_id` with `backend="hf"`.
 
-**Returns** a list of LoRA model IDs sorted by downloads. Pass the `id` field as `lora_id` in `generate_image`.
+### `list_output_images` — Browse results
+
+```
+list_output_images(sort?, limit?, offset?, filter?)
+```
+
+Paginated, compact listing of the output directory (newest first; `limit=1` = latest image). Use instead of reading large folders at once; feed `filename` into `image_edit`.
+
+### `inclination_prompt_list` / `set` / `manage` — Style profiles
+
+Persistent mood/style directives that indirectly guide how the LLM formulates image prompts (see below). `manage(action="create")` turns user descriptions into full profiles (LLM generates id/description/prompt); `set` activates; empty/`none` deactivates.
 
 ---
 
-## Design Decisions
+## Neigungsprompt System (Stimmungsprompts)
 
-### Why 4 Model Sources?
+Active profiles are injected as system context every turn and act **indirectly**: the LLM weaves mood, style, and staging into `generate_image`/`image_edit` prompts instead of prefixing them.
 
-We decided to offer 4 different model sources to balance stability, freshness, and discoverability:
+**Sources:** `curated` (read-only examples in code) + `user` (LLM-created via `inclination_prompt_manage`, persisted in plugin storage `directives.json`).
 
-- **curated**: 5 expert-verified models with detailed descriptions. Always available, no API calls needed. Best for quick discovery and reliable recommendations.
+**Curated layers:**
 
-- **provider**: Models from a specific inference provider (e.g., fal-ai, nscale). Useful when you have a preferred provider or need specific pricing/features.
+| Prompt | Layer | Answers |
+|---|---|---|
+| `pose-action`, `interaction`, `setting`, `narrative`, `camera-intimate` | Visual basics | Pose, relation, place, story, lens |
+| `dark-fashion-editorial` (~119 words) | Aesthetic | Silhouette, materials, light-as-design, gates, designer anchor, intensity 6 |
+| `power-spice-editorial` (~150 words) | Dynamics | Dominant/submissive as styling, exchange vector, editorial trance, power-read designers |
+| `voice-martha` (~137 words) | Voice | How results are *talked about*: millennial, sharp, no AI filler — combinable with the visual layers |
 
-- **trending**: Currently popular models on HuggingFace. Good for discovering what the community is using right now, but results can change frequently.
+**Typical workflow:** user describes moods → LLM creates entries via `inclination_prompt_manage(action="create")` → activates via `inclination_prompt_set` → every generation/edit follows the style. Methodology and 20+ examples: `Prompt-Inclination-Techniques.md`.
 
-- **downloads**: Most downloaded models. Shows established, battle-tested models with proven track records.
+---
 
-### Why These 5 Curated Models?
+## Curated Models (HF)
 
-Each model was selected for a specific use case based on quality, speed, license, and ecosystem support:
+| Model ID | Role | Access |
+|---|---|---|
+| `black-forest-labs/FLUX.1-dev` | Default T2I: quality + prompt adherence (12B) | pro (license) |
+| `black-forest-labs/FLUX.1-schnell` | Fast + Apache 2.0 | free |
+| `krea/Krea-2-Turbo` | Photorealism specialist | free |
+| `black-forest-labs/FLUX.1-Krea-dev` | Fashion-tuned FLUX — first choice for editorial/glamour | pro (license) |
+| `Qwen/Qwen-Image-2512` | Allround + text rendering, Apache 2.0 (20B) | free |
+| `stabilityai/stable-diffusion-xl-base-1.0` | Largest LoRA ecosystem, permissive base (OpenRAIL) | free |
+| `stabilityai/stable-diffusion-3.5-large` | Stylized alternative base | pro (gated) |
+| `Tongyi-MAI/Z-Image-Turbo` | Fast iteration, Apache 2.0 | free |
+| `black-forest-labs/FLUX.1-Kontext-dev` | **Edit default**: instruction-based I2I (fal/replicate/wavespeed verified) | pro (license) |
+| `Qwen/Qwen-Image-Edit` | Precise edits, Apache 2.0 | free |
 
-| Model | Why It's Here |
-|-------|---------------|
-| **FLUX.1-dev** | Best quality for non-commercial use. 12B parameters, cutting-edge output. |
-| **FLUX.1-schnell** | Fastest generation (1-4 steps). Apache 2.0 license = commercially usable. |
-| **Krea-2-Turbo** | Best for photorealistic output. Optimized for natural textures and lighting. |
-| **Qwen-Image** | Best text rendering (especially Chinese). 20B params, strong allround quality. |
-| **SDXL** | Largest LoRA ecosystem (9,600+ adapters). Small model (3B), resource-friendly. |
+**Pollinations models** (via `list_models source="pollinations"`): `klein` (FLUX.2, default), `kontext`, `flux`, `uncensored-image-v2`, `anima`, `animagine` (anime/Pony-adjacent), `phoenix-1.0`, `klein-9b`.
 
-### LoRA Compatibility
+---
 
-LoRAs are not universally compatible. Each base model supports specific LoRA types:
+## Workflows
 
-- **FLUX models** → FLUX LoRAs
-- **SDXL models** → SDXL LoRAs
-- **Krea models** → Krea LoRAs
-- **Qwen models** → Qwen LoRAs
+**Generate:** describe → `generate_image` → file path. Try `backend="pollinations"` for zero-setup or permissive takes.
 
-When you specify a `base_model` in `list_loras`, we filter results to show only compatible adapters. This prevents the common error of applying a FLUX LoRA to an SDXL model (which would fail or produce artifacts).
+**Edit (KEEP/CHANGE):** reference (prior result, bare filename, or URL) + change instruction → `image_edit`. Example: *"same pose, latex dress instead of silk, keep everything else monochrome."*
 
-### Dynamic vs. Hardcoded
+**Own style library:** *"Create these Neigungsprompts: cinematic-noir, dreamy-pastel"* → LLM builds entries → `inclination_prompt_set` activates one.
 
-The curated model list is hardcoded for reliability — it's always available even without API access. All other sources (provider, trending, downloads) are fetched dynamically from the HuggingFace API to ensure fresh results.
+**Community-alpha fallback (Pollinations):** if a `community/*` model fails, retry with `klein` or `flux`.
+
+**Find results:** `list_output_images({limit:1})` → latest file → straight into `image_edit`.
 
 ---
 
@@ -183,38 +184,40 @@ The curated model list is hardcoded for reliability — it's always available ev
 **Photorealistic portrait:**
 > "A cinematic close-up portrait of a woman in golden hour light, soft bokeh background, 85mm lens, film grain"
 
-**Concept art:**
-> "A futuristic megacity at night, neon reflections in rain puddles, cyberpunk aesthetic, ultra-detailed, 4K"
+**Selective edit (B/W poster, two accents):**
+> image: `"x-video-…-poster.jpg"`, prompt: `"Do not colorize the image, keep everything monochrome except: crimson red leather boots (matte, catching light) and an ornate golden mask emitting a soft radiant glow"`
 
-**With negative prompt:**
-> prompt: `"A peaceful mountain lake at sunrise"`
-> negative_prompt: `"people, cars, buildings, text, watermark"`
+**Pollinations, no token, portrait format:**
+> `generate_image(prompt="...", backend="pollinations", model_id="klein", width=768, height=1152)`
 
-**With LoRA style:**
-> First: `list_loras(base_model="black-forest-labs/FLUX.1-dev", search="anime")`
+**With LoRA (HF):**
+> First: `list_loras(base_model="black-forest-labs/FLUX.1-dev")`
 > Then: `generate_image(prompt="...", lora_id="alvdansen/flux-koda", lora_scale=0.8)`
-
-**Using a specific model:**
-> `generate_image(prompt="...", model_id="stabilityai/stable-diffusion-xl-base-1.0")`
 
 ---
 
 ## Prompt Tips
 
-- **Be specific** — vague prompts produce average results. Name the subject, lighting, style, mood.
-- **Quality terms** work: `ultra-detailed`, `8K`, `cinematic`, `professional photography`, `sharp focus`
-- **Style references** help: `in the style of Studio Ghibli`, `watercolor illustration`, `photorealistic`, `oil painting`
-- **Negative prompts** clean up common issues: `blurry, low quality, deformed hands, text, watermark, oversaturated`
-- **FLUX models** understand natural language well — you can write full sentences rather than comma-separated tags
+- **Be specific** — subject, lighting, style, mood. Vague prompts produce average results.
+- **Quality terms** work: `ultra-detailed`, `8K`, `cinematic`, `sharp focus`.
+- **Negative prompts** (HF): `blurry, low quality, deformed hands, text, watermark, oversaturated`.
+- **FLUX models** understand natural language — full sentences beat tag soup.
+- **Edits**: describe only the CHANGE; everything unmentioned tends to stay (KEEP).
 
 ---
 
-## Accepting Model Licenses
+## Design Decisions (Background)
 
-Some models require accepting their license on HuggingFace before they can be used:
+**Config is read-only from plugin code.** The LM Studio SDK exposes `get()` but no setter — a catalog picker therefore *cannot* populate a text field. Consequence: no picker UI at all; all style management runs through LLM tools (`inclination_prompt_*`). The store lives in plugin storage (`directives.json`).
 
-1. Go to the model's page on huggingface.co (e.g. `huggingface.co/black-forest-labs/FLUX.1-schnell`)
-2. Click **"Access repository"** and accept the license
-3. Make sure your API token has at least `read` scope
+**Default model = FLUX.1-dev, not FLUX.2-dev.** FLUX.2 (32B, SOTA) needs a license accepted and is absent from the free inference pool; FLUX.1-dev works license-free via Inference Providers. FLUX.2 remains documented as the quality upgrade path.
 
-This only needs to be done once per model per account.
+**Base T2I models have no image-to-image mapping.** Verified per HF provider API: FLUX.1-dev, SDXL, Qwen-Image map to `text-to-image` only on every provider — retries are doomed, which a live reasoning trace confirmed. `image_edit` therefore defaults to editing-native `FLUX.1-Kontext-dev` (I2I on fal-ai/replicate/wavespeed), with `Qwen-Image-Edit` as alternative; the error names both. `list_models source="image-edit"` keeps the two worlds apart.
+
+**Pollinations as second backend.** Filter off by default, no token, anonymous 1 req/15s (5s with free Seed key) — covers permissive fashion/editorial takes the HF pool filters. Limits are explicit: no negative prompt, no LoRAs, community alphas as fallback chain, optional key for watermark-free. Strength was deliberately omitted (not in the generic I2I spec; provider-specific and unverified).
+
+**LoRAs via fal-ai.** `generate_image` routes LoRA calls to `fal-ai`; I2I LoRA passthrough exists and is honestly marked "under verification". Curated prompts stay under ~150 words to bound token cost on every-turn injection.
+
+**Output browsing instead of directory dumps.** LLMs choke on large folders — `list_output_images` paginates the single output directory (the only place the plugin reads), and bare filenames resolve against it.
+
+**Accepting model licenses:** some models (FLUX.1-dev/-Kontext-dev, SD3.5) need a one-time license accept on their huggingface.co page (e.g. `huggingface.co/black-forest-labs/FLUX.1-dev`) with a `read`-scope token. Once per model per account.

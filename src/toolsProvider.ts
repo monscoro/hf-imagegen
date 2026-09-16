@@ -163,11 +163,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           throw new Error(rateLimitResult.error);
         }
         if (usePollinations) {
+          // Anonymous: 1 req/15s; with key (Seed tier): 1 req/5s.
+          const pollinationsCooldownMs = getPollinationsKey() ? 5_000 : POLLINATIONS_ANON_COOLDOWN_MS;
           const waited = Date.now() - lastPollinationsCall;
-          if (waited < POLLINATIONS_ANON_COOLDOWN_MS) {
+          if (waited < pollinationsCooldownMs) {
             throw new Error(
-              `Pollinations anonymous tier allows ~1 request per 15s. ` +
-              `Wait ${Math.ceil((POLLINATIONS_ANON_COOLDOWN_MS - waited) / 1000)}s and retry.`
+              `Pollinations allows ~1 request per ${pollinationsCooldownMs / 1000}s on your tier. ` +
+              `Wait ${Math.ceil((pollinationsCooldownMs - waited) / 1000)}s and retry.`
             );
           }
         }
@@ -202,6 +204,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             }
             buffer = Buffer.from(await res.arrayBuffer());
             mimeType = res.headers.get("content-type") || "image/jpeg";
+            if (!mimeType.startsWith("image/")) {
+              const preview = buffer.toString("utf-8").slice(0, 200);
+              throw new Error(`Pollinations returned non-image content (${mimeType}): ${preview}`);
+            }
             lastPollinationsCall = Date.now();
             notes.push(
               pollinationsKey
@@ -331,7 +337,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         const LORA_CAP = 10;
         let loraTruncated = false;
-        if (include_loras && models.length > 0) {
+        // LoRA lookup is HF-only: Pollinations models have no HF LoRA ecosystem.
+        if (include_loras && models.length > 0 && source !== "pollinations") {
           const targets = models.slice(0, LORA_CAP);
           loraTruncated = models.length > LORA_CAP;
           ctx.status(`Loading compatible LoRAs for ${targets.length} models...`);

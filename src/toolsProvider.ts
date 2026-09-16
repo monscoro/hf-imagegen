@@ -100,7 +100,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const getOutputDir = () => resolvePath(cfg.get("outputDirectory").trim() || "~/hf-images");
   const getRateLimitConfig = () => ({
     cooldownMs: Number(cfg.get("rateLimitCooldown")) || 5000,
-    dailyCap: Number(cfg.get("rateLimitDailyCap")) || 50,
+    dailyCap: Number(cfg.get("rateLimitDailyCap")) || 75,
   });
 
   let isGenerating = false;

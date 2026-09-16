@@ -47,6 +47,6 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: "Daily Generation Limit",
     subtitle:
       "Maximum number of images that can be generated per day. " +
-      "Resets at midnight. Default: 50.",
-  }, 50)
+      "Resets at midnight. Default: 75.",
+  }, 75)
   .build();

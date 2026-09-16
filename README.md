@@ -39,7 +39,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 | Pollinations API Key | _(blank)_ | **Optional.** From enter.pollinations.ai. Blank = anonymous (1 req/15s, possible watermark). With key: higher limits, no watermark, paid models. Never share `sk_…` keys. |
 | Output Directory | `~/hf-images` | Where images are saved. Created automatically. Supports `~/` prefix. Also the search base for bare filenames in `image_edit` and the scope of `list_output_images`. |
 | Generation Cooldown (ms) | `5000` | Minimum gap between generations (both backends). |
-| Daily Generation Limit | `50` | Max images per day, resets at **local** midnight. This is the plugin's own guard — it does **not** track HF credits. |
+| Daily Generation Limit | `75` | Max images per day, resets at **local** midnight. This is the plugin's own guard — it does **not** track HF credits. |
 
 ---
 

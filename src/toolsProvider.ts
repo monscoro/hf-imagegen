@@ -15,6 +15,7 @@ import {
 } from "./hfApi";
 import { checkRateLimit, recordGeneration } from "./rateLimit";
 import { resolveImageInput } from "./imageInput";
+import { listOutputImages } from "./workspace";
 import {
   getPollinationsModels,
   buildPollinationsUrl,
@@ -414,6 +415,44 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         } finally {
           isGenerating = false;
         }
+      }),
+    }),
+
+    tool({
+      name: "list_output_images",
+      description: text`
+        List images in the plugin output directory (where generate_image/image_edit save files).
+        Paginated and compact — use it instead of reading a large directory at once.
+
+        Use when the user asks which images exist, wants the latest result, or needs a
+        file path as reference 'image' for image_edit (newest first by default, so
+        limit=1 returns the latest image). Walk large folders page by page via offset.
+        Scoped to the output directory only.
+      `,
+      parameters: {
+        sort: z.enum(["newest", "oldest", "name"]).default("newest").describe(
+          "Sort order. Default newest first (limit=1 gives the latest image)."
+        ),
+        limit: z.number().int().min(1).max(100).default(20).describe(
+          "Entries per page (max 100)."
+        ),
+        offset: z.number().int().min(0).default(0).describe(
+          "Skip this many entries for paging (e.g. 20 for page 2 with limit 20)."
+        ),
+        filter: z.string().default("").describe(
+          "Substring filter on filenames (e.g. a date or keyword). Leave blank for all."
+        ),
+      },
+      implementation: safe_impl("list_output_images", async ({ sort, limit, offset, filter }, ctx) => {
+        const outputDir = getOutputDir();
+        ctx.status("Listing output images…");
+        const result = await listOutputImages(outputDir, { sort, limit, offset, filter });
+        return json({
+          output_directory: outputDir,
+          ...result,
+          has_more: result.offset + result.entries.length < result.total,
+          usage: "Pass a 'filename' as image in image_edit (same directory).",
+        });
       }),
     }),
 

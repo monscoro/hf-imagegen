@@ -172,4 +172,65 @@ Für uns: `description` = Variable `MOOD`, `prompt` = Template. `manage_image_di
 - `hiro.solutions Prompt Library Governance 2026-05-13`, `AWS GENREL04-BP01 Implement a prompt catalog`, `KevinRabun/prompt-catalog YAML Schema` – Metadata, Versioning, Rollback
 - `BDiopXV/AI-Visual-Prompt-Cookbook style.json`, `tyjean AI Visual Prompt Gallery 40k`, `PromptForge UI` – variable Templates, visuelle Kataloge
 
+---
+
+## 7. 17 Inclination-Prompts in Fließtextform – vom Vertrauten zum Unkonventionellen
+
+> So wie ein Endnutzer sie selbst schreiben würde: `name: Kurzbeschreibung [ro|rw]` in Zeile 1, dann ein kurzer Fließtext der **neigt** statt befiehlt. Zum Direkt-Kopieren in `customDirectives` (`src/config.ts:35`). Alle `inclination:`-artig – die LLM webt sie ein, egal ob du danach `zeichne eine Werkstatt` oder `einen Hund` verlangst. Steigerung: 1–6 vertraut, 7–12 anspruchsvoll, 13–17 bewusst unkonventionell.
+
+```text
+morgenlicht-werkstatt: Warme Werkstatt am frühen Morgen, einladend [ro]
+inclination: warmes Morgenlicht fällt schräg durch leicht staubige Fenster, Holz duftet dezent, weiche Schatten und klare Luft, Stimmung hoffnungsvoll aber ohne Kitsch, viel freier Raum für die eigentliche Handlung im Vordergrund
+
+regen-nachtmarkt: Nächtlicher Markt im Nieselregen, lebendig [ro]
+inclination: Neon spiegelt sich in nassen Pflastersteinen, leiser Dampf steigt von Ständen auf, Menschen dicht aber nicht gedrängt, leichte Unschärfe in der Ferne, Ort erzählt von Alltag und Ferne zugleich
+
+dach-tanz: Tanz auf dem Dach, mitten in Bewegung [rw]
+inclination: Körper mitten im Sprung mit spürbarem Schwung, Gewichtsverlagerung und Nachziehen der Glieder, kein statisches Posieren, leichte Bewegungsandeutung, Standpunkt so gewählt dass Dynamik lesbar bleibt
+
+fluestern-regal: Zwei flüstern zwischen hohen Regalen, nah [ro]
+inclination: relationaler Fokus auf Nähe und Blick, einer neigt sich leicht, Hand nah am Mund, der andere hört zu, Kontaktpunkte klar und zart, Hintergrund bleibt ruhig damit Beziehung trägt
+
+bahnsteig-warten: Warten am Bahnsteig, gleich geht es los [rw]
+inclination: Moment kurz vor Abfahrt, Koffer stehen bereit, Blicke gehen in verschiedene Richtungen, leichte Anspannung in Schultern, Licht flackert kühl, Geschichte liegt in dem was gleich passiert
+
+kinder-turm: Kinder bauen gemeinsam einen wackligen Turm [ro]
+inclination: kleine Hände, Konzentration und leises Lachen, verteilte Aufmerksamkeit, einer hält, einer legt auf, Interaktion über gemeinsames Ziel, Proportionen natürlich, kein Verschmelzen der Figuren
+
+runder-tisch: Verhandlung am runden Tisch, angespannt [ro]
+inclination: gegenüberliegende Haltungen, Hände auf Holz, Blicke messen ab, Raum wirkt eng und bedeutungsschwer, Licht hart und gerichtet, Spannung entsteht aus Haltung nicht aus Requisiten
+
+verlassene-schule: Verlassene Schule am Nachmittag, still [rw]
+inclination: Ort als Erzähler, abgeblätterte Farbe, Staub in Sonnenstreifen, Stille die laut wirkt, klare Fokusfläche vorne, Umgebung trägt Melancholie ohne Figuren zu beschreiben
+
+schatten-theater: Schattentheater an heller Wand, theatralisch [ro]
+inclination: große, weiche Schatten als zweite Ebene, Lichtquelle niedrig und warm, Gesten werden über Schatten überhöht, Inszenierung wirkt wie Bühne, aber intim und lesbar
+
+umkehr-schwerkraft: Werkstatt mit umgekehrter Schwerkraft, spielerisch unlogisch [rw]
+inclination: leichte Gegenstände schweben knapp über dem Boden als wäre Schwerkraft nur halb an, Staub schwebt langsam, Neigung zur Schwerelosigkeit, aber Erzählung bleibt bodenständig, Physik nur angedeutet
+
+erinnerungs-palast: Erinnerungspalast, Dinge schweben geordnet [rw]
+inclination: Raum wirkt wie ein begehbares Gedächtnis, Objekte stehen in stiller Ordnung leicht versetzt in der Luft, weiches diffuses Licht, Atmosphäre ruhig und bedeutungsvoll, Ort lädt zum Verweilen ein
+
+zeitlupe-glas: Glas zerspringt in Zeitlupe, entscheidender Augenblick [ro]
+inclination: Moment unmittelbar nach dem Aufprall, Splitter halten kurz in der Luft, Licht bricht in Facetten, Zeit wirkt gedehnt, Fokus hält die Spannung zwischen vorher und nachher
+
+spiegel-identitaet: Spiegelkabinett, Identität vervielfacht [rw]
+inclination: mehrere Spiegel reflektieren dieselbe Figur leicht versetzt, Identität wirkt vervielfacht aber jede Spiegelung bleibt klar, Licht sauber und gleichmäßig, Verwirrung nur durch Wiederholung nicht durch Unschärfe
+
+zwei-zeiten-eine-bank: Eine Bank, zwei Zeiten gleichzeitig [rw]
+inclination: dieselbe Bank im selben Bild von zwei Zeitebenen bewohnt, Kleidung und Licht deuten unterschiedliche Jahrzehnte an, beide Ebenen teilen sich den Ort aber nicht den Blick, poetische Überlagerung statt Collage
+
+fliegender-markt: Fliegender Markt über den Wolken, leicht surreal [ro]
+inclination: Stände schweben ruhig über einer Wolkendecke, Stoffbahnen wehen träge, Licht weit und hell, Ort ist fantastisch aber alltäglich inszeniert, Fokusraum bleibt frei für deine Figuren
+
+stiller-chor: Stiller Chor aus Statuen, die zuhören [rw]
+inclination: Reihe verwitterter Statuen leicht zueinander geneigt als würden sie zuhören, Stille wird hörbar, weicher Dunst, steinerne Gesichter wirken aufmerksam, Stimmung feierlich und leicht unheimlich
+
+brief-schreibt-sich: Brief der sich selbst schreibt, unkonventionell final [rw]
+inclination: Feder führt sich wie von selbst über Papier, Tinte fließt ohne Hand, Buchstaben entstehen in Echtzeit, Licht eng und warm auf dem Blatt, Handlung und Setting verschmelzen, Moment wirkt magisch aber glaubwürdig inszeniert
+```
+
+**Lesehilfe:** 1–6 sind sofort nutzbar für `generate_image("...")` jeder Art, 7–12 verlangen bewusste Setzung (Licht/Ort), 13–17 brechen bewusst mit Physik/Logik – als Inclination funktioniert gerade das: die LLM übernimmt die *Neigung* (z.B. `schweben`, `Zeitdehnung`, `Identitätsverdopplung`) und wendet sie auf deinen konkreten Wunsch an, ohne ihn zu überschreiben.
+
 > Pflege: Eigene Directives in `tmp/test-images` testen, dann `customDirectives` `[rw]` zum Experimentieren, `[ro]` zum Schützen. Curated bleiben Beispiele – nicht erweitern, sondern user-seitig wachsen lassen.

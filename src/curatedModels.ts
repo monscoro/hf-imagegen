@@ -45,9 +45,9 @@ export const CURATED_MODELS: ModelInfo[] = [
     compatible_loras_count: 1505,
   },
   {
-    id: "Qwen/Qwen-Image",
+    id: "Qwen/Qwen-Image-2512",
     description:
-      "Qwen-Image — 20B Parameter. Exzellente Textdarstellung (besonders Chinesisch!), " +
+      "Qwen-Image-2512 — Neuere Version von Qwen-Image. 20B Parameter. Exzellente Textdarstellung, " +
       "präzise Bildbearbeitung, multimodales Verständnis. " +
       "Starke Allround-Qualität mit Apache 2.0 Lizenz.",
     style: "photorealistic, artistic, text-rendering",
@@ -56,7 +56,6 @@ export const CURATED_MODELS: ModelInfo[] = [
     source: "curated",
     parameters: "20B",
     license: "Apache 2.0",
-    compatible_loras_count: 502,
   },
   {
     id: "stabilityai/stable-diffusion-xl-base-1.0",
@@ -71,5 +70,44 @@ export const CURATED_MODELS: ModelInfo[] = [
     parameters: "3B",
     license: "OpenRAIL++",
     compatible_loras_count: 9694,
+  },
+  {
+    id: "black-forest-labs/FLUX.1-Krea-dev",
+    description:
+      "FLUX.1-Krea-dev — FLUX.1-dev mit Fashion-Tuning (BFL × Krea). " +
+      "Stärke bei Editorial-Looks: Stoff, Haut, Glamour-Licht. " +
+      "Erste Wahl für dark-fashion-editorial, power-spice und Fetish-Glamour-Hommagen " +
+      "(Suzan-Randall-Ästhetik: Latex, Pin-up, Bondage-Couture). Non-Commercial, Freischaltung nötig.",
+    style: "fashion-editorial, photorealistic, glamour",
+    speed: "medium",
+    access: "pro",
+    source: "curated",
+    parameters: "12B",
+    license: "Non-Commercial",
+  },
+  {
+    id: "stabilityai/stable-diffusion-3.5-large",
+    description:
+      "SD3.5-Large — 8B Parameter. Alternative Basis mit eigenem Stil-Repertoire. " +
+      "Interessant für stilisierte Pin-up- und Anime-Crossover-Looks via LoRAs " +
+      "(nächste HF-nahbare Route Richtung Pony-Hommage). Gated — Freischaltung nötig.",
+    style: "artistic, illustration, stylized",
+    speed: "medium",
+    access: "pro",
+    source: "curated",
+    parameters: "8B",
+    license: "Stability Community",
+  },
+  {
+    id: "Tongyi-MAI/Z-Image-Turbo",
+    description:
+      "Z-Image-Turbo — Schnelle Turbo-Variante, Apache 2.0 (kommerziell nutzbar). " +
+      "Gute Wahl für iterative Sessions: viele Takes in kurzer Zeit, " +
+      "z.B. Posen- und Styling-Varianten für dark-fashion/power-spice durchprobieren.",
+    style: "photorealistic, artistic",
+    speed: "fast",
+    access: "free",
+    source: "curated",
+    license: "Apache 2.0",
   },
 ];

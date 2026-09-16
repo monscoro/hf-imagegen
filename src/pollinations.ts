@@ -103,12 +103,14 @@ export interface PollinationsGenerateOptions {
   width?: number;
   height?: number;
   seed?: number;
+  /** Optional API key (enter.pollinations.ai). Leer = anonym. */
+  apiKey?: string;
 }
 
 /**
  * Baut die Legacy-GET-URL (image.pollinations.ai). private=true hält Bilder aus dem
- * öffentlichen Feed — sinnvoller Default für unseren Einsatzzweck. nologo braucht einen
- * Account und bleibt deshalb unbelegt (Free-Tier kann ein Logo tragen).
+ * öffentlichen Feed — sinnvoller Default für unseren Einsatzzweck. Mit apiKey zusätzlich
+ * nologo=true (kein Wasserzeichen) — geht nur mit Account.
  */
 export function buildPollinationsUrl(opts: PollinationsGenerateOptions): string {
   const base = `https://image.pollinations.ai/prompt/${encodeURIComponent(opts.prompt)}`;
@@ -119,5 +121,9 @@ export function buildPollinationsUrl(opts: PollinationsGenerateOptions): string 
   if (opts.seed !== undefined) params.set("seed", String(opts.seed));
   params.set("private", "true");
   params.set("enhance", "false");
+  if (opts.apiKey) {
+    params.set("key", opts.apiKey);
+    params.set("nologo", "true");
+  }
   return `${base}?${params.toString()}`;
 }

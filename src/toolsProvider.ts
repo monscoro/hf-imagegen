@@ -72,6 +72,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const cfg = ctl.getPluginConfig(pluginConfigSchematics);
 
   const getToken = () => cfg.get("hfApiToken").trim();
+  const getPollinationsKey = () => {
+    try {
+      return (cfg.get("pollinationsApiKey") as unknown as string)?.trim() ?? "";
+    } catch {
+      return "";
+    }
+  };
   const getModel = () => cfg.get("defaultModel").trim() || "black-forest-labs/FLUX.1-dev";
   const getOutputDir = () => resolvePath(cfg.get("outputDirectory").trim() || "~/hf-images");
   const getRateLimitConfig = () => ({
@@ -97,7 +104,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           LoRA support: pass a lora_id to apply a style/character LoRA (uses fal-ai provider).
           Note: FLUX.2-dev requires accepting the license at huggingface.co first.
           HF free tier may take 20-60s to warm up inactive models on the first call.
-        - "pollinations": Pollinations.ai, no token needed. Filter is off by default.
+        - "pollinations": Pollinations.ai, no token needed (optional pollinationsApiKey in config
+          for higher limits + no watermark). Filter is off by default.
           model_id is a Pollinations model (e.g. 'klein', 'kontext', canonical IDs like
           'black-forest-labs/flux.2-klein-4b' also work). Defaults to 'klein'.
           Use list_models with source='pollinations' to see available models.
@@ -185,7 +193,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             if (cleanNegative) {
               notes.push("negative_prompt is not supported by Pollinations and was ignored.");
             }
-            const url = buildPollinationsUrl({ prompt, model: modelToUse });
+            const pollinationsKey = getPollinationsKey();
+            const url = buildPollinationsUrl({ prompt, model: modelToUse, apiKey: pollinationsKey || undefined });
             ctx.status(`Calling Pollinations (${modelToUse})…`);
             const res = await fetch(url, { signal: AbortSignal.timeout(180_000) });
             if (!res.ok) {
@@ -194,7 +203,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             buffer = Buffer.from(await res.arrayBuffer());
             mimeType = res.headers.get("content-type") || "image/jpeg";
             lastPollinationsCall = Date.now();
-            notes.push("Pollinations free tier: image may carry a watermark; private=true keeps it out of the public feed.");
+            notes.push(
+              pollinationsKey
+                ? "Pollinations with API key: no watermark (nologo), private=true keeps it out of the public feed."
+                : "Pollinations anonymous: image may carry a watermark; private=true keeps it out of the public feed. Set pollinationsApiKey in plugin config for higher limits + no watermark."
+            );
           } else {
             const token = getToken();
             modelToUse = model_id.trim() || getModel();

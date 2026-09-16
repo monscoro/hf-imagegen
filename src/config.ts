@@ -15,6 +15,14 @@ export const pluginConfigSchematics = createConfigSchematics()
       "Alternatives: FLUX.2-dev (32B, best quality, requires license), FLUX.1-schnell (fastest, free), " +
       "stabilityai/stable-diffusion-xl-base-1.0. Use list_models tool to see all options.",
   }, "black-forest-labs/FLUX.1-dev")
+  .field("pollinationsApiKey", "string", {
+    displayName: "Pollinations API Key (optional)",
+    subtitle:
+      "Optional key for backend='pollinations' (from enter.pollinations.ai). " +
+      "Leave blank for anonymous use (1 req/15s, possible watermark). " +
+      "With key: higher limits, no watermark (nologo), access to paid models. " +
+      "Never share secret keys (sk_…) — use your own key locally.",
+  }, "")
   .field("outputDirectory", "string", {
     displayName: "Output Directory",
     subtitle:

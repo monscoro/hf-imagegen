@@ -97,20 +97,18 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Generate an image from a text prompt. Saves the image to disk and returns the file path.
 
         Use when the user asks to generate, create, draw, paint, or visualize something.
-        The model defaults to config unless overridden with model_id.
 
-        Backends (parameter 'backend'):
-        - "hf" (default): HuggingFace Inference Providers. Requires HF API token in plugin config.
-          LoRA support: pass a lora_id to apply a style/character LoRA (uses fal-ai provider).
-          Note: FLUX.2-dev requires accepting the license at huggingface.co first.
-          HF free tier may take 20-60s to warm up inactive models on the first call.
-        - "pollinations": Pollinations.ai, no token needed (optional pollinationsApiKey in config
-          for higher limits + no watermark). Filter is off by default.
-          model_id is a Pollinations model (e.g. 'klein', 'kontext', canonical IDs like
-          'black-forest-labs/flux.2-klein-4b' also work). Defaults to 'klein'.
-          Use list_models with source='pollinations' to see available models.
-          Limitations: no negative_prompt (ignored), no lora_id (rejected with error).
-          Anonymous tier allows ~1 request per 15s. Free tier images may carry a watermark.
+        Backends (parameter 'backend') — where the image is generated:
+        - "hf" (default): HuggingFace Inference Providers. Requires the HF API token from plugin config.
+          Models are HuggingFace IDs — browse them with list_models sources
+          curated/provider/trending/downloads. LoRAs: pass lora_id (uses the fal-ai
+          sub-provider); browse them with list_loras. Notes: some models need a license
+          accepted at huggingface.co (e.g. FLUX.2-dev); cold models may take 20-60s to warm up.
+        - "pollinations": Pollinations.ai. No token needed (optional pollinationsApiKey in config
+          for higher limits + no watermark). Content filter is off by default.
+          Models are Pollinations IDs — browse them with list_models source='pollinations'.
+          Blank model_id = 'klein'. No negative_prompt (ignored), no lora_id (rejected with error).
+          Anonymous tier ~1 request/15s. Free images may carry a watermark.
       `,
       parameters: {
         prompt: z.string().min(1).describe(
@@ -270,37 +268,39 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "list_models",
       description: text`
-        Return available Hugging Face text-to-image models.
+        Browse text-to-image models per backend.
 
-        Use the 'source' parameter to control which models to show:
-        - "curated" (default): Expert-verified models with detailed descriptions and LoRA compatibility info
-        - "provider": Models from a specific inference provider (e.g. "fal-ai", "nscale")
-        - "trending": Currently popular models on HuggingFace
-        - "downloads": Most downloaded models
-        - "pollinations": Pollinations.ai models (no token needed, filter off by default).
-          Use with generate_image backend='pollinations'.
+        Sources (parameter 'source') — which catalog to list:
+        - "curated" (default): expert-verified HuggingFace IDs for generate_image backend='hf',
+          with descriptions and LoRA compatibility info.
+        - "provider": HuggingFace IDs served by one inference sub-provider (needs 'provider',
+          e.g. fal-ai, nscale) — for backend='hf'.
+        - "trending" / "downloads": live HuggingFace catalog — for backend='hf'.
+        - "pollinations": Pollinations.ai models (no token needed, filter off by default) —
+          for generate_image backend='pollinations'.
 
-        When source="provider", you must also specify the provider name.
-        Each model includes compatible_loras_count when available.
+        Rule of thumb: IDs from curated/provider/trending/downloads only work with
+        generate_image backend='hf'; IDs from source='pollinations' only with
+        backend='pollinations'. LoRA lookup (include_loras) and the list_loras tool are HF-only.
       `,
       parameters: {
         source: z.enum(["curated", "provider", "trending", "downloads", "pollinations"])
           .default("curated")
-          .describe("Which model list to return. Default: curated (expert-verified models)."),
+          .describe("Which catalog to list. Default: curated (expert-verified HuggingFace IDs for backend='hf')."),
         provider: z.string()
           .default("")
           .describe(
-            "Inference provider name (required when source='provider'). " +
+            "HF inference sub-provider (required when source='provider'). " +
             "Examples: fal-ai, nscale, replicate, wavespeed."
           ),
         limit: z.number()
           .min(5)
           .max(50)
           .default(20)
-          .describe("Maximum number of models to return (only for provider/trending/downloads)."),
+          .describe("Maximum number of models (only for provider/trending/downloads; ignored for curated/pollinations)."),
         include_loras: z.boolean()
           .default(false)
-          .describe("Include compatible LoRAs for each model (slower, requires API calls)."),
+          .describe("Include compatible LoRAs per model (HF sources only, skipped for source='pollinations'; slower, needs API calls)."),
       },
       implementation: safe_impl("list_models", async ({ source, provider, limit, include_loras }, ctx) => {
         const token = getToken();
@@ -356,6 +356,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         return json({
           source,
           current_default_model: currentDefault,
+          ...(source === "pollinations"
+            ? { pollinations_default_model: POLLINATIONS_DEFAULT_MODEL }
+            : {}),
           models: models.map((m) => ({
             ...m,
             is_default: m.id === currentDefault,
@@ -363,10 +366,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           note: loraTruncated
             ? `LoRA lookup capped to first ${LORA_CAP} models to avoid API flood. Use list_loras with base_model for others.`
             : source === "curated"
-              ? "Expert-verified models. Use list_loras with base_model to find compatible LoRAs."
+              ? "Expert-verified HuggingFace IDs for generate_image backend='hf'. Use list_loras with base_model to find compatible LoRAs."
               : source === "pollinations"
-                ? "Pollinations models, no token needed. Use with generate_image backend='pollinations'. Snapshot Sep 2026; canonical IDs preferred, aliases (klein, flux, kontext) also work."
-                : "Pass model_id to generate_image to use a model.",
+                ? "Pollinations IDs for generate_image backend='pollinations', no token needed. Snapshot Sep 2026; canonical IDs preferred, aliases (klein, flux, kontext) also work. No LoRAs on this backend."
+                : "HuggingFace IDs for generate_image backend='hf'. Pass model_id to generate_image to use a model.",
         });
       }),
     }),
@@ -374,7 +377,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "list_loras",
       description: text`
-        Search HuggingFace for LoRA adapters.
+        Search HuggingFace for LoRA adapters (HF backend only — Pollinations models have no LoRA support).
 
         IMPORTANT: Avoid using the 'search' keyword filter! It often returns zero results because HuggingFace search is very strict.
         Instead, use only 'base_model' to find all compatible LoRAs, then pick from the results.

@@ -105,10 +105,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           sub-provider); browse them with list_loras. Notes: some models need a license
           accepted at huggingface.co (e.g. FLUX.2-dev); cold models may take 20-60s to warm up.
         - "pollinations": Pollinations.ai. No token needed (optional pollinationsApiKey in config
-          for higher limits + no watermark). Content filter is off by default.
+          for higher limits + no watermark). Strict content filter is off by default (safe=off);
+          provider-side moderation for illegal content still applies.
           Models are Pollinations IDs — browse them with list_models source='pollinations'.
-          Blank model_id = 'klein'. No negative_prompt (ignored), no lora_id (rejected with error).
-          Anonymous tier ~1 request/15s. Free images may carry a watermark.
+          Blank model_id = 'klein'. Optional width/height/seed (pollinations only;
+          portrait e.g. 768x1152 for fashion editorial). No negative_prompt (ignored),
+          no lora_id (rejected with error). Anonymous tier ~1 request/15s.
+          Free images may carry a watermark. If a community/* model fails (alpha proxies),
+          retry with 'klein' or 'flux'.
       `,
       parameters: {
         prompt: z.string().min(1).describe(
@@ -133,8 +137,20 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         lora_scale: z.number().min(0).max(2).default(1.0).describe(
           "Strength of the LoRA adapter. 0.5–1.0 is typical; higher = stronger effect."
         ),
+        width: z.number().int().min(0).max(2048).default(0).describe(
+          "Output width in pixels (backend='pollinations' only, ignored with backend='hf'). " +
+          "0 = backend default. Portrait e.g. 768 with height 1152 for fashion editorial."
+        ),
+        height: z.number().int().min(0).max(2048).default(0).describe(
+          "Output height in pixels (backend='pollinations' only, ignored with backend='hf'). " +
+          "0 = backend default."
+        ),
+        seed: z.number().int().min(0).default(0).describe(
+          "Seed for reproducible results (backend='pollinations' only, ignored with backend='hf'). " +
+          "0 = random."
+        ),
       },
-      implementation: safe_impl("generate_image", async ({ prompt, model_id, backend, negative_prompt, lora_id, lora_scale }, ctx) => {
+      implementation: safe_impl("generate_image", async ({ prompt, model_id, backend, negative_prompt, lora_id, lora_scale, width, height, seed }, ctx) => {
         ctx.status("Generating image…");
         const usePollinations = backend === "pollinations";
         const cleanLora = lora_id.trim();
@@ -194,7 +210,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               notes.push("negative_prompt is not supported by Pollinations and was ignored.");
             }
             const pollinationsKey = getPollinationsKey();
-            const url = buildPollinationsUrl({ prompt, model: modelToUse, apiKey: pollinationsKey || undefined });
+            const url = buildPollinationsUrl({
+              prompt,
+              model: modelToUse,
+              width: width || undefined,
+              height: height || undefined,
+              seed: seed || undefined,
+              apiKey: pollinationsKey || undefined,
+            });
             ctx.status(`Calling Pollinations (${modelToUse})…`);
             const res = await fetch(url, { signal: AbortSignal.timeout(180_000) });
             if (!res.ok) {
@@ -276,7 +299,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         - "provider": HuggingFace IDs served by one inference sub-provider (needs 'provider',
           e.g. fal-ai, nscale) — for backend='hf'.
         - "trending" / "downloads": live HuggingFace catalog — for backend='hf'.
-        - "pollinations": Pollinations.ai models (no token needed, filter off by default) —
+        - "pollinations": Pollinations.ai models (no token needed, strict filter off by default) —
           for generate_image backend='pollinations'.
 
         Rule of thumb: IDs from curated/provider/trending/downloads only work with
@@ -291,7 +314,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           .default("")
           .describe(
             "HF inference sub-provider (required when source='provider'). " +
-            "Examples: fal-ai, nscale, replicate, wavespeed."
+            "Examples: fal-ai, nscale, replicate, wavespeed. " +
+            "Not 'pollinations' — use source='pollinations' instead."
           ),
         limit: z.number()
           .min(5)
@@ -318,6 +342,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               throw new Error(
                 "provider parameter is required when source='provider'. " +
                 "Examples: fal-ai, nscale, replicate."
+              );
+            }
+            if (provider.trim().toLowerCase() === "pollinations") {
+              throw new Error(
+                "provider='pollinations' is not a HuggingFace sub-provider. " +
+                "Use source='pollinations' instead."
               );
             }
             models = await getProviderModels(provider.trim(), limit, token || undefined);
@@ -368,7 +398,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             : source === "curated"
               ? "Expert-verified HuggingFace IDs for generate_image backend='hf'. Use list_loras with base_model to find compatible LoRAs."
               : source === "pollinations"
-                ? "Pollinations IDs for generate_image backend='pollinations', no token needed. Snapshot Sep 2026; canonical IDs preferred, aliases (klein, flux, kontext) also work. No LoRAs on this backend."
+                ? "Pollinations IDs for generate_image backend='pollinations', no token needed. Snapshot Sep 2026; canonical IDs preferred, aliases (klein, flux, kontext) also work. No LoRAs on this backend. current_default_model is the HF-backend default — use pollinations_default_model here. If a community/* model fails (alpha proxies), retry with klein or flux."
                 : "HuggingFace IDs for generate_image backend='hf'. Pass model_id to generate_image to use a model.",
         });
       }),
@@ -433,8 +463,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           results,
           count: results.length,
           usage: cleanBaseModel
-            ? `These LoRAs are compatible with ${cleanBaseModel}. Pass the 'id' field as lora_id in generate_image.`
-            : "Pass the 'id' field as lora_id in generate_image. Use base_model to filter for specific models.",
+            ? `These LoRAs are compatible with ${cleanBaseModel}. Pass the 'id' field as lora_id in generate_image (backend='hf').`
+            : "Pass the 'id' field as lora_id in generate_image (backend='hf'). Use base_model to filter for specific models.",
           note: "LoRA generation uses fal-ai provider. lora_scale default is 1.0; try 0.6–0.9 for subtle effects.",
         });
       }),
@@ -445,9 +475,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       description: text`
         List all available Neigungsprompts / ImageGen Stimmungsprompts (profile set) – einheitlicher Prefix inclination_prompt_.
 
-        Returns curated examples (read-only, source=curated) + user config (source=config, in plugin settings editable, per entry [ro]/[rw] switchable) + LLM-created (source=user).
+        Returns curated examples (read-only, source=curated) + LLM-created profiles
+        (source=user, manageable via inclination_prompt_manage).
         Each entry has id (short name), description (first line), prompt (indirect style/mood), source, readonly flag.
-        Curated are only examples (few, not exhaustive) – main library is user config.
+        Curated are only examples (few, not exhaustive) – main library is user-created via inclination_prompt_manage.
 
         Use this to discover available moods before calling inclination_prompt_set.
         The active profile is highlighted and also injected into the LLM system context to guide generate_image prompt creation.
@@ -518,7 +549,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "inclination_prompt_manage",
       description: text`
-        Create, update, delete, get, or list Neigungsprompts (Stimmungsprompts / Beeinflussungsprompts, synonym) – einheitlicher Prefix inclination_prompt_, LLM-managed, persisted in tmp/directives.json (projektlokal). Vereinheitlicht list+manage via action:"list".
+        Create, update, delete, get, or list Neigungsprompts (Stimmungsprompts / Beeinflussungsprompts, synonym) – einheitlicher Prefix inclination_prompt_, LLM-managed, persisted in the plugin storage (directives.json). Vereinheitlicht list+manage via action:"list".
 
         Curated (source=curated) are examples only, always read-only.
         User (source=user) profiles are fully manageable here.

@@ -12,7 +12,7 @@ You have tools to generate images via Hugging Face.
 • User asks to generate/draw/create/paint/visualize something → generate_image
 • User asks what models are available                        → list_models
 • User asks about LoRAs, styles, or custom adapters          → list_loras
-• User asks about moods/styles, Stimmung, Systemprompt       → list_image_directives / set_image_system_prompt / manage_image_directive
+• User asks about moods/styles, Neigung/Stimmung, Systemprompt→ inclination_prompt_list / inclination_prompt_set / inclination_prompt_manage
 
 == GENERATION TIPS ==
 - Descriptive prompts produce better results. Include: subject, style, lighting, mood, quality terms.
@@ -24,9 +24,9 @@ You have tools to generate images via Hugging Face.
 - If you get a 403 on FLUX.1, tell the user to accept the model license at huggingface.co first.
 
 == IMAGE SYSTEM PROMPT / STIMMUNG ==
-- Ein aktiver Stimmungsprompt (siehe unten) soll INDIREKT wirken: leite daraus ab wie du generate_image prompts formulierst
+- Ein aktiver Neigungsprompt (Stimmungsprompt / Beeinflussungsprompt, synonym, siehe unten) soll INDIREKT wirken: leite daraus ab wie du generate_image prompts formulierst
   (Mood, Stil, Ausrichtung, theatralische Inszenierung). Nicht wortwörtlich präfixen, sondern stilistisch einweben.
-- Nutze list_image_directives um verfügbare Profile zu sehen, set_image_system_prompt zum Aktivieren.
+- Nutze inclination_prompt_list um verfügbare Profile zu sehen, inclination_prompt_set zum Aktivieren.
 
 == AFTER GENERATION ==
 Always report the full file path where the image was saved and the model used.`;

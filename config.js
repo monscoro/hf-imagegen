@@ -31,7 +31,7 @@ exports.pluginConfigSchematics = (0, sdk_1.createConfigSchematics)()
 }, 50)
     .field("exampleDirectivePicker", "select", {
     displayName: "Neigungsprompt-Katalog",
-    subtitle: "Kuratierte Beispiele (Neigungsprompt, synonym Stimmungsprompt / Beeinflussungsprompt) – List-Button zum Auswählen. Nach Klick erscheint der Prompt im Textfeld direkt darunter – direkt editierbar und speicherbar. Format pro Eintrag (Leerzeile oder --- getrennt): Zeile 1: \"name: Kurzbeschreibung [ro|rw]\" | Zeile 2..n: Prompt. Flag [ro]=read-only (LLM kann nicht ändern, default), [rw]=RW (LLM darf via manage_image_directive ändern). Quelle: src/curatedDirectives.ts (nur Beispiele, 5 Stück). Vollständige Liste via Tool list_image_directives. Beispiel:\nmy-cinematic: Episch-kinoreif, dramatisch [ro]\ncinematic volumetric lighting, 35mm film, dramatic shadows",
+    subtitle: "Kuratierte Beispiele (Neigungsprompt, synonym Stimmungsprompt / Beeinflussungsprompt) – List-Button zum Auswählen. Nach Klick erscheint der Prompt im Textfeld direkt darunter – direkt editierbar und speicherbar. Format pro Eintrag (Leerzeile oder --- getrennt): Zeile 1: \"name: Kurzbeschreibung [ro|rw]\" | Zeile 2..n: Prompt. Flag [ro]=read-only (LLM kann nicht ändern, default), [rw]=RW (LLM darf via inclination_prompt_manage ändern). Quelle: src/curatedDirectives.ts (nur Beispiele, 5 Stück). Vollständige Liste via Tool inclination_prompt_list. Nach Auswahl per Copy in das Feld darunter übernehmen.",
     options: [
         { value: "none", displayName: "— bitte wählen —" },
         { value: "pose-action", displayName: "pose-action – Pose/Action dynamisch" },
@@ -43,7 +43,7 @@ exports.pluginConfigSchematics = (0, sdk_1.createConfigSchematics)()
 }, "none")
     .field("customDirectives", "string", {
     displayName: "Prompt",
-    subtitle: "Textfeld direkt unter dem Katalog – zeigt nach Selektion den aktuellen Neigungsprompt (synonym Stimmungsprompt / Beeinflussungsprompt) – editierbar. Wird als aktives Inclination-Profil via set_image_system_prompt verwendet.",
+    subtitle: "Textfeld direkt unter dem Katalog – zeigt nach Selektion den aktuellen Neigungsprompt (synonym Stimmungsprompt / Beeinflussungsprompt) – editierbar. Wird als aktives Inclination-Profil via inclination_prompt_set verwendet.",
     isParagraph: true,
 }, "")
     .build();

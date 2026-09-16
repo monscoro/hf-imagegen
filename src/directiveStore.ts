@@ -249,7 +249,7 @@ export function setActiveDirective(id: string | null, configText: string): Image
   const norm = id.trim().toLowerCase();
   const all = getAllDirectives(configText);
   const found = all.find((d) => d.id === norm);
-  if (!found) throw new Error(`Stimmungsprompt "${id}" nicht gefunden. Nutze list_image_directives um verfügbare Namen zu sehen.`);
+  if (!found) throw new Error(`Stimmungsprompt "${id}" nicht gefunden. Nutze inclination_prompt_list um verfügbare Namen zu sehen.`);
   cache.activeId = found.id;
   savePersisted(cache);
   return found;

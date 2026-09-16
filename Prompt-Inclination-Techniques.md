@@ -10,7 +10,7 @@ Direkte Prompts (`"a cat, cinematic, neon"`) beschreiben **was** zu sehen ist. I
 
 - **Mittelbar:** Gleicher User-Wunsch `zeichne eine Werkstatt` wird mit `pose-action` anders als mit `narrative` — ohne dass die Directive `Werkstatt` nennt.
 - **Kombinierbar:** Mehrere Neigungen orthogonal (siehe 2.) ohne Keyword-Salat.
-- **Persistierbar:** Aktiviert via `set_image_system_prompt({name})`, in `promptPreprocessor` injiziert, via `[ro]/[rw]` in `customDirectives` (`src/config.ts:35`) schaltbar.
+- **Persistierbar:** Aktiviert via `inclination_prompt_set({name})`, in `promptPreprocessor` injiziert, via `[ro]/[rw]` in `customDirectives` (`src/config.ts:35`) schaltbar. Einheitlicher Prefix `inclination_prompt_` (`list`/`set`/`manage`).
 
 Quellenprinzip: *Struktur + Ziel* vor *Syntax* — `HuggingFace Diffusers: subject>style>context`, `OpenAI gpt-image-2 Guide 2026-04-21: background/scene → subject → key details → constraints + intended use`.
 
@@ -80,11 +80,11 @@ Nach `BDiopXV/AI-Visual-Prompt-Cookbook style.json`, `Shelly Palmer Workbook`:
 }
 ```
 
-Für uns: `description` = Variable `MOOD`, `prompt` = Template. `manage_image_directive` nutzt genau diese Felder.
+Für uns: `description` = Variable `MOOD`, `prompt` = Template. `inclination_prompt_manage` nutzt genau diese Felder (vereinheitlicht auch `list` via `action:"list"`).
 
 ### 3.4 Inclination-Anwendung im Plugin
 
-- **Aktivierung:** `list_image_directives` → `set_image_system_prompt({name:"pose-action"})` → `promptPreprocessor.ts:32` injiziert `== ACTIVE IMAGE SYSTEM PROMPT ==` bei jedem Turn (nicht stures Präfix, Anweisung: *stilistisch verweben*).
+- **Aktivierung:** `inclination_prompt_list` → `inclination_prompt_set({name:"pose-action"})` → `promptPreprocessor.ts:32` injiziert `== ACTIVE IMAGE SYSTEM PROMPT ==` bei jedem Turn (nicht stures Präfix, Anweisung: *stilistisch verweben*). `inclination_prompt_manage({action:"list"})` ist Alias für `list`.
 - **Schutz:** `[ro]` → `update` reject, `[rw]` → Shadow in `~/.cache/hf-image-gen/directives.json` erlaubt (`directiveStore.ts:259`).
 - **Qualität-Levers gezielt:** `photorealistic` direkt nennen aktiviert Photoreal-Modus (OpenAI Guide), technische Levers wie `film grain, subsurface scattering` nur wenn nötig.
 
@@ -92,7 +92,7 @@ Für uns: `description` = Variable `MOOD`, `prompt` = Template. `manage_image_di
 
 ## 4. Erweiterter Beispielsatz – zum Kopieren & Anpassen
 
-> Alle als `name: Beschreibung [ro|rw]` in `customDirectives` nutzbar, oder via `manage_image_directive({action:"create"})`. Bewusst inklinationsartig formuliert (`inclination: ...`), damit LLM sie *auslegt* statt kopiert.
+> Alle als `name: Beschreibung [ro|rw]` in `customDirectives` (Neigungsprompt-Katalog) nutzbar, oder via `inclination_prompt_manage({action:"create"})`. Bewusst inklinationsartig formuliert (`inclination: ...`), damit LLM sie *auslegt* statt kopiert.
 
 ### Pose/Action (exemplarisch + erweitert)
 

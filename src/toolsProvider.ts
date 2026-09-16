@@ -355,21 +355,22 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     }),
 
     tool({
-      name: "list_image_directives",
+      name: "inclination_prompt_list",
       description: text`
-        List all available ImageGen Stimmungsprompts / Systemprompts (profile set).
+        List all available Neigungsprompts / ImageGen Stimmungsprompts (profile set) – einheitlicher Prefix inclination_prompt_.
 
         Returns curated examples (read-only, source=curated) + user config (source=config, in plugin settings editable, per entry [ro]/[rw] switchable) + LLM-created (source=user).
         Each entry has id (short name), description (first line), prompt (indirect style/mood), source, readonly flag.
         Curated are only examples (few, not exhaustive) – main library is user config.
 
-        Use this to discover available moods before calling set_image_system_prompt.
+        Use this to discover available moods before calling inclination_prompt_set.
         The active profile is highlighted and also injected into the LLM system context to guide generate_image prompt creation.
+        Hinweis: list ist auch via inclination_prompt_manage({action:"list"}) verfügbar (vereinheitlicht).
       `,
       parameters: {
         filter: z.string().default("").describe("Optional substring to filter by id or description. Leave blank for all."),
       },
-      implementation: safe_impl("list_image_directives", async ({ filter }, _ctx) => {
+      implementation: safe_impl("inclination_prompt_list", async ({ filter }, _ctx) => {
         const text_ = getCustomDirectivesText();
         const all = getAllDirectives(text_);
         const activeId = getActiveId();
@@ -385,28 +386,28 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             ...d,
             is_active: d.id === activeId,
           })),
-          note: "Use set_image_system_prompt({name}) to activate. Curated=examples read-only, config RO=[ro] locked / RW=[rw] LLM-editable, user=via manage_image_directive.",
-          config_hint: "Config 'Eigene Stimmungsprompts': 'name: Beschreibung [ro|rw]' Zeile 1, dann Prompt. Leerzeile/--- trennt. [ro]=read-only (default), [rw]=LLM darf ändern. Beispiele: siehe curated.",
+          note: "Use inclination_prompt_set({name}) to activate. Curated=examples read-only, config RO=[ro] locked / RW=[rw] LLM-editable, user=via inclination_prompt_manage.",
+          config_hint: "Config 'Neigungsprompt-Katalog': 'name: Beschreibung [ro|rw]' Zeile 1, dann Prompt. Leerzeile/--- trennt. [ro]=read-only (default), [rw]=LLM darf ändern. Beispiele: siehe curated.",
         });
       }),
     }),
 
     tool({
-      name: "set_image_system_prompt",
+      name: "inclination_prompt_set",
       description: text`
-        Activate or clear the ImageGen Systemprompt (Stimmungsprompt) for indirect prompt guidance.
+        Activate or clear the Neigungsprompt (Stimmungsprompt / Beeinflussungsprompt, synonym) for indirect prompt guidance – einheitlicher Prefix inclination_prompt_.
 
         Manages the whole profile set by simple name. The active prompt is injected as system context
         and guides the Tool LLM to create stylistically aligned generate_image prompts (Mood, Kunststil, Ausrichtung, Inszenierung).
 
-        - Pass a name from list_image_directives to activate (e.g. "cinematic", "noir").
+        - Pass a name from inclination_prompt_list to activate (e.g. "pose-action", "interaction").
         - Pass empty string or "none"/"clear" to deactivate.
-        Use list_image_directives first to discover available profiles.
+        Use inclination_prompt_list first to discover available profiles.
       `,
       parameters: {
-        name: z.string().describe("Profile id to activate (e.g. 'cinematic'). Use '' or 'none' to clear/deactivate."),
+        name: z.string().describe("Profile id to activate (e.g. 'pose-action'). Use '' or 'none' to clear/deactivate."),
       },
-      implementation: safe_impl("set_image_system_prompt", async ({ name }, _ctx) => {
+      implementation: safe_impl("inclination_prompt_set", async ({ name }, _ctx) => {
         const text_ = getCustomDirectivesText();
         const clean = name.trim().toLowerCase();
         if (!clean || clean === "none" || clean === "clear") {
@@ -415,7 +416,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             success: true,
             active_id: null,
             active_directive: null,
-            message: "Image Systemprompt deaktiviert. generate_image nutzt wieder neutralen Stil.",
+            message: "Neigungsprompt deaktiviert. generate_image nutzt wieder neutralen Stil.",
           });
         }
         const activated = setActiveDirective(clean, text_);
@@ -429,34 +430,55 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     }),
 
     tool({
-      name: "manage_image_directive",
+      name: "inclination_prompt_manage",
       description: text`
-        Create, update, delete, or get custom ImageGen Stimmungsprompts (LLM-managed, persisted in ~/.cache/hf-image-gen/directives.json).
+        Create, update, delete, get, or list Neigungsprompts (Stimmungsprompts / Beeinflussungsprompts, synonym) – einheitlicher Prefix inclination_prompt_, LLM-managed, persisted in ~/.cache/hf-image-gen/directives.json. Vereinheitlicht list+manage via action:"list".
 
         Curated (source=curated) are examples only, always read-only.
         Config (source=config) profiles are user-written in plugin settings: with [ro] read-only (default, cannot be changed via tool), with [rw] RW (LLM darf via update ändern -> shadowed in user store). Delete of config base never via tool, only shadow revert.
         User (source=user) profiles are fully manageable here.
 
-        Use when the user wants a new mood/style or the LLM wants to create a tailored Stimmungsprompt dynamically.
-        After create/update, use set_image_system_prompt to activate it.
+        Use when the user wants a new mood/style or the LLM wants to create a tailored Neigungsprompt dynamically.
+        After create/update, use inclination_prompt_set to activate it. Use action:"list" to list (alternative to inclination_prompt_list).
       `,
       parameters: {
-        action: z.enum(["create", "update", "delete", "get"]).describe("Action to perform."),
-        name: z.string().describe("Profile id (a-z,0-9,-,_). Required for all actions."),
+        action: z.enum(["create", "update", "delete", "get", "list"]).describe("Action to perform. Use list to list all (unified with inclination_prompt_list)."),
+        name: z.string().default("").describe("Profile id (a-z,0-9,-,_). Required for create/update/delete/get, optional for list (ignored)."),
         description: z.string().default("").describe("Kurzbeschreibung (Zeile 1). Required for create, optional for update."),
-        prompt: z.string().default("").describe("Stimmungsprompt (indirekter Style/Mood, nicht direkter Bildinhalt). Required for create, optional for update."),
+        prompt: z.string().default("").describe("Neigungsprompt (indirekter Style/Mood, nicht direkter Bildinhalt). Required for create, optional for update."),
+        filter: z.string().default("").describe("Optional filter for list (substring of id/description). Only for action list."),
       },
-      implementation: safe_impl("manage_image_directive", async ({ action, name, description, prompt }, _ctx) => {
+      implementation: safe_impl("inclination_prompt_manage", async ({ action, name, description, prompt, filter }, _ctx) => {
         const text_ = getCustomDirectivesText();
-        const cleanName = name.trim().toLowerCase();
-        if (!cleanName) throw new Error("name is required.");
+
+        if (action === "list") {
+          const all = getAllDirectives(text_);
+          const activeId = getActiveId();
+          const active = getActiveDirective(text_);
+          const f = (filter as string).trim().toLowerCase();
+          const filtered = f ? all.filter((d) => d.id.includes(f) || d.description.toLowerCase().includes(f)) : all;
+          return json({
+            active_id: activeId,
+            active_directive: active,
+            count: filtered.length,
+            total_count: all.length,
+            directives: filtered.map((d) => ({
+              ...d,
+              is_active: d.id === activeId,
+            })),
+            note: "Use inclination_prompt_set({name}) to activate. Vereinheitlicht: list via manage action list oder via inclination_prompt_list.",
+          });
+        }
+
+        const cleanName = (name as string).trim().toLowerCase();
+        if (!cleanName) throw new Error("name is required for create/update/delete/get.");
 
         switch (action) {
           case "create": {
             if (!description.trim()) throw new Error("description is required for create.");
             if (!prompt.trim()) throw new Error("prompt is required for create.");
             const created = createDirective(cleanName, description, prompt, text_);
-            return json({ success: true, action, directive: created, message: `Erstellt: ${created.id}. Aktiviere mit set_image_system_prompt({name:"${created.id}"}).` });
+            return json({ success: true, action, directive: created, message: `Erstellt: ${created.id}. Aktiviere mit inclination_prompt_set({name:"${created.id}"}).` });
           }
           case "update": {
             const hasDesc = description.trim().length > 0;

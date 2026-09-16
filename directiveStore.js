@@ -281,7 +281,7 @@ function setActiveDirective(id, configText) {
     const all = getAllDirectives(configText);
     const found = all.find((d) => d.id === norm);
     if (!found)
-        throw new Error(`Stimmungsprompt "${id}" nicht gefunden. Nutze list_image_directives um verfügbare Namen zu sehen.`);
+        throw new Error(`Stimmungsprompt "${id}" nicht gefunden. Nutze inclination_prompt_list um verfügbare Namen zu sehen.`);
     cache.activeId = found.id;
     savePersisted(cache);
     return found;

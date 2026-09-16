@@ -33,9 +33,9 @@ export const pluginConfigSchematics = createConfigSchematics()
       "Resets at midnight. Default: 50.",
   }, 50)
   .field("exampleDirectivePicker", "select", {
-    displayName: "List-Button: Kuratierte Beispiele auswählen",
+    displayName: "Neigungsprompt-Katalog",
     subtitle:
-      "Wähle ein kuratiertes Beispiel (Stimmungsprompt / Beeinflussungsprompt, synonym) – der zugehörige Prompt erscheint im Textfeld direkt darunter zum Inspizieren/Kopieren. Quelle: src/curatedDirectives.ts (nur Beispiele, 5 Stück). Vollständige Liste via Tool list_image_directives. Nach Auswahl per Copy in das Feld darunter übernehmen.",
+      "Kuratierte Beispiele (Neigungsprompt, synonym Stimmungsprompt / Beeinflussungsprompt) – List-Button zum Auswählen. Nach Klick erscheint der Prompt im Textfeld direkt darunter – direkt editierbar und speicherbar. Format pro Eintrag (Leerzeile oder --- getrennt): Zeile 1: \"name: Kurzbeschreibung [ro|rw]\" | Zeile 2..n: Prompt. Flag [ro]=read-only (LLM kann nicht ändern, default), [rw]=RW (LLM darf via manage_image_directive ändern). Quelle: src/curatedDirectives.ts (nur Beispiele, 5 Stück). Vollständige Liste via Tool list_image_directives. Beispiel:\nmy-cinematic: Episch-kinoreif, dramatisch [ro]\ncinematic volumetric lighting, 35mm film, dramatic shadows",
     options: [
       { value: "none", displayName: "— bitte wählen —" },
       { value: "pose-action", displayName: "pose-action – Pose/Action dynamisch" },
@@ -46,9 +46,8 @@ export const pluginConfigSchematics = createConfigSchematics()
     ],
   }, "none")
   .field("customDirectives", "string", {
-    displayName: "Stimmungsprompt / Beeinflussungsprompt – Textfeld (aktuell ausgewählt)",
-    subtitle:
-      "Einziges Prompt-Textfeld direkt unter dem List-Button (synonym Stimmungsprompt / Beeinflussungsprompt). Zeigt nach Selektion den Prompt des gewählten Beispiels – direkt editierbar und speicherbar. Format pro Eintrag (Leerzeile oder --- getrennt): Zeile 1: \"name: Kurzbeschreibung [ro|rw]\" | Zeile 2..n: Prompt (synonym). Flag [ro]=read-only (LLM kann nicht ändern, default), [rw]=RW (LLM darf via manage_image_directive ändern). Beispiel:\nmy-cinematic: Episch-kinoreif, dramatisch [ro]\ncinematic volumetric lighting, 35mm film, dramatic shadows",
+    displayName: "Prompt",
+    subtitle: "Textfeld direkt unter dem Katalog – zeigt nach Selektion den aktuellen Neigungsprompt (synonym Stimmungsprompt / Beeinflussungsprompt) – editierbar. Wird als aktives Inclination-Profil via set_image_system_prompt verwendet.",
     isParagraph: true,
   }, "")
   .build();

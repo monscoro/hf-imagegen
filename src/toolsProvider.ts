@@ -15,6 +15,12 @@ import {
 } from "./hfApi";
 import { checkRateLimit, recordGeneration } from "./rateLimit";
 import {
+  getPollinationsModels,
+  buildPollinationsUrl,
+  POLLINATIONS_DEFAULT_MODEL,
+  POLLINATIONS_ANON_COOLDOWN_MS,
+} from "./pollinations";
+import {
   getAllDirectives,
   getActiveDirective,
   getActiveId,
@@ -74,57 +80,88 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
 
   let isGenerating = false;
+  let lastPollinationsCall = 0;
 
   const tools: Tool[] = [
 
     tool({
       name: "generate_image",
       description: text`
-        Generate an image from a text prompt using a Hugging Face text-to-image model.
-        Saves the image to disk and returns the file path.
+        Generate an image from a text prompt. Saves the image to disk and returns the file path.
 
         Use when the user asks to generate, create, draw, paint, or visualize something.
         The model defaults to config unless overridden with model_id.
 
-        LoRA support: pass a lora_id (HuggingFace model ID of a LoRA adapter) to apply a style or
-        character LoRA on top of the base model. Uses fal-ai provider which supports FLUX LoRAs.
-
-        Note: FLUX.2-dev requires accepting the license at huggingface.co first. FLUX.1-dev works without extra steps.
-        HF free tier may take 20-60s to warm up inactive models on the first call.
+        Backends (parameter 'backend'):
+        - "hf" (default): HuggingFace Inference Providers. Requires HF API token in plugin config.
+          LoRA support: pass a lora_id to apply a style/character LoRA (uses fal-ai provider).
+          Note: FLUX.2-dev requires accepting the license at huggingface.co first.
+          HF free tier may take 20-60s to warm up inactive models on the first call.
+        - "pollinations": Pollinations.ai, no token needed. Filter is off by default.
+          model_id is a Pollinations model (e.g. 'klein', 'kontext', canonical IDs like
+          'black-forest-labs/flux.2-klein-4b' also work). Defaults to 'klein'.
+          Use list_models with source='pollinations' to see available models.
+          Limitations: no negative_prompt (ignored), no lora_id (rejected with error).
+          Anonymous tier allows ~1 request per 15s. Free tier images may carry a watermark.
       `,
       parameters: {
         prompt: z.string().min(1).describe(
           "Text description of the image. Be specific — subject, style, lighting, mood, quality terms."
         ),
         model_id: z.string().default("").describe(
-          "HuggingFace model ID override (e.g. 'stabilityai/stable-diffusion-xl-base-1.0'). " +
-          "Leave blank to use the default model from plugin config."
+          "Model override. For backend='hf': HuggingFace model ID (e.g. 'stabilityai/stable-diffusion-xl-base-1.0'), " +
+          "blank = default from plugin config. For backend='pollinations': Pollinations model " +
+          "(e.g. 'klein', 'kontext'), blank = 'klein'."
+        ),
+        backend: z.enum(["hf", "pollinations"]).default("hf").describe(
+          "Image backend: 'hf' (HuggingFace, needs token) or 'pollinations' (no token, filter off by default)."
         ),
         negative_prompt: z.string().default("").describe(
           "What to exclude from the image (e.g. 'blurry, low quality, text, watermark'). " +
-          "Not all models support this."
+          "HF only — ignored with backend='pollinations'."
         ),
         lora_id: z.string().default("").describe(
           "HuggingFace model ID of a LoRA adapter to apply (e.g. 'alvdansen/flux-koda'). " +
-          "Only compatible with FLUX base models. Use list_loras to discover available LoRAs."
+          "HF backend + FLUX base models only. Use list_loras to discover available LoRAs."
         ),
         lora_scale: z.number().min(0).max(2).default(1.0).describe(
           "Strength of the LoRA adapter. 0.5–1.0 is typical; higher = stronger effect."
         ),
       },
-      implementation: safe_impl("generate_image", async ({ prompt, model_id, negative_prompt, lora_id, lora_scale }, ctx) => {
+      implementation: safe_impl("generate_image", async ({ prompt, model_id, backend, negative_prompt, lora_id, lora_scale }, ctx) => {
         ctx.status("Generating image…");
-        const token = getToken();
-        if (!token) {
+        const usePollinations = backend === "pollinations";
+        const cleanLora = lora_id.trim();
+
+        if (!usePollinations) {
+          const token = getToken();
+          if (!token) {
+            throw new Error(
+              "HuggingFace API token is not set. " +
+              "Go to plugin settings and paste your token from huggingface.co/settings/tokens. " +
+              "Alternatively use backend='pollinations' which needs no token."
+            );
+          }
+        }
+        if (usePollinations && cleanLora) {
           throw new Error(
-            "HuggingFace API token is not set. " +
-            "Go to plugin settings and paste your token from huggingface.co/settings/tokens."
+            "lora_id is not supported with backend='pollinations'. " +
+            "Use backend='hf' with a FLUX base model for LoRAs."
           );
         }
 
         const rateLimitResult = checkRateLimit(getRateLimitConfig());
         if (!rateLimitResult.ok) {
           throw new Error(rateLimitResult.error);
+        }
+        if (usePollinations) {
+          const waited = Date.now() - lastPollinationsCall;
+          if (waited < POLLINATIONS_ANON_COOLDOWN_MS) {
+            throw new Error(
+              `Pollinations anonymous tier allows ~1 request per 15s. ` +
+              `Wait ${Math.ceil((POLLINATIONS_ANON_COOLDOWN_MS - waited) / 1000)}s and retry.`
+            );
+          }
         }
 
         if (isGenerating) {
@@ -133,33 +170,56 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         isGenerating = true;
 
         try {
-          const modelToUse = model_id.trim() || getModel();
           const cleanNegative = negative_prompt.trim();
-          const cleanLora = lora_id.trim();
           const outputDir = getOutputDir();
 
           await mkdir(outputDir, { recursive: true });
 
-          const hf = new InferenceClient(token);
+          let buffer: Buffer;
+          let mimeType: string;
+          let modelToUse: string;
+          const notes: string[] = [];
 
-          const parameters: Record<string, unknown> = {};
-          if (cleanNegative) parameters.negative_prompt = cleanNegative;
-          if (cleanLora) parameters.loras = [{ path: cleanLora, scale: lora_scale }];
+          if (usePollinations) {
+            modelToUse = model_id.trim() || POLLINATIONS_DEFAULT_MODEL;
+            if (cleanNegative) {
+              notes.push("negative_prompt is not supported by Pollinations and was ignored.");
+            }
+            const url = buildPollinationsUrl({ prompt, model: modelToUse });
+            ctx.status(`Calling Pollinations (${modelToUse})…`);
+            const res = await fetch(url, { signal: AbortSignal.timeout(180_000) });
+            if (!res.ok) {
+              throw new Error(`Pollinations error: ${res.status} ${res.statusText}`);
+            }
+            buffer = Buffer.from(await res.arrayBuffer());
+            mimeType = res.headers.get("content-type") || "image/jpeg";
+            lastPollinationsCall = Date.now();
+            notes.push("Pollinations free tier: image may carry a watermark; private=true keeps it out of the public feed.");
+          } else {
+            const token = getToken();
+            modelToUse = model_id.trim() || getModel();
+            const hf = new InferenceClient(token);
 
-          ctx.status(`Calling ${modelToUse}…`);
-          const blob = await hf.textToImage({
-            provider: cleanLora ? "fal-ai" : "auto",
-            model: modelToUse,
-            inputs: prompt,
-            parameters,
-          }) as unknown as Blob;
+            const parameters: Record<string, unknown> = {};
+            if (cleanNegative) parameters.negative_prompt = cleanNegative;
+            if (cleanLora) parameters.loras = [{ path: cleanLora, scale: lora_scale }];
 
-          const mimeType = blob.type || "image/png";
+            ctx.status(`Calling ${modelToUse}…`);
+            const blob = await hf.textToImage({
+              provider: cleanLora ? "fal-ai" : "auto",
+              model: modelToUse,
+              inputs: prompt,
+              parameters,
+            }) as unknown as Blob;
+
+            mimeType = blob.type || "image/png";
+            buffer = Buffer.from(await blob.arrayBuffer());
+          }
+
           const ext: "png" | "jpeg" = mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpeg" : "png";
           const filename = timestampedFilename(ext);
           const filePath = path.join(outputDir, filename);
 
-          const buffer = Buffer.from(await blob.arrayBuffer());
           await writeFile(filePath, buffer);
 
           recordGeneration();
@@ -170,6 +230,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             success: true,
             file_path: filePath,
             filename,
+            backend: usePollinations ? "pollinations" : "hf",
             model_used: modelToUse,
             lora_used: cleanLora || null,
             lora_scale: cleanLora ? lora_scale : null,
@@ -178,6 +239,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             file_size_bytes: buffer.length,
             mime_type: mimeType,
             generations_remaining_today: remainingCount,
+            notes: notes.length > 0 ? notes : undefined,
             message: `Image saved to ${filePath}`,
           });
         } finally {
@@ -196,12 +258,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         - "provider": Models from a specific inference provider (e.g. "fal-ai", "nscale")
         - "trending": Currently popular models on HuggingFace
         - "downloads": Most downloaded models
+        - "pollinations": Pollinations.ai models (no token needed, filter off by default).
+          Use with generate_image backend='pollinations'.
 
         When source="provider", you must also specify the provider name.
         Each model includes compatible_loras_count when available.
       `,
       parameters: {
-        source: z.enum(["curated", "provider", "trending", "downloads"])
+        source: z.enum(["curated", "provider", "trending", "downloads", "pollinations"])
           .default("curated")
           .describe("Which model list to return. Default: curated (expert-verified models)."),
         provider: z.string()
@@ -245,6 +309,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           case "downloads":
             models = await getDownloadedModels(limit, token || undefined);
             break;
+          case "pollinations":
+            models = getPollinationsModels();
+            break;
           default:
             models = getCuratedModels();
         }
@@ -277,7 +344,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             ? `LoRA lookup capped to first ${LORA_CAP} models to avoid API flood. Use list_loras with base_model for others.`
             : source === "curated"
               ? "Expert-verified models. Use list_loras with base_model to find compatible LoRAs."
-              : "Pass model_id to generate_image to use a model.",
+              : source === "pollinations"
+                ? "Pollinations models, no token needed. Use with generate_image backend='pollinations'. Snapshot Sep 2026; canonical IDs preferred, aliases (klein, flux, kontext) also work."
+                : "Pass model_id to generate_image to use a model.",
         });
       }),
     }),

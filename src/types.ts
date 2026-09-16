@@ -1,4 +1,4 @@
-export type ModelSource = "curated" | "provider" | "trending" | "downloads";
+export type ModelSource = "curated" | "provider" | "trending" | "downloads" | "pollinations";
 
 export interface LoRAInfo {
   id: string;

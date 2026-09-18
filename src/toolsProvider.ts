@@ -27,6 +27,7 @@ import {
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_ANON_COOLDOWN_MS,
 } from "./pollinations";
+import { getAllCosts, getCacheInfo } from "./costCache";
 import {
   getAllDirectives,
   getActiveDirective,
@@ -634,7 +635,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
           DECISION: Use the best model for the task, not the cheapest.
           Paid models produce better results — the user expects quality over cost savings.
-          Each model includes a 'cost' field (e.g. '~0.03 pollen') for paid models.
+          Each model's 'cost' field is fetched live from the Pollinations API (cached 12h).
           Snapshot Sep 2026 — prices may change.
 
         Rule of thumb: IDs from curated/provider/trending/downloads only work with
@@ -723,6 +724,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           }
         }
 
+        // Merge dynamic costs from cache (Pollinations API + HF hardcoded)
+        const costMap = await getAllCosts();
+        const cacheInfo = await getCacheInfo();
+
         return json({
           source,
           current_default_model: currentDefault,
@@ -730,8 +735,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             ? { pollinations_default_model: POLLINATIONS_DEFAULT_MODEL }
             : {}),
           ...(source === "image-edit" ? { image_edit_default_model: editDefault } : {}),
+          cost_cache: {
+            fetched_at: cacheInfo.fetchedAt.toISOString(),
+            expires_in_hours: Math.round(cacheInfo.expiresInMs / 3600000),
+            models_priced: cacheInfo.modelCount,
+          },
           models: models.map((m) => ({
             ...m,
+            cost: costMap[m.id]?.cost ?? m.cost,
             is_default: m.id === currentDefault,
           })),
           note: loraTruncated
@@ -740,8 +751,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               ? "Expert-verified HuggingFace IDs for generate_image backend='hf'. Use list_loras with base_model to find compatible LoRAs."
               : source === "pollinations"
                 ? "Pollinations IDs for generate_image backend='pollinations' (requires pollinationsApiKey). " +
-                  "Snapshot Sep 2026; canonical IDs preferred, aliases (flux, kontext, seedream5) also work. " +
-                  "Each model includes a 'cost' field (e.g. '~0.03 pollen') for paid models; free models have no cost. " +
+                  "Canonical IDs preferred, aliases (flux, kontext, seedream5) also work. " +
+                  "Each model's 'cost' field is fetched live from the Pollinations API (12h cache). " +
                   "Use full IDs — only flux/kontext/seedream5 are valid aliases. No LoRAs on this backend."
               : source === "image-edit"
                 ? "Editing-native IDs for the image_edit tool (verified image-to-image mapping). image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing."

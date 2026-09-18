@@ -3,14 +3,21 @@ import type { ModelInfo } from "./types";
 /**
  * Pollinations.ai backend — zweites Backend neben HuggingFace.
  *
- * - Kein Token nötig, Filter default aus (safe-Parameter bleibt unbelegt).
- * - Kanonische Modell-IDs (Publisher/Modellname) seit Pollinations-Umstellung Sep 2025,
- *   Aliase (flux, klein, kontext …) funktionieren weiter.
- * - Stand der Liste: Sep 2026 (Registry + models.ts auf GitHub verifiziert).
- *   Community-Modelle sind Alpha über Dritt-Proxies — als Fallback-Kette nutzen,
- *   nicht als Single Point.
+ * - Neue API: https://gen.pollinations.ai (GET /image/{prompt}, POST /v1/images/generations)
+ * - Auth: Bearer Token via Authorization-Header (POST) bzw. ?key= (GET)
+ * - Modell-IDs: volle IDs UND Kurz-Aliase funktionieren auf gen.pollinations.ai
+ *   (z.B. black-forest-labs/flux.1-schnell === flux). Volle IDs bevorzugt.
+ * - Quality-Parameter: nur für gptimage-Modelle dokumentiert, sonst ignoriert.
+ * - seed: nur als Query-Param von GET /image/{prompt} dokumentiert, NICHT im POST-Body.
+ * - Der alte Host image.pollinations.ai ist deprecated und wird nicht mehr genutzt.
+ *
+ * Qualitäts-Hinweise für komplexe, detailreiche Prompts:
+ * - `black-forest-labs/flux.1-schnell`: Solide Basis, 1024px
+ * - `black-forest-labs/flux.1-kontext-pro`: Azure-FLUX, ideal für komplexe Prompts
+ * - `bytedance/seedream-5.0-lite`: ByteDance, sehr hoch, min 1920x1920 (paid_only)
+ * - `google/gemini-3-pro-image`: Gemini 3 Pro, bis 4K, höchste Qualität
  */
-export const POLLINATIONS_DEFAULT_MODEL = "klein";
+export const POLLINATIONS_DEFAULT_MODEL = "black-forest-labs/flux.1-schnell";
 
 export const POLLINATIONS_ANON_COOLDOWN_MS = 15_000;
 
@@ -102,28 +109,118 @@ export interface PollinationsGenerateOptions {
   model: string;
   width?: number;
   height?: number;
+  quality?: "low" | "medium" | "high" | "hd";
   seed?: number;
   /** Optional API key (enter.pollinations.ai). Leer = anonym. */
   apiKey?: string;
 }
 
 /**
- * Baut die Legacy-GET-URL (image.pollinations.ai). private=true hält Bilder aus dem
- * öffentlichen Feed — sinnvoller Default für unseren Einsatzzweck. Mit apiKey zusätzlich
- * nologo=true (kein Wasserzeichen) — geht nur mit Account.
+ * Modelle mit dokumentiertem quality-Support (APIDOCS: gptimage-Familie + grok-imagine-image-2.0).
+ * quality wird nur für diese Modelle im POST-Body gesendet, sonst still ignoriert.
  */
-export function buildPollinationsUrl(opts: PollinationsGenerateOptions): string {
-  const base = `https://image.pollinations.ai/prompt/${encodeURIComponent(opts.prompt)}`;
+const QUALITY_SUPPORTED_HINTS = [
+  "gpt-image",
+  "gptimage",
+  "grok-imagine-image-2.0",
+];
+
+export function isQualitySupportedModel(modelId: string): boolean {
+  const m = modelId.toLowerCase();
+  return QUALITY_SUPPORTED_HINTS.some((h) => m.includes(h));
+}
+
+/**
+ * Baut den Request-Body für die neue gen.pollinations.ai API.
+ * POST /v1/images/generations mit Bearer-Auth.
+ *
+ * Volle IDs UND Kurz-Aliase funktionieren (z.B. flux === black-forest-labs/flux.1-schnell).
+ * seed ist im POST-Schema nicht dokumentiert und wird daher NICHT gesendet
+ * (Reproduzierbarkeit via seed nur über GET /image/{prompt}).
+ * quality wird nur für Modelle mit dokumentiertem Support gesendet.
+ * safe=false wird explizit gesetzt (Filter aus, Default wäre ebenfalls off).
+ */
+export function buildPollinationsPostBody(opts: PollinationsGenerateOptions): {
+  url: string;
+  headers: Record<string, string>;
+  body: Record<string, unknown>;
+  qualityDropped: boolean;
+  seedDropped: boolean;
+} {
+  const url = "https://gen.pollinations.ai/v1/images/generations";
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (opts.apiKey) {
+    headers["Authorization"] = `Bearer ${opts.apiKey}`;
+  }
+
+  const body: Record<string, unknown> = {
+    prompt: opts.prompt,
+    model: opts.model || POLLINATIONS_DEFAULT_MODEL,
+    n: 1,
+    response_format: "b64_json",
+    safe: false,
+  };
+
+  if (opts.width && opts.height) {
+    body.size = `${opts.width}x${opts.height}`;
+  }
+  const seedDropped = opts.seed !== undefined;
+  let qualityDropped = false;
+  if (opts.quality && isQualitySupportedModel(opts.model || POLLINATIONS_DEFAULT_MODEL)) {
+    body.quality = opts.quality;
+  } else if (opts.quality) {
+    qualityDropped = true;
+  }
+
+  return { url, headers, body, qualityDropped, seedDropped };
+}
+
+/**
+ * Baut die GET-URL auf dem aktuellen Host gen.pollinations.ai (auch anonym nutzbar).
+ * Unterstützt einzelne width/height UND seed (im Gegensatz zum POST-Body).
+ */
+export function buildPollinationsGenGetUrl(opts: PollinationsGenerateOptions): string {
+  const base = `https://gen.pollinations.ai/image/${encodeURIComponent(opts.prompt)}`;
   const params = new URLSearchParams();
-  params.set("model", opts.model);
+  params.set("model", opts.model || POLLINATIONS_DEFAULT_MODEL);
   if (opts.width) params.set("width", String(opts.width));
-  if (opts.height) params.set("height", String(opts.height));
   if (opts.seed !== undefined) params.set("seed", String(opts.seed));
+  if (opts.height) params.set("height", String(opts.height));
+  if (opts.quality && isQualitySupportedModel(opts.model || POLLINATIONS_DEFAULT_MODEL)) {
+    params.set("quality", opts.quality);
+  }
+  params.set("safe", "false");
   params.set("private", "true");
-  params.set("enhance", "false");
   if (opts.apiKey) {
     params.set("key", opts.apiKey);
     params.set("nologo", "true");
   }
   return `${base}?${params.toString()}`;
+}
+
+/**
+ * Erkennt JPEG/PNG anhand Magic Bytes (POST liefert b64 ohne Content-Type).
+ */
+export function detectImageMime(buffer: Buffer): string {
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47 &&
+    buffer[4] === 0x0d && buffer[5] === 0x0a && buffer[6] === 0x1a && buffer[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+  return "image/jpeg";
+}
+
+/**
+ * @deprecated Host image.pollinations.ai ist deprecated (502-anfällig).
+ * Nutze buildPollinationsGenGetUrl für GET bzw. buildPollinationsPostBody für POST.
+ */
+export function buildPollinationsUrl(opts: PollinationsGenerateOptions): string {
+  return buildPollinationsGenGetUrl(opts);
 }

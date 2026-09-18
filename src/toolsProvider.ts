@@ -19,7 +19,9 @@ import { resolveImageInput } from "./imageInput";
 import { listOutputImages } from "./workspace";
 import {
   getPollinationsModels,
-  buildPollinationsUrl,
+  buildPollinationsPostBody,
+  buildPollinationsGenGetUrl,
+  detectImageMime,
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_ANON_COOLDOWN_MS,
 } from "./pollinations";
@@ -172,10 +174,14 @@ Free images may carry a watermark. If a community/* model fails (alpha proxies),
         ),
         seed: z.number().int().min(0).default(0).describe(
           "Seed for reproducible results (backend='pollinations' only, ignored with backend='hf'). " +
-          "0 = random."
+          "0 = random. Only supported via GET (anonymous path); ignored for POST with API key (note in result)."
+        ),
+        quality: z.enum(["low", "medium", "high", "hd"]).default("medium").describe(
+          "Image quality (backend='pollinations' only, ignored with backend='hf'). " +
+          "Only documented for gpt-image models; ignored otherwise (note in result)."
         ),
       },
-      implementation: safe_impl("generate_image", async ({ prompt, model_id, backend, negative_prompt, lora_id, lora_scale, width, height, seed }, ctx) => {
+      implementation: safe_impl("generate_image", async ({ prompt, model_id, backend, negative_prompt, lora_id, lora_scale, width, height, seed, quality }, ctx) => {
         ctx.status("Generating image…");
         const usePollinations = backend === "pollinations";
         const cleanLora = lora_id.trim();
@@ -235,31 +241,73 @@ Free images may carry a watermark. If a community/* model fails (alpha proxies),
               notes.push("negative_prompt is not supported by Pollinations and was ignored.");
             }
             const pollinationsKey = getPollinationsKey();
-            const url = buildPollinationsUrl({
-              prompt,
-              model: modelToUse,
-              width: width || undefined,
-              height: height || undefined,
-              seed: seed || undefined,
-              apiKey: pollinationsKey || undefined,
-            });
-            ctx.status(`Calling Pollinations (${modelToUse})…`);
-            const res = await fetch(url, { signal: AbortSignal.timeout(180_000) });
-            if (!res.ok) {
-              throw new Error(`Pollinations error: ${res.status} ${res.statusText}`);
-            }
-            buffer = Buffer.from(await res.arrayBuffer());
-            mimeType = res.headers.get("content-type") || "image/jpeg";
-            if (!mimeType.startsWith("image/")) {
-              const preview = buffer.toString("utf-8").slice(0, 200);
-              throw new Error(`Pollinations returned non-image content (${mimeType}): ${preview}`);
+
+            if (pollinationsKey) {
+              // Neue API: POST /v1/images/generations mit Bearer-Auth
+              // Hinweis: seed ist im POST-Schema nicht dokumentiert und wird nicht gesendet;
+              // quality nur bei Modellen mit dokumentiertem Support (gpt-image-Familie).
+              const { url, headers, body, qualityDropped, seedDropped } = buildPollinationsPostBody({
+                prompt,
+                model: modelToUse,
+                width: width || undefined,
+                height: height || undefined,
+                quality,
+                apiKey: pollinationsKey,
+              });
+              if (seed) {
+                notes.push("seed is only supported via GET /image/{prompt} and was ignored for POST /v1/images/generations.");
+              }
+              if (qualityDropped) {
+                notes.push(`quality='${quality}' is only documented for gpt-image models and was ignored for '${modelToUse}'.`);
+              }
+              if ((width && !height) || (!width && height)) {
+                notes.push("POST size needs width AND height (WIDTHxHEIGHT); a single dimension was ignored. Use both for exact size.");
+              }
+              ctx.status(`Calling Pollinations API (${modelToUse}, quality=${quality})…`);
+              const res = await fetch(url, {
+                method: "POST",
+                headers,
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(180_000),
+              });
+              if (!res.ok) {
+                const errText = await res.text().catch(() => "");
+                if (res.status === 402 || res.status === 403) {
+                  throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText} — paid_only model or exhausted Pollen budget? Check key balance / use a free model.`);
+                }
+                throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText}`);
+              }
+              const jsonRes = await res.json() as { data?: { b64_json?: string }[] };
+              if (!jsonRes.data?.[0]?.b64_json) {
+                throw new Error("Pollinations API returned no image data");
+              }
+              buffer = Buffer.from(jsonRes.data[0].b64_json, "base64");
+              mimeType = detectImageMime(buffer);
+              notes.push("Pollinations API (gen.pollinations.ai POST): safe=false, no watermark with key.");
+            } else {
+              // GET auf gen.pollinations.ai (anonym): unterstützt width/height einzeln + seed.
+              const url = buildPollinationsGenGetUrl({
+                prompt,
+                model: modelToUse,
+                width: width || undefined,
+                height: height || undefined,
+                seed: seed || undefined,
+                quality,
+              });
+              ctx.status(`Calling Pollinations (${modelToUse})…`);
+              const res = await fetch(url, { signal: AbortSignal.timeout(180_000) });
+              if (!res.ok) {
+                throw new Error(`Pollinations error: ${res.status} ${res.statusText}`);
+              }
+              buffer = Buffer.from(await res.arrayBuffer());
+              mimeType = res.headers.get("content-type") || "image/jpeg";
+              if (!mimeType.startsWith("image/")) {
+                const preview = buffer.toString("utf-8").slice(0, 200);
+                throw new Error(`Pollinations returned non-image content (${mimeType}): ${preview}`);
+              }
+              notes.push("Pollinations anonymous: image may carry a watermark. Set pollinationsApiKey for higher limits + no watermark.");
             }
             lastPollinationsCall = Date.now();
-            notes.push(
-              pollinationsKey
-                ? "Pollinations with API key: no watermark (nologo), private=true keeps it out of the public feed."
-                : "Pollinations anonymous: image may carry a watermark; private=true keeps it out of the public feed. Set pollinationsApiKey in plugin config for higher limits + no watermark."
-            );
           } else {
             const token = getToken();
             modelToUse = model_id.trim() || getModel();

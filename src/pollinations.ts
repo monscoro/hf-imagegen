@@ -149,7 +149,6 @@ export function buildPollinationsPostBody(opts: PollinationsGenerateOptions): {
   headers: Record<string, string>;
   body: Record<string, unknown>;
   qualityDropped: boolean;
-  seedDropped: boolean;
 } {
   const url = "https://gen.pollinations.ai/v1/images/generations";
   const headers: Record<string, string> = {
@@ -165,12 +164,15 @@ export function buildPollinationsPostBody(opts: PollinationsGenerateOptions): {
     n: 1,
     response_format: "b64_json",
     safe: false,
+    // Passthrough-Params der POST-Route (enter.pollinations.ai): private → nofeed,
+    // nologo entfernt das Wasserzeichen (nur mit Key).
+    private: true,
+    nologo: true,
   };
 
   if (opts.width && opts.height) {
     body.size = `${opts.width}x${opts.height}`;
   }
-  const seedDropped = opts.seed !== undefined;
   let qualityDropped = false;
   if (opts.quality && isQualitySupportedModel(opts.model || POLLINATIONS_DEFAULT_MODEL)) {
     body.quality = opts.quality;
@@ -178,7 +180,7 @@ export function buildPollinationsPostBody(opts: PollinationsGenerateOptions): {
     qualityDropped = true;
   }
 
-  return { url, headers, body, qualityDropped, seedDropped };
+  return { url, headers, body, qualityDropped };
 }
 
 /**
@@ -218,7 +220,14 @@ export function detectImageMime(buffer: Buffer): string {
   if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
     return "image/jpeg";
   }
-  return "image/jpeg";
+  if (
+    buffer.length >= 12 &&
+    buffer.toString("ascii", 0, 4) === "RIFF" &&
+    buffer.toString("ascii", 8, 12) === "WEBP"
+  ) {
+    return "image/webp";
+  }
+  return "application/octet-stream";
 }
 
 /**

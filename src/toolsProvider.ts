@@ -22,6 +22,7 @@ import {
   buildPollinationsPostBody,
   buildPollinationsGenGetUrl,
   detectImageMime,
+  isQualitySupportedModel,
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_ANON_COOLDOWN_MS,
 } from "./pollinations";
@@ -68,7 +69,7 @@ function resolvePath(p: string): string {
   return path.resolve(p);
 }
 
-function timestampedFilename(ext: "png" | "jpeg", prefix: "hf" | "pl" = "hf"): string {
+function timestampedFilename(ext: "png" | "jpeg" | "webp", prefix: "hf" | "pl" = "hf"): string {
   const ts = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
   return `${prefix}-${ts}.${ext}`;
 }
@@ -79,7 +80,10 @@ async function saveImageBuffer(
   outputDir: string,
   prefix: "hf" | "pl" = "hf"
 ): Promise<{ filePath: string; filename: string }> {
-  const ext: "png" | "jpeg" = mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpeg" : "png";
+  const ext: "png" | "jpeg" | "webp" =
+    mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpeg"
+    : mimeType.includes("webp") ? "webp"
+    : "png";
   const filename = timestampedFilename(ext, prefix);
   const filePath = path.join(outputDir, filename);
   await writeFile(filePath, buffer);
@@ -185,9 +189,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "Seed for reproducible results (backend='pollinations' only, ignored with backend='hf'). " +
           "0 = random. Only supported via GET (anonymous path); ignored for POST with API key (note in result)."
         ),
-        quality: z.enum(["low", "medium", "high", "hd"]).default("medium").describe(
+        quality: z.enum(["low", "medium", "high", "hd"]).optional().describe(
           "Image quality (backend='pollinations' only, ignored with backend='hf'). " +
-          "Only documented for gpt-image models; ignored otherwise (note in result)."
+          "Blank or unset = medium (server default). " +
+          "Only documented for gpt-image models; for other models it is ignored and a note is added to the result."
         ),
       },
       implementation: safe_impl("generate_image", async ({ prompt, model_id, backend, negative_prompt, lora_id, lora_scale, width, height, seed, quality }, ctx) => {
@@ -255,7 +260,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               // Neue API: POST /v1/images/generations mit Bearer-Auth
               // Hinweis: seed ist im POST-Schema nicht dokumentiert und wird nicht gesendet;
               // quality nur bei Modellen mit dokumentiertem Support (gpt-image-Familie).
-              const { url, headers, body, qualityDropped, seedDropped } = buildPollinationsPostBody({
+              const { url, headers, body, qualityDropped } = buildPollinationsPostBody({
                 prompt,
                 model: modelToUse,
                 width: width || undefined,
@@ -272,7 +277,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               if ((width && !height) || (!width && height)) {
                 notes.push("POST size needs width AND height (WIDTHxHEIGHT); a single dimension was ignored. Use both for exact size.");
               }
-              ctx.status(`Calling Pollinations API (${modelToUse}, quality=${quality})…`);
+              ctx.status(`Calling Pollinations API (${modelToUse}, quality=${quality ?? "medium"})…`);
               const res = await fetch(url, {
                 method: "POST",
                 headers,
@@ -292,7 +297,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               }
               buffer = Buffer.from(jsonRes.data[0].b64_json, "base64");
               mimeType = detectImageMime(buffer);
-              notes.push("Pollinations API (gen.pollinations.ai POST): safe=false, no watermark with key.");
+              notes.push("Pollinations API (gen.pollinations.ai POST): safe=false, private (hidden from public feed), no watermark with key.");
             } else {
               // GET auf gen.pollinations.ai (anonym): unterstützt width/height einzeln + seed.
               const url = buildPollinationsGenGetUrl({
@@ -303,7 +308,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 seed: seed || undefined,
                 quality,
               });
-              ctx.status(`Calling Pollinations (${modelToUse})…`);
+              if (quality !== undefined && !isQualitySupportedModel(modelToUse)) {
+                notes.push(`quality='${quality}' is only documented for gpt-image models and was ignored for '${modelToUse}'.`);
+              }
+              ctx.status(`Calling Pollinations (${modelToUse}, quality=${quality ?? "medium"})…`);
               const res = await fetch(url, { signal: AbortSignal.timeout(180_000) });
               if (!res.ok) {
                 throw new Error(`Pollinations error: ${res.status} ${res.statusText}`);

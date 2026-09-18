@@ -23,11 +23,11 @@ export const POLLINATIONS_ANON_COOLDOWN_MS = 15_000;
 
 export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
   {
-    id: "black-forest-labs/flux.2-klein-4b",
+    id: "black-forest-labs/flux.1-schnell",
     description:
-      "FLUX.2 Klein 4B — Neueste FLUX-Generation, sub-second, Editing bis 2.4MP. " +
-      "Erste Wahl für schnelle dark-fashion/power-spice Takes.",
-    style: "photorealistic, artistic, fashion-editorial",
+      "FLUX.1 Schnell — Standard T2I. Solide Qualität, 1024px. " +
+      "Guter Allrounder für die meisten Prompts.",
+    style: "photorealistic, artistic",
     speed: "fast",
     access: "free",
     source: "pollinations",
@@ -35,66 +35,70 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
   {
     id: "black-forest-labs/flux.1-kontext-pro",
     description:
-      "FLUX.1 Kontext Pro — Instruction-Editing: Pose behalten, Outfit/Licht tauschen. " +
-      "Bildet den KEEP/CHANGE-Workflow direkt ab.",
-    style: "editing, photorealistic",
+      "FLUX.1 Kontext Pro — Azure-FLUX. " +
+      "Ideal für komplexe Prompts. ACHTUNG: Strenge Content-Filter — " +
+      "Fashion-Editorial mit intimen Details kann als Sexual_Prompt geflaggt werden.",
+    style: "photorealistic, artistic, editing",
     speed: "medium",
     access: "free",
     source: "pollinations",
   },
   {
-    id: "black-forest-labs/flux.1-schnell",
+    id: "black-forest-labs/flux.2-klein-4b",
     description:
-      "FLUX.1 Schnell — Schnelle Baseline, winzige Kosten. Zum Durchprobieren von Posen und Stylings.",
+      "FLUX.2 Klein 4B — Schnell, aber 4B Parameter. " +
+      "Zu klein für komplexe Szenen, nur für schnelle Takes.",
     style: "photorealistic, artistic",
     speed: "fast",
     access: "free",
     source: "pollinations",
   },
   {
-    id: "community/vendouple/uncensored-image-v2",
+    id: "bytedance/seedream-5.0-lite",
     description:
-      "Uncensored v2 — Explizit uncensored, kein Safety-Requirement, keine Datenspeicherung. " +
-      "Für power-spice jenseits Intensität 7. Community-Alpha.",
-    style: "photorealistic, adult",
+      "Seedream 5.0 Lite — ByteDance, sehr hohe Qualität. " +
+      "Min. 1920x1920 px. paid_only (Key mit Guthaben nötig). " +
+      "ACHTUNG: Sehr strenge Content-Filter.",
+    style: "photorealistic, high-res",
+    speed: "slow",
+    access: "pro",
+    source: "pollinations",
+  },
+  {
+    id: "bytedance/seedream-5.0-pro",
+    description:
+      "Seedream 5.0 Pro — ByteDance, höchste Qualität, min 1920x1920.",
+    style: "photorealistic, high-res",
+    speed: "slow",
+    access: "pro",
+    source: "pollinations",
+  },
+  {
+    id: "google/gemini-3-pro-image",
+    description:
+      "Gemini 3 Pro Image — Bis 4K Auflösung, höchste Qualität. " +
+      "Langsam, aber exzellent für feine Details.",
+    style: "photorealistic, cinematic",
+    speed: "slow",
+    access: "pro",
+    source: "pollinations",
+  },
+  {
+    id: "openai/gpt-image-1.5",
+    description:
+      "GPT Image 1.5 — OpenAI, gute Qualität. " +
+      "Starke Textdarstellung und Stil-Konsistenz. Unterstützt quality-Parameter.",
+    style: "photorealistic, illustration",
     speed: "medium",
     access: "free",
     source: "pollinations",
   },
   {
-    id: "community/vendouple/anima",
+    id: "tongyi-mai/z-image-turbo",
     description:
-      "Anima — Uncensored Kreativ-Modell (READ DOCS beim Anbieter). Community-Alpha.",
-    style: "artistic, stylized",
-    speed: "medium",
-    access: "free",
-    source: "pollinations",
-  },
-  {
-    id: "community/vendouple/animagine",
-    description:
-      "Animagine — Anime-nativ, nächste Pony-Ästhetik per API. " +
-      "Für Idol-Crossover/Cosplay-Register. Community-Alpha.",
-    style: "anime, illustration",
-    speed: "medium",
-    access: "free",
-    source: "pollinations",
-  },
-  {
-    id: "community/MarcosFRG/phoenix-1.0",
-    description:
-      "Leonardo Phoenix 1.0 — 5MP-Fotorealismus, starke Prompt-Treue. Für Glamour/Pin-up. Community-Alpha.",
-    style: "photorealistic, glamour",
-    speed: "medium",
-    access: "free",
-    source: "pollinations",
-  },
-  {
-    id: "community/CloudCompile/flux-2-klein-9b",
-    description:
-      "FLUX.2 Klein 9B via Community — Größerer Klein, kein Safety-Requirement. Community-Alpha.",
+      "Z-Image Turbo — Default-Modell der neuen API, schnell und zuverlässig.",
     style: "photorealistic, artistic",
-    speed: "medium",
+    speed: "fast",
     access: "free",
     source: "pollinations",
   },

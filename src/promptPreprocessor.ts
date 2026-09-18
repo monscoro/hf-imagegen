@@ -7,10 +7,17 @@ import { getActiveDirective } from "./directiveStore";
 const SYSTEM_RULES = `\
 [System: Image Generation Plugin]
 
-You have tools to generate images via Hugging Face.
+You have tools to generate images via Hugging Face or Pollinations.ai.
 
 == TOOL ROUTING ==
-• User asks to generate/draw/create/paint/visualize something → generate_image (backend="hf" default, needs token; backend="pollinations" needs no token, filter off — use list_models source="pollinations" for its models)
+• User asks to generate/draw/create/paint/visualize something → generate_image
+  - backend="hf" (default): needs HF token, BEST QUALITY, LoRA support
+    Recommended for: complex prompts, production use, fashion-editorial, detailed scenes
+  - backend="pollinations": no token needed, free, quick experiments
+    LOWER QUALITY than HF — use for testing only
+    Full IDs AND short aliases both work on gen.pollinations.ai (flux === black-forest-labs/flux.1-schnell)
+    Recommended model: flux (reliable T2I)
+    Content filter warning: kontext/seedream5 flag fashion-editorial as "Sexual_Prompt"
 • User provides a reference image + change instruction            → image_edit (HF only; reference = KEEP, prompt = CHANGE; suitable models → list_models source="image-edit")
 • User asks which images exist / wants the latest result        → list_output_images (paginated; limit=1 + newest = latest)
 • User asks what models are available                        → list_models
@@ -22,9 +29,22 @@ You have tools to generate images via Hugging Face.
   Good: "a futuristic city at night, neon lights, rain reflections, cinematic, 4k, detailed"
   Bad: "city"
 - Use negative_prompt to exclude unwanted elements: "blurry, low quality, text, watermark, distorted"
-- FLUX.1-dev: good quality, free via Inference Providers. FLUX.1-schnell: fastest free. FLUX.2-dev: best quality, requires license. SDXL: photorealistic, stable.
+- HF backend: FLUX.1-dev (good quality, free), FLUX.1-schnell (fastest free), FLUX.2-dev (best, license needed), SDXL (stable).
+- Pollinations backend: full IDs and aliases both work (flux, kontext, seedream5)
+- FIRST CHOICE for complex prompts: use backend="hf" with FLUX.1-dev — best quality.
+- Pollinations is for quick tests only — quality is lower than HF for detailed scenes.
 - First call to an inactive model may take 20-60s on HF free tier — this is normal.
 - If you get a 403 on FLUX.2, tell the user to accept the model license at huggingface.co first.
+
+== POLLINATIONS.AI ==
+- Free backend, no token needed. Optional API key for higher limits + no watermark.
+- Uses gen.pollinations.ai API with Bearer auth when API key is set.
+- LOWER QUALITY than HF — use for quick tests, not production.
+- Full IDs AND aliases both work (flux === black-forest-labs/flux.1-schnell).
+- seed works via GET (anonymous); ignored for POST with key. quality only for gpt-image models.
+- Content filter: kontext/seedream5 have STRICT filters — fashion-editorial often flagged.
+- Use black-forest-labs/flux.1-schnell for most prompts.
+- Anon tier: ~1 request/15s, possible watermark. With key: higher limits, no watermark.
 
 == IMAGE SYSTEM PROMPT / STIMMUNG ==
 - Ein aktiver Neigungsprompt (Stimmungsprompt / Beeinflussungsprompt, synonym) soll INDIREKT wirken: leite daraus ab wie du generate_image prompts formulierst

@@ -125,15 +125,23 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           curated/provider/trending/downloads. LoRAs: pass lora_id (uses the fal-ai
           sub-provider); browse them with list_loras. Notes: some models need a license
           accepted at huggingface.co (e.g. FLUX.2-dev); cold models may take 20-60s to warm up.
-        - "pollinations": Pollinations.ai. No token needed (optional pollinationsApiKey in config
-          for higher limits + no watermark). Strict content filter is off by default (safe=off);
-          provider-side moderation for illegal content still applies.
-          Models are Pollinations IDs — browse them with list_models source='pollinations'.
-          Blank model_id = 'klein'. Optional width/height/seed (pollinations only;
-          portrait e.g. 768x1152 for fashion editorial). No negative_prompt (ignored),
-          no lora_id (rejected with error). Anonymous tier ~1 request/15s.
-Free images may carry a watermark. If a community/* model fails (alpha proxies),
-           retry with 'klein' or 'flux'.
+          BEST QUALITY for complex/detailed prompts — recommended for production use.
+        - "pollinations": Pollinations.ai — free, no token needed (optional pollinationsApiKey
+          in config for higher limits + no watermark). Uses gen.pollinations.ai API with
+          Bearer auth when API key is set (POST /v1/images/generations), GET /image/{prompt} when anonymous.
+          safe=false is sent explicitly. Strict content filter is off by default (safe=off).
+          Models: full IDs AND short aliases both work on gen.pollinations.ai
+          (e.g. black-forest-labs/flux.1-schnell === flux; kontext; bytedance/seedream-5.0-lite === seedream5).
+          Browse with list_models source='pollinations'.
+          Blank model_id defaults to 'black-forest-labs/flux.1-schnell' (own default; API default is z-image).
+          Optional width/height/seed/quality.
+          seed is only supported via GET (anonymous path); ignored for POST with API key.
+          quality is only documented for gpt-image models and ignored otherwise.
+          POST size needs width AND height together.
+          No negative_prompt (ignored), no lora_id (rejected with error). Anonymous tier ~1 req/15s.
+          QUALITY TIPS for complex/detailed prompts:
+          • For best quality: use backend="hf" with FLUX.1-dev
+          • For quick tests: use backend="pollinations" with flux.1-schnell
 
         FILES: the image is saved under the plugin output directory (config 'Output Directory',
         returned as output_dir). Use the returned absolute file_path when handing the image to
@@ -147,8 +155,9 @@ Free images may carry a watermark. If a community/* model fails (alpha proxies),
         ),
         model_id: z.string().default("").describe(
           "Model override. For backend='hf': HuggingFace model ID (e.g. 'stabilityai/stable-diffusion-xl-base-1.0'), " +
-          "blank = default from plugin config. For backend='pollinations': Pollinations model " +
-          "(e.g. 'klein', 'kontext'), blank = 'klein'."
+          "blank = default from plugin config. For backend='pollinations': full Pollinations model ID " +
+          "(e.g. 'black-forest-labs/flux.1-schnell', 'black-forest-labs/flux.1-kontext-pro'), " +
+          "blank = 'black-forest-labs/flux.1-schnell'."
         ),
         backend: z.enum(["hf", "pollinations"]).default("hf").describe(
           "Image backend: 'hf' (HuggingFace, needs token) or 'pollinations' (no token, filter off by default)."
@@ -579,8 +588,18 @@ Free images may carry a watermark. If a community/* model fails (alpha proxies),
         - "provider": HuggingFace IDs served by one inference sub-provider (needs 'provider',
           e.g. fal-ai, nscale) — for backend='hf'.
         - "trending" / "downloads": live HuggingFace catalog — for backend='hf'.
-        - "pollinations": Pollinations.ai models (no token needed, strict filter off by default) —
+        - "pollinations": Pollinations.ai models (no token needed, filter off by default) —
           for generate_image backend='pollinations'.
+          Full IDs AND short aliases both work on gen.pollinations.ai
+          (e.g. black-forest-labs/flux.1-schnell === flux).
+          Note: seedream-5.0-lite is paid_only (needs key with balance);
+          gpt-image-1.5 is free. Snapshot Sep 2026 — paid_only flags may change.
+          QUALITY GUIDE:
+          • Lower quality than HF — use HF backend for production
+          • black-forest-labs/flux.1-schnell: solid baseline, 1024px
+          • black-forest-labs/flux.1-kontext-pro: Azure-FLUX, STRICT content filter
+          • bytedance/seedream-5.0-lite: ByteDance, high quality, VERY STRICT filter, paid_only
+          • google/gemini-3-pro-image: Gemini 3 Pro, best quality but slow
 
         Rule of thumb: IDs from curated/provider/trending/downloads only work with
         generate_image backend='hf'; IDs from source='pollinations' only with

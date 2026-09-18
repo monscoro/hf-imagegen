@@ -30,7 +30,7 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
   Bad: "city"
 - Use negative_prompt to exclude unwanted elements: "blurry, low quality, text, watermark, distorted"
 - HF backend: FLUX.1-dev (good quality, free), FLUX.1-schnell (fastest free), FLUX.2-dev (best, license needed), SDXL (stable).
-- Pollinations backend: full IDs and aliases both work (flux, kontext, seedream5)
+- Pollinations backend: flux.1-schnell (default), flux.2-pro (best quality), grok-imagine-image-2.0 (very high quality)
 - FIRST CHOICE for complex prompts: use backend="hf" with FLUX.1-dev — best quality.
 - Pollinations is for quick tests only — quality is lower than HF for detailed scenes.
 - First call to an inactive model may take 20-60s on HF free tier — this is normal.
@@ -41,9 +41,10 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - Uses gen.pollinations.ai API with Bearer auth when API key is set.
 - LOWER QUALITY than HF — use for quick tests, not production.
 - Full IDs AND aliases both work (flux === black-forest-labs/flux.1-schnell).
-- seed works via GET (anonymous); ignored for POST with key. quality only for gpt-image models.
+- seed: model-specific (flux.1-schnell, z-image-turbo, seedream-4.0, flux.2-klein-4b). POST ignores seed.
+- quality: only for gptimage/grok-imagine-image-2.0 family.
 - Content filter: kontext/seedream5 have STRICT filters — fashion-editorial often flagged.
-- Use black-forest-labs/flux.1-schnell for most prompts.
+- RECOMMENDED: flux.1-schnell (default), flux.2-pro (best quality), grok-imagine-image-2.0 (xAI, very high quality).
 - Anon tier: ~1 request/15s, possible watermark. With key: higher limits, no watermark.
 
 == IMAGE SYSTEM PROMPT / STIMMUNG ==

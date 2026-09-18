@@ -23,6 +23,7 @@ import {
   buildPollinationsGenGetUrl,
   detectImageMime,
   isQualitySupportedModel,
+  isSeedSupportedModel,
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_ANON_COOLDOWN_MS,
 } from "./pollinations";
@@ -135,17 +136,27 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           Bearer auth when API key is set (POST /v1/images/generations), GET /image/{prompt} when anonymous.
           safe=false is sent explicitly. Strict content filter is off by default (safe=off).
           Models: full IDs AND short aliases both work on gen.pollinations.ai
-          (e.g. black-forest-labs/flux.1-schnell === flux; kontext; bytedance/seedream-5.0-lite === seedream5).
+          (e.g. black-forest-labs/flux.1-schnell === flux; kontext; seedream5).
           Browse with list_models source='pollinations'.
           Blank model_id defaults to 'black-forest-labs/flux.1-schnell' (own default; API default is z-image).
           Optional width/height/seed/quality.
-          seed is only supported via GET (anonymous path); ignored for POST with API key.
-          quality is only documented for gpt-image models and ignored otherwise.
+          seed: model-specific — supported by flux.1-schnell, z-image-turbo, seedream-4.0, flux.2-klein-4b.
+                POST ignores seed entirely; use GET for reproducible results.
+          quality: only for gptimage/grok-imagine-image-2.0 family; ignored otherwise (note in result).
           POST size needs width AND height together.
           No negative_prompt (ignored), no lora_id (rejected with error). Anonymous tier ~1 req/15s.
+          RECOMMENDED MODELS:
+          • flux.1-schnell: solid baseline, fast, free (default)
+          • flux.2-pro: highest quality FLUX-2, free
+          • flux.2-flex: fast FLUX-2 variant, free
+          • grok-imagine-image-2.0: xAI, very high quality, supports quality param
+          • ideogram-v4-turbo: best for text-in-image (logos, graphics)
+          • kontext-pro: instruction editing, STRICT content filter
+          • seedream-5.0-lite: ByteDance, very high quality, paid_only, VERY STRICT filter
           QUALITY TIPS for complex/detailed prompts:
           • For best quality: use backend="hf" with FLUX.1-dev
           • For quick tests: use backend="pollinations" with flux.1-schnell
+          • For highest Pollinations quality: flux.2-pro or grok-imagine-image-2.0
 
         FILES: the image is saved under the plugin output directory (config 'Output Directory',
         returned as output_dir). Use the returned absolute file_path when handing the image to
@@ -269,7 +280,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 apiKey: pollinationsKey,
               });
               if (seed) {
-                notes.push("seed is only supported via GET /image/{prompt} and was ignored for POST /v1/images/generations.");
+                if (isSeedSupportedModel(modelToUse)) {
+                  notes.push("seed is supported for this model via GET /image/{prompt}, but POST /v1/images/generations ignores seed. Use GET for reproducible results.");
+                } else {
+                  notes.push(`seed is not supported by '${modelToUse}' (only flux.1-schnell, z-image-turbo, seedream-4.0, flux.2-klein-4b) and was ignored.`);
+                }
               }
               if (qualityDropped) {
                 notes.push(`quality='${quality}' is only documented for gpt-image models and was ignored for '${modelToUse}'.`);
@@ -309,7 +324,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 quality,
               });
               if (quality !== undefined && !isQualitySupportedModel(modelToUse)) {
-                notes.push(`quality='${quality}' is only documented for gpt-image models and was ignored for '${modelToUse}'.`);
+                notes.push(`quality='${quality}' is only documented for gpt-image/grok-imagine-image-2.0 models and was ignored for '${modelToUse}'.`);
+              }
+              if (seed && !isSeedSupportedModel(modelToUse)) {
+                notes.push(`seed is not supported by '${modelToUse}' (only flux.1-schnell, z-image-turbo, seedream-4.0, flux.2-klein-4b) and was ignored.`);
               }
               ctx.status(`Calling Pollinations (${modelToUse}, quality=${quality ?? "medium"})…`);
               const res = await fetch(url, { signal: AbortSignal.timeout(180_000) });
@@ -601,13 +619,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           Full IDs AND short aliases both work on gen.pollinations.ai
           (e.g. black-forest-labs/flux.1-schnell === flux).
           Note: seedream-5.0-lite is paid_only (needs key with balance);
-          gpt-image-1.5 is free. Snapshot Sep 2026 — paid_only flags may change.
-          QUALITY GUIDE:
-          • Lower quality than HF — use HF backend for production
-          • black-forest-labs/flux.1-schnell: solid baseline, 1024px
-          • black-forest-labs/flux.1-kontext-pro: Azure-FLUX, STRICT content filter
-          • bytedance/seedream-5.0-lite: ByteDance, high quality, VERY STRICT filter, paid_only
-          • google/gemini-3-pro-image: Gemini 3 Pro, best quality but slow
+          Snapshot Sep 2026 — paid_only flags may change.
+          RECOMMENDED:
+          • flux.1-schnell: solid baseline, fast, free (default)
+          • flux.2-pro: highest quality FLUX-2, free
+          • flux.2-flex: fast FLUX-2 variant, free
+          • grok-imagine-image-2.0: xAI, very high quality, quality param supported
+          • ideogram-v4-turbo: best for text-in-image
+          • kontext-pro: instruction editing, STRICT content filter
+          • seedream-5.0-lite: ByteDance, very high quality, paid_only
+          • gemini-3.1-flash-image: Gemini, fast, free
 
         Rule of thumb: IDs from curated/provider/trending/downloads only work with
         generate_image backend='hf'; IDs from source='pollinations' only with

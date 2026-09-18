@@ -54,6 +54,26 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
     source: "pollinations",
   },
   {
+    id: "black-forest-labs/flux.2-pro",
+    description:
+      "FLUX.2 Pro — Neues FLUX-2 Flaggschiff. " +
+      "Höchste Qualität, flexibel für 1k–2k. Empfohlen für Production.",
+    style: "photorealistic, cinematic",
+    speed: "medium",
+    access: "free",
+    source: "pollinations",
+  },
+  {
+    id: "black-forest-labs/flux.2-flex",
+    description:
+      "FLUX.2 Flex — FLUX-2 variabel. " +
+      "Gute Qualität, schnellere Inferenz als Pro.",
+    style: "photorealistic, artistic",
+    speed: "fast",
+    access: "free",
+    source: "pollinations",
+  },
+  {
     id: "bytedance/seedream-5.0-lite",
     description:
       "Seedream 5.0 Lite — ByteDance, sehr hohe Qualität. " +
@@ -84,11 +104,61 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
     source: "pollinations",
   },
   {
-    id: "openai/gpt-image-1.5",
+    id: "google/gemini-3.1-flash-image",
     description:
-      "GPT Image 1.5 — OpenAI, gute Qualität. " +
-      "Starke Textdarstellung und Stil-Konsistenz. Unterstützt quality-Parameter.",
-    style: "photorealistic, illustration",
+      "Gemini 3.1 Flash Image — Schnell, gute Qualität. " +
+      "Ideal für schnelle Iterationen.",
+    style: "photorealistic, artistic",
+    speed: "fast",
+    access: "free",
+    source: "pollinations",
+  },
+  {
+    id: "x-ai/grok-imagine-image-2.0",
+    description:
+      "Grok Imagine 2.0 — xAI, sehr hohe Qualität. " +
+      "Unterstützt quality-Parameter. Guter Allrounder.",
+    style: "photorealistic, cinematic",
+    speed: "medium",
+    access: "free",
+    source: "pollinations",
+  },
+  {
+    id: "x-ai/grok-imagine-image",
+    description:
+      "Grok Imagine — xAI, erste Generation. " +
+      "Solide Qualität, schnellere Inferenz.",
+    style: "photorealistic, artistic",
+    speed: "fast",
+    access: "free",
+    source: "pollinations",
+  },
+  {
+    id: "ideogram-ai/ideogram-v4-turbo",
+    description:
+      "Ideogram V4 Turbo — Exzellent für Text-in-Bild. " +
+      "Schnell, gute Qualität für Grafiken und Logos.",
+    style: "illustration, graphic, text-in-image",
+    speed: "fast",
+    access: "free",
+    source: "pollinations",
+  },
+  {
+    id: "alibaba/wan-2.7-image",
+    description:
+      "Wan 2.7 Image — Alibaba, multimodal. " +
+      "Gute Qualität für detailreiche Szenen.",
+    style: "photorealistic, artistic",
+    speed: "medium",
+    access: "free",
+    source: "pollinations",
+  },
+  {
+    id: "qwen/qwen-image-3",
+    description:
+      "Qwen Image 3 — Alibaba/Qwen, stark für detailreiche Szenen. " +
+      "Gute Prompt-Treue.",
+    style: "photorealistic, detailed",
     speed: "medium",
     access: "free",
     source: "pollinations",
@@ -120,8 +190,9 @@ export interface PollinationsGenerateOptions {
 }
 
 /**
- * Modelle mit dokumentiertem quality-Support (APIDOCS: gptimage-Familie + grok-imagine-image-2.0).
+ * Modelle mit dokumentiertem quality-Support (APIDOCS).
  * quality wird nur für diese Modelle im POST-Body gesendet, sonst still ignoriert.
+ * Unterstützt: gptimage, gptimage-large, gpt-image-2*, grok-imagine-image-2.0
  */
 const QUALITY_SUPPORTED_HINTS = [
   "gpt-image",
@@ -135,6 +206,23 @@ export function isQualitySupportedModel(modelId: string): boolean {
 }
 
 /**
+ * Modelle mit dokumentiertem seed-Support (APIDOCS).
+ * flux.1-schnell, z-image-turbo, seedream-4.0, flux.2-klein-4b.
+ * Andere Modelle ignorieren seed auch auf GET.
+ */
+const SEED_SUPPORTED_HINTS = [
+  "flux.1-schnell",
+  "z-image-turbo",
+  "seedream-4.0",
+  "flux.2-klein-4b",
+];
+
+export function isSeedSupportedModel(modelId: string): boolean {
+  const m = modelId.toLowerCase();
+  return SEED_SUPPORTED_HINTS.some((h) => m.includes(h));
+}
+
+/**
  * Baut den Request-Body für die neue gen.pollinations.ai API.
  * POST /v1/images/generations mit Bearer-Auth.
  *
@@ -142,7 +230,9 @@ export function isQualitySupportedModel(modelId: string): boolean {
  * seed ist im POST-Schema nicht dokumentiert und wird daher NICHT gesendet
  * (Reproduzierbarkeit via seed nur über GET /image/{prompt}).
  * quality wird nur für Modelle mit dokumentiertem Support gesendet.
- * safe=false wird explizit gesetzt (Filter aus, Default wäre ebenfalls off).
+ * safe: Skill-Set (comma-separated: privacy,secrets,sexual,violence,shield,nsfw,true,false).
+ *       "false" = alle Filter aus (Default). "true" = privacy+secrets an.
+ * private → nofeed (versteckt aus öffentlichem Feed). nologo → kein Wasserzeichen (nur mit Key).
  */
 export function buildPollinationsPostBody(opts: PollinationsGenerateOptions): {
   url: string;

@@ -66,18 +66,19 @@ function resolvePath(p: string): string {
   return path.resolve(p);
 }
 
-function timestampedFilename(ext: "png" | "jpeg"): string {
+function timestampedFilename(ext: "png" | "jpeg", prefix: "hf" | "pl" = "hf"): string {
   const ts = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
-  return `hf-${ts}.${ext}`;
+  return `${prefix}-${ts}.${ext}`;
 }
 
 async function saveImageBuffer(
   buffer: Buffer,
   mimeType: string,
-  outputDir: string
+  outputDir: string,
+  prefix: "hf" | "pl" = "hf"
 ): Promise<{ filePath: string; filename: string }> {
   const ext: "png" | "jpeg" = mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpeg" : "png";
-  const filename = timestampedFilename(ext);
+  const filename = timestampedFilename(ext, prefix);
   const filePath = path.join(outputDir, filename);
   await writeFile(filePath, buffer);
   return { filePath, filename };
@@ -280,7 +281,7 @@ Free images may carry a watermark. If a community/* model fails (alpha proxies),
             buffer = Buffer.from(await blob.arrayBuffer());
           }
 
-          const { filePath, filename } = await saveImageBuffer(buffer, mimeType, outputDir);
+          const { filePath, filename } = await saveImageBuffer(buffer, mimeType, outputDir, usePollinations ? "pl" : "hf");
 
           recordGeneration();
           const quota = checkRateLimit(getRateLimitConfig());

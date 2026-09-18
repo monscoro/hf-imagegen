@@ -36,7 +36,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 | HuggingFace API Token | _(blank)_ | **Required for backend `hf`.** Token from huggingface.co/settings/tokens, at least `read` scope. Not needed for `pollinations`. |
 | Default Model | `black-forest-labs/FLUX.1-dev` | Text-to-image model for `generate_image` (backend `hf`). Overridable per call. |
 | Default Edit Model | `black-forest-labs/FLUX.1-Kontext-dev` | Image-to-image model for `image_edit`. Must be editing-native (Kontext-dev or Qwen-Image-Edit). |
-| Pollinations API Key | _(blank)_ | **Optional.** From enter.pollinations.ai. Blank = anonymous (1 req/15s, possible watermark). With key: higher limits, no watermark, paid models. Never share `sk_…` keys. |
+| Pollinations API Key | _(blank)_ | **Required for backend `pollinations`** (since Sep 2026, anonymous access removed). Get one at enter.pollinations.ai/keys. Never share `sk_…` keys. |
 | Output Directory | `~/hf-images` | Where images are saved. Created automatically. Supports `~/` prefix. Also the search base for bare filenames in `image_edit` and the scope of `list_output_images`. |
 | Generation Cooldown (ms) | `5000` | Minimum gap between generations (both backends). |
 | Daily Generation Limit | `75` | Max images per day, resets at **local** midnight. This is the plugin's own guard — it does **not** track HF credits. |
@@ -48,13 +48,13 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 |  | `hf` (default) | `pollinations` |
 |---|---|---|
 | Provider | HuggingFace Inference Providers (auto/fal-ai/…) | Pollinations.ai |
-| Token | HF token required | None (optional key for limits + no watermark) |
+| Token | HF token required | API key required (enter.pollinations.ai/keys) |
 | Content filter | Provider-side moderation | Strict filter off by default (`safe=off`); illegal content still moderated |
 | Negative prompt | ✅ supported | ❌ ignored (reported in response notes) |
 | LoRA (`lora_id`) | ✅ FLUX via fal-ai | ❌ rejected with a clear error |
 | Image editing | ✅ `image_edit` tool | ❌ (deferred) |
 | Rate limit | Config cooldown + daily cap | Same, plus 15s anon / 5s with-key tier gap |
-| Best for | Quality, LoRAs, editing, precise control | No-setup start, permissive fashion/editorial takes |
+| Best for | Quality, LoRAs, editing, precise control | Quick tests, permissive fashion/editorial takes |
 
 **Rule of thumb:** HuggingFace IDs ↔ `backend="hf"`, Pollinations IDs ↔ `backend="pollinations"`, editing-native IDs ↔ `image_edit`. Mixing them fails — the tools say so explicitly.
 
@@ -71,7 +71,7 @@ generate_image(prompt, model_id?, backend?, negative_prompt?, lora_id?, lora_sca
 | Parameter | Default | Description |
 |---|---|---|
 | `prompt` | _(required)_ | Specific description — subject, style, lighting, mood, quality terms. |
-| `model_id` | _(config default)_ | HF ID (backend `hf`) or Pollinations model (backend `pollinations`, blank = `klein`). |
+| `model_id` | _(config default)_ | HF ID (backend `hf`) or Pollinations model (backend `pollinations`, blank = `flux.1-schnell`). |
 | `backend` | `"hf"` | `"hf"` or `"pollinations"`. |
 | `negative_prompt` | `""` | Exclusions. HF only — ignored on Pollinations. |
 | `lora_id` | `""` | HF LoRA adapter ID. HF + FLUX only. |
@@ -101,7 +101,7 @@ list_models(source?, provider?, limit?, include_loras?)
 | `image-edit` | `image_edit` | Editing-native IDs with verified I2I mapping (Kontext-dev, Qwen-Image-Edit). |
 | `provider` | `generate_image` + `hf` | Needs `provider` (fal-ai, nscale, …). Never `pollinations` — use `source="pollinations"`. |
 | `trending` / `downloads` | `generate_image` + `hf` | Live HF catalog. |
-| `pollinations` | `generate_image` + `pollinations` | 8 models, no token. Response includes `pollinations_default_model`. |
+| `pollinations` | `generate_image` + `pollinations` | 15 models (4 free, 11 paid). Requires API key. Aliases: `flux`, `kontext`, `seedream5`. |
 
 LoRA lookup (`include_loras`) and `list_loras` are HF-only.
 
@@ -161,13 +161,31 @@ Active profiles are injected as system context every turn and act **indirectly**
 | `black-forest-labs/FLUX.1-Kontext-dev` | **Edit default**: instruction-based I2I (fal/replicate/wavespeed verified) | pro (license) |
 | `Qwen/Qwen-Image-Edit` | Precise edits, Apache 2.0 | free |
 
-**Pollinations models** (via `list_models source="pollinations"`): `klein` (FLUX.2, default), `kontext`, `flux`, `uncensored-image-v2`, `anima`, `animagine` (anime/Pony-adjacent), `phoenix-1.0`, `klein-9b`.
+**Pollinations models** (via `list_models source="pollinations"`, requires API key):
+
+| Model | Alias | Access | Notes |
+|---|---|---|---|
+| `flux.1-schnell` | `flux` | free | Default model, fast |
+| `flux.1-kontext-pro` | `kontext` | free | Instruction editing, strict filter |
+| `flux.2-klein-4b` | — | free | Fast, small, for quick tests |
+| `z-image-turbo` | — | free | API default model |
+| `flux.2-pro` | — | paid | Highest quality FLUX-2 |
+| `flux.2-flex` | — | paid | Fast FLUX-2 variant |
+| `grok-imagine-image-2.0` | — | paid | Very high quality, supports quality param |
+| `grok-imagine-image` | — | paid | Fast xAI model |
+| `ideogram-v4-turbo` | — | paid | Best for text-in-image, logos |
+| `wan-2.7-image` | — | paid | Good for detailed scenes |
+| `qwen-image-3` | — | paid | Strong prompt adherence |
+| `gemini-3.1-flash-image` | — | paid | Fast Gemini |
+| `seedream-5.0-lite` | `seedream5` | paid | Very high quality, strict filter |
+| `seedream-5.0-pro` | — | paid | Highest ByteDance quality |
+| `gemini-3-pro-image` | — | paid | 4K, slow, highest quality |
 
 ---
 
 ## Workflows
 
-**Generate:** describe → `generate_image` → file path. Try `backend="pollinations"` for zero-setup or permissive takes.
+**Generate:** describe → `generate_image` → file path. Use `backend="pollinations"` for quick iterations or permissive takes (requires API key).
 
 **Edit (KEEP/CHANGE):** reference (prior result, bare filename, or URL) + change instruction → `image_edit`. Example: *"same pose, latex dress instead of silk, keep everything else monochrome."*
 
@@ -187,8 +205,8 @@ Active profiles are injected as system context every turn and act **indirectly**
 **Selective edit (B/W poster, two accents):**
 > image: `"x-video-…-poster.jpg"`, prompt: `"Do not colorize the image, keep everything monochrome except: crimson red leather boots (matte, catching light) and an ornate golden mask emitting a soft radiant glow"`
 
-**Pollinations, no token, portrait format:**
-> `generate_image(prompt="...", backend="pollinations", model_id="klein", width=768, height=1152)`
+**Pollinations, portrait format:**
+> `generate_image(prompt="...", backend="pollinations", model_id="black-forest-labs/flux.1-schnell", width=768, height=1152)`
 
 **With LoRA (HF):**
 > First: `list_loras(base_model="black-forest-labs/FLUX.1-dev")`
@@ -214,7 +232,7 @@ Active profiles are injected as system context every turn and act **indirectly**
 
 **Base T2I models have no image-to-image mapping.** Verified per HF provider API: FLUX.1-dev, SDXL, Qwen-Image map to `text-to-image` only on every provider — retries are doomed, which a live reasoning trace confirmed. `image_edit` therefore defaults to editing-native `FLUX.1-Kontext-dev` (I2I on fal-ai/replicate/wavespeed), with `Qwen-Image-Edit` as alternative; the error names both. `list_models source="image-edit"` keeps the two worlds apart.
 
-**Pollinations as second backend.** Filter off by default, no token, anonymous 1 req/15s (5s with free Seed key) — covers permissive fashion/editorial takes the HF pool filters. Limits are explicit: no negative prompt, no LoRAs, community alphas as fallback chain, optional key for watermark-free. Strength was deliberately omitted (not in the generic I2I spec; provider-specific and unverified).
+**Pollinations as second backend.** Filter off by default; API key required since Sep 2026 (anonymous access removed). 15 models available: 4 free (flux.1-schnell, kontext, klein-4b, z-image-turbo), 11 paid (cost pollen). Use `list_models source="pollinations"` for current model list with costs. No negative prompt, no LoRAs, community alphas as fallback chain.
 
 **LoRAs via fal-ai.** `generate_image` routes LoRA calls to `fal-ai`; I2I LoRA passthrough exists and is honestly marked "under verification". Curated prompts stay under ~150 words to bound token cost on every-turn injection.
 

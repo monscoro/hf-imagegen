@@ -57,20 +57,20 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
     id: "black-forest-labs/flux.2-pro",
     description:
       "FLUX.2 Pro — Neues FLUX-2 Flaggschiff. " +
-      "Höchste Qualität, flexibel für 1k–2k. Empfohlen für Production.",
+      "Höchste Qualität, flexibel für 1k–2k. Empfohlen für Production. paid_only.",
     style: "photorealistic, cinematic",
     speed: "medium",
-    access: "free",
+    access: "pro",
     source: "pollinations",
   },
   {
     id: "black-forest-labs/flux.2-flex",
     description:
       "FLUX.2 Flex — FLUX-2 variabel. " +
-      "Gute Qualität, schnellere Inferenz als Pro.",
+      "Gute Qualität, schnellere Inferenz als Pro. paid_only.",
     style: "photorealistic, artistic",
     speed: "fast",
-    access: "free",
+    access: "pro",
     source: "pollinations",
   },
   {
@@ -107,60 +107,60 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
     id: "google/gemini-3.1-flash-image",
     description:
       "Gemini 3.1 Flash Image — Schnell, gute Qualität. " +
-      "Ideal für schnelle Iterationen.",
+      "Ideal für schnelle Iterationen. Kosten: ~0.07 pollen.",
     style: "photorealistic, artistic",
     speed: "fast",
-    access: "free",
+    access: "pro",
     source: "pollinations",
   },
   {
     id: "x-ai/grok-imagine-image-2.0",
     description:
       "Grok Imagine 2.0 — xAI, sehr hohe Qualität. " +
-      "Unterstützt quality-Parameter. Guter Allrounder.",
+      "Unterstützt quality-Parameter. Kosten: ~0.07 pollen.",
     style: "photorealistic, cinematic",
     speed: "medium",
-    access: "free",
+    access: "pro",
     source: "pollinations",
   },
   {
     id: "x-ai/grok-imagine-image",
     description:
       "Grok Imagine — xAI, erste Generation. " +
-      "Solide Qualität, schnellere Inferenz.",
+      "Solide Qualität, schnellere Inferenz. Kosten: ~0.02 pollen.",
     style: "photorealistic, artistic",
     speed: "fast",
-    access: "free",
+    access: "pro",
     source: "pollinations",
   },
   {
     id: "ideogram-ai/ideogram-v4-turbo",
     description:
       "Ideogram V4 Turbo — Exzellent für Text-in-Bild. " +
-      "Schnell, gute Qualität für Grafiken und Logos.",
+      "Schnell, gute Qualität für Grafiken und Logos. Kosten: ~0.03 pollen.",
     style: "illustration, graphic, text-in-image",
     speed: "fast",
-    access: "free",
+    access: "pro",
     source: "pollinations",
   },
   {
     id: "alibaba/wan-2.7-image",
     description:
       "Wan 2.7 Image — Alibaba, multimodal. " +
-      "Gute Qualität für detailreiche Szenen.",
+      "Gute Qualität für detailreiche Szenen. Kosten: ~0.03 pollen.",
     style: "photorealistic, artistic",
     speed: "medium",
-    access: "free",
+    access: "pro",
     source: "pollinations",
   },
   {
     id: "qwen/qwen-image-3",
     description:
       "Qwen Image 3 — Alibaba/Qwen, stark für detailreiche Szenen. " +
-      "Gute Prompt-Treue.",
+      "Gute Prompt-Treue. Kosten: ~0.04 pollen.",
     style: "photorealistic, detailed",
     speed: "medium",
-    access: "free",
+    access: "pro",
     source: "pollinations",
   },
   {

@@ -24,10 +24,10 @@ export const pluginConfigSchematics = createConfigSchematics()
       "Use list_models with source='image-edit' to see suitable models.",
   }, "black-forest-labs/FLUX.1-Kontext-dev")
   .field("pollinationsApiKey", "string", {
-    displayName: "Pollinations API Key (optional)",
+    displayName: "Pollinations API Key (required)",
     subtitle:
-      "Optional key for backend='pollinations' (from enter.pollinations.ai). " +
-      "Leave blank for anonymous use (1 req/15s, possible watermark). " +
+      "Required for backend='pollinations' (since Sep 2026, anonymous access removed). " +
+      "Get your key at https://enter.pollinations.ai/keys. " +
       "With key: higher limits, no watermark (nologo), access to paid models. " +
       "Never share secret keys (sk_…) — use your own key locally.",
   }, "")

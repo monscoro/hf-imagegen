@@ -131,9 +131,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           sub-provider); browse them with list_loras. Notes: some models need a license
           accepted at huggingface.co (e.g. FLUX.2-dev); cold models may take 20-60s to warm up.
           BEST QUALITY for complex/detailed prompts — recommended for production use.
-        - "pollinations": Pollinations.ai — free, no token needed (optional pollinationsApiKey
-          in config for higher limits + no watermark). Uses gen.pollinations.ai API with
-          Bearer auth when API key is set (POST /v1/images/generations), GET /image/{prompt} when anonymous.
+        - "pollinations": Pollinations.ai — requires pollinationsApiKey in config
+          (since Sep 2026, anonymous access removed). Uses gen.pollinations.ai API with
+          Bearer auth (POST /v1/images/generations) or ?key= query param (GET /image/{prompt}).
           safe=false is sent explicitly. Strict content filter is off by default (safe=off).
           Models: full IDs AND short aliases both work on gen.pollinations.ai
           (e.g. black-forest-labs/flux.1-schnell === flux; kontext; seedream5).
@@ -314,7 +314,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               mimeType = detectImageMime(buffer);
               notes.push("Pollinations API (gen.pollinations.ai POST): safe=false, private (hidden from public feed), no watermark with key. Credit consumed.");
             } else {
-              // GET auf gen.pollinations.ai (anonym): unterstützt width/height einzeln + seed.
+              // GET auf gen.pollinations.ai: Key wird als Query-Param übergeben (key=).
+              // ACHTUNG: API verlangt jetzt immer einen Key — 401 ohne Key.
               const url = buildPollinationsGenGetUrl({
                 prompt,
                 model: modelToUse,
@@ -322,6 +323,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 height: height || undefined,
                 seed: seed || undefined,
                 quality,
+                apiKey: pollinationsKey || undefined,
               });
               if (quality !== undefined && !isQualitySupportedModel(modelToUse)) {
                 notes.push(`quality='${quality}' is only documented for gpt-image/grok-imagine-image-2.0 models and was ignored for '${modelToUse}'.`);
@@ -329,9 +331,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               if (seed && !isSeedSupportedModel(modelToUse)) {
                 notes.push(`seed is not supported by '${modelToUse}' (only flux.1-schnell, z-image-turbo, seedream-4.0, flux.2-klein-4b) and was ignored.`);
               }
-              ctx.status(`Calling Pollinations (${modelToUse}, quality=${quality ?? "medium"}, auth=anon)…`);
+              ctx.status(`Calling Pollinations (${modelToUse}, quality=${quality ?? "medium"}, auth=${pollinationsKey ? "key" : "anon"})…`);
               const res = await fetch(url, { signal: AbortSignal.timeout(180_000) });
               if (!res.ok) {
+                if (res.status === 401) {
+                  throw new Error("Pollinations API error: 401 Unauthorized — API key is required. Set pollinationsApiKey in plugin config (get one at https://enter.pollinations.ai/keys).");
+                }
                 throw new Error(`Pollinations error: ${res.status} ${res.statusText}`);
               }
               buffer = Buffer.from(await res.arrayBuffer());
@@ -340,7 +345,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 const preview = buffer.toString("utf-8").slice(0, 200);
                 throw new Error(`Pollinations returned non-image content (${mimeType}): ${preview}`);
               }
-              notes.push("Pollinations anonymous (no API key configured). Set pollinationsApiKey in plugin config for higher limits + no watermark.");
+              if (pollinationsKey) {
+                notes.push("Pollinations API (gen.pollinations.ai GET): safe=false, private (hidden from public feed), no watermark with key. Credit consumed.");
+              } else {
+                notes.push("Pollinations API key is NOT configured. Set pollinationsApiKey in plugin config to use Pollinations (required since Sep 2026).");
+              }
             }
             lastPollinationsCall = Date.now();
           } else {

@@ -37,15 +37,16 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - If you get a 403 on FLUX.2, tell the user to accept the model license at huggingface.co first.
 
 == POLLINATIONS.AI ==
-- Free backend, no token needed. Optional API key for higher limits + no watermark.
-- Uses gen.pollinations.ai API with Bearer auth when API key is set.
+- Requires pollinationsApiKey in plugin config (since Sep 2026, anonymous access removed).
+- Get key at https://enter.pollinations.ai/keys.
+- Uses gen.pollinations.ai API with Bearer auth (POST) or ?key= (GET).
 - LOWER QUALITY than HF — use for quick tests, not production.
 - Full IDs AND aliases both work (flux === black-forest-labs/flux.1-schnell).
 - seed: model-specific (flux.1-schnell, z-image-turbo, seedream-4.0, flux.2-klein-4b). POST ignores seed.
 - quality: only for gptimage/grok-imagine-image-2.0 family.
 - Content filter: kontext/seedream5 have STRICT filters — fashion-editorial often flagged.
 - RECOMMENDED: flux.1-schnell (default), flux.2-pro (best quality), grok-imagine-image-2.0 (xAI, very high quality).
-- Anon tier: ~1 request/15s, possible watermark. With key: higher limits, no watermark.
+- With key: higher limits, no watermark.
 
 == IMAGE SYSTEM PROMPT / STIMMUNG ==
 - Ein aktiver Neigungsprompt (Stimmungsprompt / Beeinflussungsprompt, synonym) soll INDIREKT wirken: leite daraus ab wie du generate_image prompts formulierst

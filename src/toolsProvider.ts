@@ -232,9 +232,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         if (!rateLimitResult.ok) {
           throw new Error(rateLimitResult.error);
         }
+        const pollinationsKey = usePollinations ? getPollinationsKey() : "";
         if (usePollinations) {
           // Anonymous: 1 req/15s; with key (Seed tier): 1 req/5s.
-          const pollinationsCooldownMs = getPollinationsKey() ? 5_000 : POLLINATIONS_ANON_COOLDOWN_MS;
+          const pollinationsCooldownMs = pollinationsKey ? 5_000 : POLLINATIONS_ANON_COOLDOWN_MS;
           const waited = Date.now() - lastPollinationsCall;
           if (waited < pollinationsCooldownMs) {
             throw new Error(
@@ -265,7 +266,6 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             if (cleanNegative) {
               notes.push("negative_prompt is not supported by Pollinations and was ignored.");
             }
-            const pollinationsKey = getPollinationsKey();
 
             if (pollinationsKey) {
               // Neue API: POST /v1/images/generations mit Bearer-Auth
@@ -292,7 +292,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               if ((width && !height) || (!width && height)) {
                 notes.push("POST size needs width AND height (WIDTHxHEIGHT); a single dimension was ignored. Use both for exact size.");
               }
-              ctx.status(`Calling Pollinations API (${modelToUse}, quality=${quality ?? "medium"})…`);
+              ctx.status(`Calling Pollinations API (${modelToUse}, quality=${quality ?? "medium"}, auth=key)…`);
               const res = await fetch(url, {
                 method: "POST",
                 headers,
@@ -312,7 +312,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               }
               buffer = Buffer.from(jsonRes.data[0].b64_json, "base64");
               mimeType = detectImageMime(buffer);
-              notes.push("Pollinations API (gen.pollinations.ai POST): safe=false, private (hidden from public feed), no watermark with key.");
+              notes.push("Pollinations API (gen.pollinations.ai POST): safe=false, private (hidden from public feed), no watermark with key. Credit consumed.");
             } else {
               // GET auf gen.pollinations.ai (anonym): unterstützt width/height einzeln + seed.
               const url = buildPollinationsGenGetUrl({
@@ -329,7 +329,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               if (seed && !isSeedSupportedModel(modelToUse)) {
                 notes.push(`seed is not supported by '${modelToUse}' (only flux.1-schnell, z-image-turbo, seedream-4.0, flux.2-klein-4b) and was ignored.`);
               }
-              ctx.status(`Calling Pollinations (${modelToUse}, quality=${quality ?? "medium"})…`);
+              ctx.status(`Calling Pollinations (${modelToUse}, quality=${quality ?? "medium"}, auth=anon)…`);
               const res = await fetch(url, { signal: AbortSignal.timeout(180_000) });
               if (!res.ok) {
                 throw new Error(`Pollinations error: ${res.status} ${res.statusText}`);
@@ -340,7 +340,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 const preview = buffer.toString("utf-8").slice(0, 200);
                 throw new Error(`Pollinations returned non-image content (${mimeType}): ${preview}`);
               }
-              notes.push("Pollinations anonymous: image may carry a watermark. Set pollinationsApiKey for higher limits + no watermark.");
+              notes.push("Pollinations anonymous (no API key configured). Set pollinationsApiKey in plugin config for higher limits + no watermark.");
             }
             lastPollinationsCall = Date.now();
           } else {

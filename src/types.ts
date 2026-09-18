@@ -21,6 +21,7 @@ export interface ModelInfo {
   speed: "fast" | "medium" | "slow";
   access: "free" | "pro";
   source: ModelSource;
+  cost?: string;
   parameters?: string;
   license?: string;
   compatible_loras?: LoRAInfo[];

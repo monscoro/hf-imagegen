@@ -634,6 +634,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
           DECISION: Use the best model for the task, not the cheapest.
           Paid models produce better results — the user expects quality over cost savings.
+          Each model includes a 'cost' field (e.g. '~0.03 pollen') for paid models.
           Snapshot Sep 2026 — prices may change.
 
         Rule of thumb: IDs from curated/provider/trending/downloads only work with
@@ -740,8 +741,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               : source === "pollinations"
                 ? "Pollinations IDs for generate_image backend='pollinations' (requires pollinationsApiKey). " +
                   "Snapshot Sep 2026; canonical IDs preferred, aliases (flux, kontext, seedream5) also work. " +
-                  "FREE: flux.1-schnell, flux.1-kontext-pro, flux.2-klein-4b, z-image-turbo. " +
-                  "PAID (require pollen balance): all others. " +
+                  "Each model includes a 'cost' field (e.g. '~0.03 pollen') for paid models; free models have no cost. " +
                   "Use full IDs — only flux/kontext/seedream5 are valid aliases. No LoRAs on this backend."
               : source === "image-edit"
                 ? "Editing-native IDs for the image_edit tool (verified image-to-image mapping). image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing."

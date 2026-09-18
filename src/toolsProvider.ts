@@ -124,66 +124,31 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Use when the user asks to generate, create, draw, paint, or visualize something.
         To edit an existing image instead, use image_edit.
 
-        Backends (parameter 'backend') — where the image is generated:
-        - "hf" (default): HuggingFace Inference Providers. Requires the HF API token from plugin config.
-          Models are HuggingFace IDs — browse them with list_models sources
-          curated/provider/trending/downloads. LoRAs: pass lora_id (uses the fal-ai
-          sub-provider); browse them with list_loras. Notes: some models need a license
-          accepted at huggingface.co (e.g. FLUX.2-dev); cold models may take 20-60s to warm up.
-          BEST QUALITY for complex/detailed prompts — recommended for production use.
-        - "pollinations": Pollinations.ai — requires pollinationsApiKey in config
-          (since Sep 2026, anonymous access removed). Uses gen.pollinations.ai API with
-          Bearer auth (POST) or ?key= query param (GET). safe=false is sent explicitly.
+        Backends (parameter 'backend'):
+        - "hf" (default): HuggingFace Inference Providers. Requires HF API token from config.
+          Models are HuggingFace IDs — browse with list_models (source curated/provider/trending/downloads).
+          LoRAs: pass lora_id (fal-ai sub-provider); browse with list_loras.
+          BEST QUALITY for complex/detailed prompts — recommended for production.
+        - "pollinations": Pollinations.ai — requires pollinationsApiKey in config.
+          Uses gen.pollinations.ai API. Browse models with list_models source='pollinations'.
 
-          MODEL SELECTION — IMPORTANT:
-          • model_id: use FULL canonical IDs (e.g. "black-forest-labs/flux.1-schnell").
-          • SHORT ALIASES that work: "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
-            "seedream5" (= seedream-5.0-lite). NO OTHER SHORT ALIASES ARE VALID.
-          • Do NOT use "flux.2-pro", "flux.2-flex", "grok-imagine-image-2.0" as aliases — use full IDs.
-          • Blank model_id defaults to "black-forest-labs/flux.1-schnell".
+        MODEL IDS for pollinations backend:
+        • Use FULL canonical IDs (e.g. "black-forest-labs/flux.1-schnell").
+        • Valid short aliases: "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
+          "seedream5" (= seedream-5.0-lite). ALL OTHER IDs MUST BE FULL FORM.
+        • Blank model_id defaults to "black-forest-labs/flux.1-schnell".
 
-          FREE MODELS (no pollen cost — use when budget is a concern):
-          "black-forest-labs/flux.1-schnell" — solid baseline, fast (alias: flux)
-          "black-forest-labs/flux.1-kontext-pro" — instruction editing, STRICT filter (alias: kontext)
-          "black-forest-labs/flux.2-klein-4b" — fast, small, for quick tests
-          "tongyi-mai/z-image-turbo" — API default model
+        PARAMETERS:
+        • prompt: descriptive text — subject, style, lighting, mood, quality terms.
+        • width/height: pollinations only. POST needs BOTH; GET supports single dimension.
+        • seed: model-specific (flux.1-schnell, z-image-turbo, flux.2-klein-4b). POST ignores seed.
+        • quality: only for gptimage/grok-imagine-image-2.0 family; ignored otherwise.
+        • negative_prompt: HF only, ignored with pollinations.
+        • lora_id: HF only, rejected with error on pollinations.
 
-          PAID MODELS (cost pollen — USE FREELY, the user has balance and expects quality):
-          "black-forest-labs/flux.2-pro" — highest quality FLUX-2 (~0.034 pollen)
-          "black-forest-labs/flux.2-flex" — fast FLUX-2 variant (paid)
-          "x-ai/grok-imagine-image-2.0" — very high quality, supports quality param (~0.07 pollen)
-          "x-ai/grok-imagine-image" — fast xAI model (~0.02 pollen)
-          "ideogram-ai/ideogram-v4-turbo" — best for text-in-image (~0.03 pollen)
-          "alibaba/wan-2.7-image" — good for detailed scenes (~0.03 pollen)
-          "qwen/qwen-image-3" — strong prompt adherence (~0.04 pollen)
-          "google/gemini-3.1-flash-image" — fast Gemini (~0.07 pollen)
-          "bytedance/seedream-5.0-lite" — very high quality, VERY STRICT filter (~? pollen, alias: seedream5)
-          "bytedance/seedream-5.0-pro" — highest ByteDance quality (paid)
-          "google/gemini-3-pro-image" — 4K, slow, highest quality (paid)
-
-          DECISION GUIDE: Choose the BEST model for the task, not the cheapest.
-          • If user asks for "best quality" or "production" → use flux.2-pro or grok-imagine-image-2.0 (PAID)
-          • If user asks for "quick test" → use flux.1-schnell (FREE)
-          • If user does not specify → prefer PAID models for better results (flux.2-pro, grok-imagine-image-2.0)
-          • The user HAS pollen balance and WANTS you to use paid models. Do not avoid them.
-
-          CONTENT FILTER: kontext/seedream5 flag fashion-editorial as "Sexual_Prompt".
-          Other models (flux, grok, ideogram) have filter off by default.
-
-          PARAMETERS:
-          • prompt: descriptive text (subject, style, lighting, mood, quality terms).
-          • width/height: pollinations only. POST needs BOTH; GET supports single dimension.
-          • seed: model-specific (flux.1-schnell, z-image-turbo, seedream-4.0, flux.2-klein-4b).
-            POST ignores seed entirely; use GET for reproducible results.
-          • quality: only for gptimage/grok-imagine-image-2.0 family; ignored otherwise.
-          • negative_prompt: HF only, ignored with backend='pollinations'.
-          • lora_id: HF only, rejected with error on pollinations.
-
-        FILES: the image is saved under the plugin output directory (config 'Output Directory',
-        returned as output_dir). Use the returned absolute file_path when handing the image to
-        other tools — do NOT strip it to a bare filename; other tools may not search the output
-        directory automatically. Find results via list_output_images. quota.remaining counts the
-        plugin's own daily limit (config 'Daily Generation Limit'), not HF credits.
+        FILES: saved under plugin output directory (config 'Output Directory'). Use the returned
+        absolute file_path when handing the image to other tools — do NOT strip to bare filename.
+        Find results via list_output_images. quota.remaining counts plugin daily limit, not HF credits.
       `,
       parameters: {
         prompt: z.string().min(1).describe(
@@ -644,16 +609,31 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         - "provider": HuggingFace IDs served by one inference sub-provider (needs 'provider',
           e.g. fal-ai, nscale) — for backend='hf'.
         - "trending" / "downloads": live HuggingFace catalog — for backend='hf'.
-        - "pollinations": Pollinations.ai models (requires pollinationsApiKey) —
-          for generate_image backend='pollinations'.
+        - "pollinations": Pollinations.ai models (requires pollinationsApiKey in config).
           ALIASES: only "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
           "seedream5" (= seedream-5.0-lite). Use FULL IDs for all other models.
-          FREE: flux.1-schnell, flux.1-kontext-pro, flux.2-klein-4b, z-image-turbo.
-          PAID (cost pollen, USE FREELY — user has balance):
-                flux.2-pro (~0.034), flux.2-flex, grok-imagine-image-2.0 (~0.07),
-                grok-imagine-image (~0.02), ideogram-v4-turbo (~0.03),
-                wan-2.7-image (~0.03), qwen-image-3 (~0.04),
-                gemini-3.1-flash-image (~0.07), seedream-5.0-lite/pro, gemini-3-pro-image.
+
+          FREE (no pollen cost):
+          "flux.1-schnell" (alias: flux) — solid baseline, fast
+          "flux.1-kontext-pro" (alias: kontext) — instruction editing, STRICT content filter
+          "flux.2-klein-4b" — fast, small, for quick tests
+          "z-image-turbo" — API default model
+
+          PAID (require pollen balance, costs are approximate per request):
+          "flux.2-pro" — highest quality FLUX-2 (~0.03 pollen)
+          "flux.2-flex" — fast FLUX-2 variant (paid)
+          "grok-imagine-image-2.0" — very high quality, supports quality param (~0.07 pollen)
+          "grok-imagine-image" — fast xAI model (~0.02 pollen)
+          "ideogram-v4-turbo" — best for text-in-image, logos (~0.03 pollen)
+          "wan-2.7-image" — good for detailed scenes (~0.03 pollen)
+          "qwen-image-3" — strong prompt adherence (~0.04 pollen)
+          "gemini-3.1-flash-image" — fast Gemini (~0.07 pollen)
+          "seedream-5.0-lite" (alias: seedream5) — very high quality, VERY strict content filter
+          "seedream-5.0-pro" — highest ByteDance quality (paid)
+          "gemini-3-pro-image" — 4K, slow, highest quality (paid)
+
+          DECISION: Use the best model for the task, not the cheapest.
+          Paid models produce better results — the user expects quality over cost savings.
           Snapshot Sep 2026 — prices may change.
 
         Rule of thumb: IDs from curated/provider/trending/downloads only work with
@@ -758,7 +738,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             : source === "curated"
               ? "Expert-verified HuggingFace IDs for generate_image backend='hf'. Use list_loras with base_model to find compatible LoRAs."
               : source === "pollinations"
-                ? "Pollinations IDs for generate_image backend='pollinations', no token needed. Snapshot Sep 2026; canonical IDs preferred, aliases (klein, flux, kontext) also work. No LoRAs on this backend. current_default_model is the HF-backend default — use pollinations_default_model here. If a community/* model fails (alpha proxies), retry with klein or flux."
+                ? "Pollinations IDs for generate_image backend='pollinations' (requires pollinationsApiKey). " +
+                  "Snapshot Sep 2026; canonical IDs preferred, aliases (flux, kontext, seedream5) also work. " +
+                  "FREE: flux.1-schnell, flux.1-kontext-pro, flux.2-klein-4b, z-image-turbo. " +
+                  "PAID (require pollen balance): all others. " +
+                  "Use full IDs — only flux/kontext/seedream5 are valid aliases. No LoRAs on this backend."
               : source === "image-edit"
                 ? "Editing-native IDs for the image_edit tool (verified image-to-image mapping). image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing."
                 : "HuggingFace IDs for generate_image backend='hf'. Pass model_id to generate_image to use a model.",

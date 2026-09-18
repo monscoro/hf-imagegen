@@ -57,7 +57,7 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
     id: "black-forest-labs/flux.2-pro",
     description:
       "FLUX.2 Pro — Neues FLUX-2 Flaggschiff. " +
-      "Höchste Qualität, flexibel für 1k–2k. Empfohlen für Production. paid_only.",
+      "Höchste Qualität, flexibel für 1k–2k. Empfohlen für Production.",
     style: "photorealistic, cinematic",
     speed: "medium",
     access: "pro",
@@ -67,7 +67,7 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
     id: "black-forest-labs/flux.2-flex",
     description:
       "FLUX.2 Flex — FLUX-2 variabel. " +
-      "Gute Qualität, schnellere Inferenz als Pro. paid_only.",
+      "Gute Qualität, schnellere Inferenz als Pro.",
     style: "photorealistic, artistic",
     speed: "fast",
     access: "pro",
@@ -77,7 +77,7 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
     id: "bytedance/seedream-5.0-lite",
     description:
       "Seedream 5.0 Lite — ByteDance, sehr hohe Qualität. " +
-      "Min. 1920x1920 px. paid_only (Key mit Guthaben nötig). " +
+      "Min. 1920x1920 px. " +
       "ACHTUNG: Sehr strenge Content-Filter.",
     style: "photorealistic, high-res",
     speed: "slow",

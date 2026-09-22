@@ -242,6 +242,7 @@ const QUALITY_SUPPORTED_HINTS = [
   "gpt-image",
   "gptimage",
   "grok-imagine-image-2.0",
+  "grok-imagine-image-quality",
 ];
 
 export function isQualitySupportedModel(modelId: string): boolean {
@@ -372,7 +373,7 @@ export function buildPollinationsEditForm(opts: PollinationsEditOptions): {
 
   const form = new FormData();
   form.append("prompt", opts.prompt);
-  form.append("model", opts.model || POLLINATIONS_DEFAULT_EDIT_MODEL);
+  form.append("model", opts.model);
   form.append("response_format", "b64_json");
   form.append("safe", "false");
   form.append("private", "true");
@@ -380,7 +381,7 @@ export function buildPollinationsEditForm(opts: PollinationsEditOptions): {
 
   let qualityDropped = false;
   if (opts.quality) {
-    if (isQualitySupportedModel(opts.model || POLLINATIONS_DEFAULT_EDIT_MODEL)) {
+    if (isQualitySupportedModel(opts.model)) {
       form.append("quality", opts.quality);
     } else {
       qualityDropped = true;

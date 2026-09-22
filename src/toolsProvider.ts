@@ -536,12 +536,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             await resolveImageInput(image, [outputDir]);
           await mkdir(outputDir, { recursive: true });
 
-          let outBuffer: Buffer;
-          let mimeType: string;
-          let modelToUse: string;
-          const notes: string[] = [];
+           let outBuffer: Buffer;
+           let mimeType: string;
+           let modelToUse: string;
+           const notes: string[] = [];
 
-          if (usePollinations) {
+           if (quality !== undefined && !usePollinations) {
+             notes.push("quality is only supported with backend='pollinations' and was ignored here.");
+           }
+
+           if (usePollinations) {
             modelToUse = model_id.trim() || POLLINATIONS_DEFAULT_EDIT_MODEL;
             if (cleanNegative) {
               notes.push("negative_prompt is not supported by Pollinations and was ignored.");

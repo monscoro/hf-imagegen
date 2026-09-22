@@ -19,10 +19,10 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: "Default Edit Model",
     subtitle:
       "HuggingFace model ID for image_edit (image-to-image). Must be an editing-native model: " +
-      "black-forest-labs/FLUX.1-Kontext-dev (default) or Qwen/Qwen-Image-Edit. " +
-      "Text-to-image base models (FLUX.1-dev, SDXL, Qwen-Image) do NOT work for editing. " +
-      "Use list_models with source='image-edit' to see suitable models.",
-  }, "black-forest-labs/FLUX.1-Kontext-dev")
+      "black-forest-labs/FLUX.2-dev (default) or alternatives black-forest-labs/FLUX.1-Kontext-dev, " +
+      "Qwen/Qwen-Image-Edit. Text-to-image base models (FLUX.1-dev, SDXL, Qwen-Image) do NOT work " +
+      "for editing. Use list_models with source='image-edit' to see suitable models.",
+  }, "black-forest-labs/FLUX.2-dev")
   .field("pollinationsApiKey", "string", {
     displayName: "Pollinations API Key (required)",
     subtitle:

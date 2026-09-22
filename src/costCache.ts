@@ -57,6 +57,7 @@ const HF_COSTS: Record<string, CostEntry> = {
   "stabilityai/stable-diffusion-xl-base-1.0": { cost: "free", rawTokens: 0 },
   "stabilityai/stable-diffusion-3.5-large": { cost: "free (gated)", rawTokens: 0 },
   "Tongyi-MAI/Z-Image-Turbo": { cost: "free", rawTokens: 0 },
+  "black-forest-labs/FLUX.2-dev": { cost: "free (license needed)", rawTokens: 0 },
   "black-forest-labs/FLUX.1-Kontext-dev": { cost: "free (license needed)", rawTokens: 0 },
   "Qwen/Qwen-Image-Edit": { cost: "free", rawTokens: 0 },
 };

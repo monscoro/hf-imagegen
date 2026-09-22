@@ -21,10 +21,12 @@ import {
   getPollinationsModels,
   buildPollinationsPostBody,
   buildPollinationsGenGetUrl,
+  buildPollinationsEditForm,
   detectImageMime,
   isQualitySupportedModel,
   isSeedSupportedModel,
   POLLINATIONS_DEFAULT_MODEL,
+  POLLINATIONS_DEFAULT_EDIT_MODEL,
   POLLINATIONS_ANON_COOLDOWN_MS,
 } from "./pollinations";
 import { getAllCosts, getCacheInfo } from "./costCache";
@@ -106,7 +108,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   };
   const getModel = () => cfg.get("defaultModel").trim() || "black-forest-labs/FLUX.1-dev";
   const getEditModel = () =>
-    cfg.get("defaultEditModel").trim() || "black-forest-labs/FLUX.1-Kontext-dev";
+    cfg.get("defaultEditModel").trim() || "black-forest-labs/FLUX.2-dev";
   const getOutputDir = () => resolvePath(cfg.get("outputDirectory").trim() || "~/hf-images");
   const getRateLimitConfig = () => ({
     cooldownMs: Number(cfg.get("rateLimitCooldown")) || 5000,
@@ -398,25 +400,34 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "image_edit",
       description: text`
-        Edit an existing image (image-to-image). HF backend only.
+        Edit an existing image (image-to-image). Backends: hf or pollinations.
 
         Use when the user provides a reference image plus a change instruction
         (e.g. a generated portrait + "same pose, latex dress instead of silk").
         Reference image = KEEP, prompt = CHANGE — mirrors the Neigungsprompt gates:
         pose/composition stay, the instruction transforms material, light, or details.
 
-        MODELS — important: use editing-native models, NOT text-to-image base models.
-        Base models (FLUX.1-dev, SDXL, Qwen-Image) have NO image-to-image provider mapping
-        and fail with "not supported for task image-to-image". Working models:
-        - "black-forest-labs/FLUX.1-Kontext-dev" (default): instruction editing, fal-ai/replicate/wavespeed
-        - "Qwen/Qwen-Image-Edit": precise edits, fal-ai/replicate/wavespeed
-        Browse them with list_models source='curated'.
+        Backends (parameter 'backend'):
+        - "hf" (default): HuggingFace Inference Providers, needs HF API token.
+          Editing-native models ONLY — base T2I models (FLUX.1-dev, SDXL, Qwen-Image)
+          have NO image-to-image provider mapping and fail. Working models:
+          - "black-forest-labs/FLUX.2-dev" (default): instruction editing, fal-ai/replicate
+          - "black-forest-labs/FLUX.1-Kontext-dev": instruction editing, fal-ai/replicate/wavespeed
+          - "Qwen/Qwen-Image-Edit": precise edits, fal-ai/replicate/wavespeed
+          Browse with list_models source='image-edit'.
+        - "pollinations": Pollinations.ai POST /v1/images/edits, needs pollinationsApiKey.
+          Blank model_id defaults to "x-ai/grok-imagine-image-quality" (alias "aurora") —
+          deliberately non-restrictive (strict filters on kontext/seedream flag fashion-editorial
+          and burn credits on failed edits). Other edit-capable IDs with /v1/images/edits:
+          x-ai/grok-imagine-image (cheaper), black-forest-labs/flux.1-kontext-pro (STRICT),
+          flux.2-*, gpt-image-2*, seedream-5*.
+          Browse with list_models source='pollinations'.
 
         The 'image' parameter accepts a local file path (also from earlier generate_image
         results) or a public image URL. To generate from scratch, use generate_image instead.
         An active Neigungsprompt guides how the change is formulated, same as generate_image.
-        Optional lora_id (FLUX base models, fal-ai passthrough — effectiveness on image-to-image
-        is currently being verified, report what you observe).
+        Optional lora_id/negative_prompt/provider: HF backend only (rejected or ignored
+        with pollinations).
 
         FILES: the edited image is saved under the plugin output directory (config
         'Output Directory', returned as output_dir). Use the returned absolute file_path when
@@ -432,40 +443,86 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "CHANGE instruction: what to transform (subject, garment, material, light, mood). " +
           "Be specific — everything not mentioned tends to stay as in the reference."
         ),
+        backend: z.enum(["hf", "pollinations"]).default("hf").describe(
+          "Edit backend: 'hf' (HuggingFace, needs token) or 'pollinations' " +
+          "(needs pollinationsApiKey; uses POST /v1/images/edits)."
+        ),
         model_id: z.string().default("").describe(
-          "Editing-native model ID. Blank = defaultEditModel from plugin config " +
-          "('black-forest-labs/FLUX.1-Kontext-dev'). Alternative: 'Qwen/Qwen-Image-Edit' " +
-          "(see list_models source='image-edit'). Do NOT use text-to-image base models " +
-          "(FLUX.1-dev, SDXL, Qwen-Image) — they have no image-to-image mapping."
+          "Model override. backend='hf': editing-native HF ID, blank = defaultEditModel " +
+          "('black-forest-labs/FLUX.2-dev'); alternatives 'black-forest-labs/FLUX.1-Kontext-dev', " +
+          "'Qwen/Qwen-Image-Edit' (list_models source='image-edit'). " +
+          "backend='pollinations': full ID or alias (e.g. 'x-ai/grok-imagine-image-quality', " +
+          "'x-ai/grok-imagine-image', 'black-forest-labs/flux.1-kontext-pro'), " +
+          "blank = 'x-ai/grok-imagine-image-quality' (few filters)."
         ),
         provider: z.string().default("auto").describe(
           "HF inference sub-provider (auto, fal-ai, replicate, wavespeed). " +
-          "Default auto resolves via the model's image-to-image mapping."
+          "Default auto resolves via the model's image-to-image mapping. HF backend only — " +
+          "ignored with backend='pollinations'."
         ),
         negative_prompt: z.string().default("").describe(
-          "What to exclude from the image (e.g. 'blurry, low quality, text, watermark')."
+          "What to exclude from the image (e.g. 'blurry, low quality, text, watermark'). " +
+          "HF only — ignored with backend='pollinations'."
         ),
         lora_id: z.string().default("").describe(
-          "HuggingFace LoRA adapter ID (e.g. 'alvdansen/flux-koda'). FLUX base models only, " +
-          "passed through to fal-ai — I2I effectiveness under verification."
+          "HuggingFace LoRA adapter ID (e.g. 'alvdansen/flux-koda'). HF backend + FLUX base " +
+          "models only, passed through to fal-ai — rejected with backend='pollinations'."
         ),
         lora_scale: z.number().min(0).max(2).default(1.0).describe(
           "Strength of the LoRA adapter. 0.5–1.0 is typical; higher = stronger effect."
         ),
+        quality: z.enum(["low", "medium", "high", "hd"]).optional().describe(
+          "Image quality (backend='pollinations' only, ignored with backend='hf'). " +
+          "Blank = medium (server default). Only documented for gpt-image/grok-imagine-image-2.0; " +
+          "for other models it is ignored and a note is added to the result."
+        ),
       },
-      implementation: safe_impl("image_edit", async ({ image, prompt, model_id, provider, negative_prompt, lora_id, lora_scale }, ctx) => {
+      implementation: safe_impl("image_edit", async ({ image, prompt, backend, model_id, provider, negative_prompt, lora_id, lora_scale, quality }, ctx) => {
         ctx.status("Reading reference image…");
-        const token = getToken();
-        if (!token) {
+        const usePollinations = backend === "pollinations";
+        const cleanLora = lora_id.trim();
+        const cleanNegative = negative_prompt.trim();
+
+        if (!usePollinations) {
+          const token = getToken();
+          if (!token) {
+            throw new Error(
+              "HuggingFace API token is not set. " +
+              "Go to plugin settings and paste your token from huggingface.co/settings/tokens. " +
+              "Alternatively use backend='pollinations' which needs no HF token."
+            );
+          }
+        }
+        if (usePollinations && cleanLora) {
           throw new Error(
-            "HuggingFace API token is not set. " +
-            "Go to plugin settings and paste your token from huggingface.co/settings/tokens."
+            "lora_id is not supported with backend='pollinations'. " +
+            "Use backend='hf' with a FLUX base model for LoRAs."
           );
         }
 
         const rateLimitResult = checkRateLimit(getRateLimitConfig());
         if (!rateLimitResult.ok) {
           throw new Error(rateLimitResult.error);
+        }
+
+        const pollinationsKey = usePollinations ? getPollinationsKey() : "";
+        if (usePollinations) {
+          if (!pollinationsKey) {
+            throw new Error(
+              "Pollinations API key is not set (required since Sep 2026). " +
+              "Set pollinationsApiKey in plugin config (get one at https://enter.pollinations.ai/keys) " +
+              "or use backend='hf'."
+            );
+          }
+          // Gleicher Cooldown wie generate_image (gleicher Account/Rate-Limit).
+          const pollinationsCooldownMs = pollinationsKey ? 5_000 : POLLINATIONS_ANON_COOLDOWN_MS;
+          const waited = Date.now() - lastPollinationsCall;
+          if (waited < pollinationsCooldownMs) {
+            throw new Error(
+              `Pollinations allows ~1 request per ${pollinationsCooldownMs / 1000}s on your tier. ` +
+              `Wait ${Math.ceil((pollinationsCooldownMs - waited) / 1000)}s and retry.`
+            );
+          }
         }
 
         if (isGenerating) {
@@ -477,50 +534,126 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           const outputDir = getOutputDir();
           const { buffer: inputBuffer, mimeType: inputMime, source: inputSource } =
             await resolveImageInput(image, [outputDir]);
-          // Editing-native default from config: base T2I models have no image-to-image mapping.
-          const modelToUse = model_id.trim() || getEditModel();
-          const providerToUse = (provider.trim() || "auto") as
-            "auto" | "fal-ai" | "replicate" | "wavespeed" | "together" | "nscale";
-          const cleanNegative = negative_prompt.trim();
-          const cleanLora = lora_id.trim();
-
           await mkdir(outputDir, { recursive: true });
 
-          const hf = new InferenceClient(token);
-          // Copy out of the Node buffer pool so TS accepts it as BlobPart.
-          const inputBlob = new Blob([new Uint8Array(inputBuffer)], { type: inputMime });
+          let outBuffer: Buffer;
+          let mimeType: string;
+          let modelToUse: string;
+          const notes: string[] = [];
 
-          const parameters: Record<string, unknown> = {};
-          if (cleanNegative) parameters.negative_prompt = cleanNegative;
-          if (cleanLora) parameters.loras = [{ path: cleanLora, scale: lora_scale }];
-
-          ctx.status(`Editing with ${modelToUse}…`);
-          let blob: Blob;
-          try {
-            blob = await hf.imageToImage({
-              provider: providerToUse,
-              model: modelToUse,
-              inputs: inputBlob,
-              parameters: {
-                prompt,
-                ...parameters,
-              },
-            }) as unknown as Blob;
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            if (/not supported for task image-to-image/i.test(msg)) {
-              throw new Error(
-                `${msg} — use an editing-native model instead: ` +
-                `'black-forest-labs/FLUX.1-Kontext-dev' (default) or 'Qwen/Qwen-Image-Edit'. ` +
-                `Base text-to-image models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping.`
-              );
+          if (usePollinations) {
+            modelToUse = model_id.trim() || POLLINATIONS_DEFAULT_EDIT_MODEL;
+            if (cleanNegative) {
+              notes.push("negative_prompt is not supported by Pollinations and was ignored.");
             }
-            throw err;
+            if (provider.trim() && provider.trim() !== "auto") {
+              notes.push(`provider='${provider.trim()}' is HF-only and was ignored (backend='pollinations').`);
+            }
+
+            const { url, headers, form, qualityDropped } = buildPollinationsEditForm({
+              prompt,
+              model: modelToUse,
+              imageBuffer: inputBuffer,
+              imageMime: inputMime,
+              apiKey: pollinationsKey,
+              quality,
+            });
+            if (qualityDropped && quality) {
+              notes.push(`quality='${quality}' is only documented for gpt-image/grok-imagine-image-2.0 models and was ignored for '${modelToUse}'.`);
+            }
+
+            ctx.status(`Editing with Pollinations (${modelToUse})…`);
+            const res = await fetch(url, {
+              method: "POST",
+              headers,
+              body: form,
+              signal: AbortSignal.timeout(180_000),
+            });
+            if (!res.ok) {
+              const errText = await res.text().catch(() => "");
+              if (res.status === 401) {
+                throw new Error("Pollinations API error: 401 Unauthorized — set pollinationsApiKey in plugin config.");
+              }
+              if (res.status === 402 || res.status === 403) {
+                throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText} — paid_only model or exhausted Pollen budget? Check key balance / use a free model.`);
+              }
+              throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText}`);
+            }
+
+            // Antwort: JSON mit data[0].b64_json ODER data[0].url (ggf. nachladen).
+            const contentType = (res.headers.get("content-type") || "").toLowerCase();
+            if (contentType.includes("application/json")) {
+              const jsonRes = await res.json() as {
+                data?: { b64_json?: string; url?: string }[];
+              };
+              const item = jsonRes.data?.[0];
+              if (item?.b64_json) {
+                outBuffer = Buffer.from(item.b64_json, "base64");
+                mimeType = detectImageMime(outBuffer);
+              } else if (item?.url) {
+                const dl = await fetch(item.url, { signal: AbortSignal.timeout(60_000) });
+                if (!dl.ok) {
+                  throw new Error(`Pollinations returned an image URL but download failed: ${dl.status} ${dl.statusText}`);
+                }
+                outBuffer = Buffer.from(await dl.arrayBuffer());
+                mimeType = detectImageMime(outBuffer);
+              } else {
+                throw new Error("Pollinations API returned no image data");
+              }
+            } else {
+              outBuffer = Buffer.from(await res.arrayBuffer());
+              mimeType = contentType.startsWith("image/") ? contentType.split(";")[0] : detectImageMime(outBuffer);
+              if (!mimeType.startsWith("image/")) {
+                const preview = outBuffer.toString("utf-8").slice(0, 200);
+                throw new Error(`Pollinations returned non-image content (${mimeType}): ${preview}`);
+              }
+            }
+            lastPollinationsCall = Date.now();
+            notes.push("Pollinations API (gen.pollinations.ai POST /v1/images/edits): safe=false, private, no watermark with key. Credit consumed.");
+          } else {
+            const token = getToken();
+            modelToUse = model_id.trim() || getEditModel();
+            const providerToUse = (provider.trim() || "auto") as
+              "auto" | "fal-ai" | "replicate" | "wavespeed" | "together" | "nscale";
+
+            const hf = new InferenceClient(token);
+            // Copy out of the Node buffer pool so TS accepts it as BlobPart.
+            const inputBlob = new Blob([new Uint8Array(inputBuffer)], { type: inputMime });
+
+            const parameters: Record<string, unknown> = {};
+            if (cleanNegative) parameters.negative_prompt = cleanNegative;
+            if (cleanLora) parameters.loras = [{ path: cleanLora, scale: lora_scale }];
+
+            ctx.status(`Editing with ${modelToUse}…`);
+            let blob: Blob;
+            try {
+              blob = await hf.imageToImage({
+                provider: providerToUse,
+                model: modelToUse,
+                inputs: inputBlob,
+                parameters: {
+                  prompt,
+                  ...parameters,
+                },
+              }) as unknown as Blob;
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (/not supported for task image-to-image/i.test(msg)) {
+                throw new Error(
+                  `${msg} — use an editing-native model instead: ` +
+                  `'black-forest-labs/FLUX.2-dev' (default), 'black-forest-labs/FLUX.1-Kontext-dev' ` +
+                  `or 'Qwen/Qwen-Image-Edit'. ` +
+                  `Base text-to-image models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping.`
+                );
+              }
+              throw err;
+            }
+
+            mimeType = blob.type || "image/png";
+            outBuffer = Buffer.from(await blob.arrayBuffer());
           }
 
-          const mimeType = blob.type || "image/png";
-          const outBuffer = Buffer.from(await blob.arrayBuffer());
-          const { filePath, filename } = await saveImageBuffer(outBuffer, mimeType, outputDir);
+          const { filePath, filename } = await saveImageBuffer(outBuffer, mimeType, outputDir, usePollinations ? "pl" : "hf");
 
           recordGeneration();
           const quota = checkRateLimit(getRateLimitConfig());
@@ -530,7 +663,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             file_path: filePath,
             filename,
             output_dir: outputDir,
-            backend: "hf",
+            backend: usePollinations ? "pollinations" : "hf",
             model_used: modelToUse,
             input_image: image,
             input_source: inputSource,
@@ -547,6 +680,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               remaining: quota.remaining,
               resets_in_hours: quota.resetInHours,
             },
+            notes: notes.length > 0 ? notes : undefined,
             message:
               `Edited image saved to ${filePath}` +
               (quota.remaining === 0
@@ -606,8 +740,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         - "curated" (default): expert-verified HuggingFace IDs for generate_image backend='hf',
           with descriptions and LoRA compatibility info.
         - "image-edit": editing-native HuggingFace IDs with verified image-to-image mapping
-          (Kontext-dev, Qwen-Image-Edit) — for the image_edit tool. Do NOT use text-to-image
-          base models from the other sources here; they fail with "not supported for task".
+          (FLUX.2-dev, Kontext-dev, Qwen-Image-Edit) — for the image_edit tool. Do NOT use
+          text-to-image base models from the other sources here; they fail with "not supported for task".
         - "provider": HuggingFace IDs served by one inference sub-provider (needs 'provider',
           e.g. fal-ai, nscale) — for backend='hf'.
         - "trending" / "downloads": live HuggingFace catalog — for backend='hf'.

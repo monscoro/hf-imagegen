@@ -35,7 +35,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 |---|---|---|
 | HuggingFace API Token | _(blank)_ | **Required for backend `hf`.** Token from huggingface.co/settings/tokens, at least `read` scope. Not needed for `pollinations`. |
 | Default Model | `black-forest-labs/FLUX.1-dev` | Text-to-image model for `generate_image` (backend `hf`). Overridable per call. |
-| Default Edit Model | `black-forest-labs/FLUX.1-Kontext-dev` | Image-to-image model for `image_edit`. Must be editing-native (Kontext-dev or Qwen-Image-Edit). |
+| Default Edit Model | `black-forest-labs/FLUX.2-dev` | Image-to-image model for `image_edit`. Must be editing-native (FLUX.2-dev, Kontext-dev or Qwen-Image-Edit). |
 | Pollinations API Key | _(blank)_ | **Required for backend `pollinations`** (since Sep 2026, anonymous access removed). Get one at enter.pollinations.ai/keys. Never share `sk_…` keys. |
 | Output Directory | `~/hf-images` | Where images are saved. Created automatically. Supports `~/` prefix. Also the search base for bare filenames in `image_edit` and the scope of `list_output_images`. |
 | Generation Cooldown (ms) | `5000` | Minimum gap between generations (both backends). |
@@ -81,13 +81,22 @@ generate_image(prompt, model_id?, backend?, negative_prompt?, lora_id?, lora_sca
 
 Returns `file_path`, `output_dir`, `backend`, `model_used`, sizes, a `quota` block (plugin daily limit → `remaining`, `used`, `limit`, `resets_in_hours` — *plugin guard, not HF credits*), and `notes` (ignored params, watermark hints). Use `file_path` as-is when handing images to other tools — other plugins may not find bare filenames.
 
-### `image_edit` — Edit a reference image (HF only)
+### `image_edit` — Edit a reference image (hf or pollinations)
 
 ```
-image_edit(image, prompt, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?)
+image_edit(image, prompt, backend?, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?, quality?)
 ```
 
-Reference image = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` accepts a local path, a bare filename (looked up in the output directory first), or a public URL. Default model is `defaultEditModel` (Kontext-dev). **Important:** only editing-native models work — base T2I models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping and fail; the error message says exactly that. `lora_id` is passed through to fal-ai (I2I effectiveness under verification — report observations). Returns `file_path`, `output_dir`, the full `quota` block, and a clear warning when the plugin's daily limit is hit.
+Reference image = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` accepts a local path, a bare filename (looked up in the output directory first), or a public URL.
+
+| Parameter | Default | Description |
+|---|---|---|
+| `backend` | `"hf"` | `"hf"` (needs HF token) or `"pollinations"` (needs pollinationsApiKey, `POST /v1/images/edits`). |
+| `model_id` | _(backend default)_ | hf: `defaultEditModel` (`FLUX.2-dev`). pollinations: blank = `x-ai/grok-imagine-image-quality` (few filters); edit-capable IDs with `/v1/images/edits` include grok-imagine-image/-quality, kontext (strict), flux.2-*, gpt-image-2*. |
+| `provider` / `negative_prompt` / `lora_id` | | HF only — ignored or rejected with pollinations. |
+| `quality` | unset | pollinations only; documented for gpt-image/grok-imagine-image-2.0. |
+
+**hf:** only editing-native models work — base T2I models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping and fail; the error message says exactly that. `lora_id` is passed through to fal-ai (I2I effectiveness under verification). **pollinations:** default is deliberately non-restrictive (`grok-imagine-image-quality`) — kontext/seedream strict filters flag fashion-editorial and burn credits on failed edits; use them only as explicit fallback. Returns `file_path`, `output_dir`, `backend`, the full `quota` block, and a clear warning when the plugin's daily limit is hit.
 
 ### `list_models` — Browse models per backend
 
@@ -97,11 +106,11 @@ list_models(source?, provider?, limit?, include_loras?)
 
 | Source | For | Notes |
 |---|---|---|
-| `curated` (default) | `generate_image` + `hf` | 10 expert-verified HF IDs, always available offline. |
-| `image-edit` | `image_edit` | Editing-native IDs with verified I2I mapping (Kontext-dev, Qwen-Image-Edit). |
+| `curated` (default) | `generate_image` + `hf` | 11 expert-verified HF IDs, always available offline. |
+| `image-edit` | `image_edit` + `hf` | Editing-native IDs with verified I2I mapping (FLUX.2-dev, Kontext-dev, Qwen-Image-Edit). |
 | `provider` | `generate_image` + `hf` | Needs `provider` (fal-ai, nscale, …). Never `pollinations` — use `source="pollinations"`. |
 | `trending` / `downloads` | `generate_image` + `hf` | Live HF catalog. |
-| `pollinations` | `generate_image` + `pollinations` | 15 models (4 free, 11 paid). Requires API key. Aliases: `flux`, `kontext`, `seedream5`. |
+| `pollinations` | `generate_image`/`image_edit` + `pollinations` | 16 models (4 free, 12 paid). Requires API key. Aliases: `flux`, `kontext`, `seedream5`. |
 
 LoRA lookup (`include_loras`) and `list_loras` are HF-only.
 
@@ -158,7 +167,8 @@ Active profiles are injected as system context every turn and act **indirectly**
 | `stabilityai/stable-diffusion-xl-base-1.0` | Largest LoRA ecosystem, permissive base (OpenRAIL) | free |
 | `stabilityai/stable-diffusion-3.5-large` | Stylized alternative base | pro (gated) |
 | `Tongyi-MAI/Z-Image-Turbo` | Fast iteration, Apache 2.0 | free |
-| `black-forest-labs/FLUX.1-Kontext-dev` | **Edit default**: instruction-based I2I (fal/replicate/wavespeed verified) | pro (license) |
+| `black-forest-labs/FLUX.2-dev` | **Edit default**: instruction-based I2I, 32B (fal/replicate verified) | pro (license) |
+| `black-forest-labs/FLUX.1-Kontext-dev` | Edit alternative: instruction-based I2I (fal/replicate/wavespeed verified) | pro (license) |
 | `Qwen/Qwen-Image-Edit` | Precise edits, Apache 2.0 | free |
 
 **Pollinations models** (via `list_models source="pollinations"`, requires API key):
@@ -166,13 +176,14 @@ Active profiles are injected as system context every turn and act **indirectly**
 | Model | Alias | Access | Notes |
 |---|---|---|---|
 | `flux.1-schnell` | `flux` | free | Default model, fast |
-| `flux.1-kontext-pro` | `kontext` | free | Instruction editing, strict filter |
+| `flux.1-kontext-pro` | `kontext` | free | Instruction editing (`/v1/images/edits`), **strict filter** — flags fashion-editorial |
 | `flux.2-klein-4b` | — | free | Fast, small, for quick tests |
 | `z-image-turbo` | — | free | API default model |
 | `flux.2-pro` | — | paid | Highest quality FLUX-2 |
 | `flux.2-flex` | — | paid | Fast FLUX-2 variant |
 | `grok-imagine-image-2.0` | — | paid | Very high quality, supports quality param |
-| `grok-imagine-image` | — | paid | Fast xAI model |
+| `grok-imagine-image-quality` | `aurora` | paid | Grok Pro, **pollinations edit default** (`/v1/images/edits`), few filters |
+| `grok-imagine-image` | — | paid | Fast xAI model, edit-capable, few filters |
 | `ideogram-v4-turbo` | — | paid | Best for text-in-image, logos |
 | `wan-2.7-image` | — | paid | Good for detailed scenes |
 | `qwen-image-3` | — | paid | Strong prompt adherence |
@@ -187,7 +198,7 @@ Active profiles are injected as system context every turn and act **indirectly**
 
 **Generate:** describe → `generate_image` → file path. Use `backend="pollinations"` for quick iterations or permissive takes (requires API key).
 
-**Edit (KEEP/CHANGE):** reference (prior result, bare filename, or URL) + change instruction → `image_edit`. Example: *"same pose, latex dress instead of silk, keep everything else monochrome."*
+**Edit (KEEP/CHANGE):** reference (prior result, bare filename, or URL) + change instruction → `image_edit`. Example: *"same pose, latex dress instead of silk, keep everything else monochrome."* Backend `hf` (FLUX.2-dev etc.) or `pollinations` (default `grok-imagine-image-quality` — non-restrictive; via `/v1/images/edits`).
 
 **Own style library:** *"Create these Neigungsprompts: cinematic-noir, dreamy-pastel"* → LLM builds entries → `inclination_prompt_set` activates one.
 
@@ -230,7 +241,7 @@ Active profiles are injected as system context every turn and act **indirectly**
 
 **Default model = FLUX.1-dev, not FLUX.2-dev.** FLUX.2 (32B, SOTA) needs a license accepted and is absent from the free inference pool; FLUX.1-dev works license-free via Inference Providers. FLUX.2 remains documented as the quality upgrade path.
 
-**Base T2I models have no image-to-image mapping.** Verified per HF provider API: FLUX.1-dev, SDXL, Qwen-Image map to `text-to-image` only on every provider — retries are doomed, which a live reasoning trace confirmed. `image_edit` therefore defaults to editing-native `FLUX.1-Kontext-dev` (I2I on fal-ai/replicate/wavespeed), with `Qwen-Image-Edit` as alternative; the error names both. `list_models source="image-edit"` keeps the two worlds apart.
+**Base T2I models have no image-to-image mapping.** Verified per HF provider API: FLUX.1-dev, SDXL, Qwen-Image map to `text-to-image` only on every provider — retries are doomed, which a live reasoning trace confirmed. `image_edit` therefore defaults to editing-native `FLUX.2-dev` (I2I on fal-ai/replicate), with `FLUX.1-Kontext-dev` and `Qwen-Image-Edit` as alternatives; the error names all three. `list_models source="image-edit"` keeps the two worlds apart.
 
 **Pollinations as second backend.** Filter off by default; API key required since Sep 2026 (anonymous access removed). 15 models available: 4 free (flux.1-schnell, kontext, klein-4b, z-image-turbo), 11 paid (cost pollen). Use `list_models source="pollinations"` for current model list with costs. No negative prompt, no LoRAs, community alphas as fallback chain.
 

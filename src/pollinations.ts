@@ -11,17 +11,27 @@ import {
  * - Auth: Bearer Token via Authorization-Header (POST) bzw. ?key= (GET)
  * - Modell-IDs: volle IDs UND Kurz-Aliase funktionieren auf gen.pollinations.ai
  *   (z.B. black-forest-labs/flux.1-schnell === flux). Volle IDs bevorzugt.
- * - Quality-Parameter: nur für gptimage-Modelle dokumentiert, sonst ignoriert.
+ * - Quality-Parameter: nur für gptimage-Modelle und grok-imagine-image-2.0 dokumentiert, sonst ignoriert.
  * - seed: nur als Query-Param von GET /image/{prompt} dokumentiert, NICHT im POST-Body.
  * - Der alte Host image.pollinations.ai ist deprecated und wird nicht mehr genutzt.
  *
  * Qualitäts-Hinweise für komplexe, detailreiche Prompts:
+ * - `x-ai/grok-imagine-image-2.0` (quality: medium): Empfohlen für hochwertige Fashion-Editorials, keine strengen Content-Filter
  * - `black-forest-labs/flux.1-schnell`: Solide Basis, 1024px
- * - `black-forest-labs/flux.1-kontext-pro`: Azure-FLUX, ideal für komplexe Prompts
- * - `bytedance/seedream-5.0-lite`: ByteDance, sehr hoch, min 1920x1920 (paid_only)
+ * - `black-forest-labs/flux.1-kontext-pro`: Azure-FLUX, ideal für komplexe Prompts (STRENGE Filter)
+ * - `bytedance/seedream-5.0-lite`: ByteDance, sehr hoch, min 1920x1920 (paid_only, STRENGE Filter)
  * - `google/gemini-3-pro-image`: Gemini 3 Pro, bis 4K, höchste Qualität
  */
 export const POLLINATIONS_DEFAULT_MODEL = "black-forest-labs/flux.1-schnell";
+
+/**
+ * Default-Edit-Modell für backend='pollinations' (POST /v1/images/edits).
+ * bewusst NICHT restriktiv: kontext/seedream haben strenge Filter, die
+ * Fashion-Editorial flaggen und Credits verbrennen (fehlgeschlagene Edits kosten).
+ * grok-imagine-image-quality: healthy, edit-fähig, wenige Filter.
+ * Günstige Alternative: x-ai/grok-imagine-image. Strict-Fallback: flux.1-kontext-pro.
+ */
+export const POLLINATIONS_DEFAULT_EDIT_MODEL = "x-ai/grok-imagine-image-quality";
 
 export const POLLINATIONS_ANON_COOLDOWN_MS = 15_000;
 
@@ -39,9 +49,10 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
   {
     id: "black-forest-labs/flux.1-kontext-pro",
     description:
-      "FLUX.1 Kontext Pro — Azure-FLUX. " +
-      "Ideal für komplexe Prompts. ACHTUNG: Strenge Content-Filter — " +
-      "Fashion-Editorial mit intimen Details kann als Sexual_Prompt geflaggt werden.",
+      "FLUX.1 Kontext Pro — Azure-FLUX, editing-nativ (POST /v1/images/edits). " +
+      "ACHTUNG: Strenge Content-Filter — Fashion-Editorial mit intimen Details kann als " +
+      "Sexual_Prompt geflaggt werden (gefilterte Edits kosten trotzdem). " +
+      "Nicht-Restriktiver Edit-Default: x-ai/grok-imagine-image-quality.",
     style: "photorealistic, artistic, editing",
     speed: "medium",
     access: "free",
@@ -124,10 +135,23 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
     cost: "~0.07 pollen",
   },
   {
+    id: "x-ai/grok-imagine-image-quality",
+    description:
+      "Grok Imagine Pro (quality) — xAI, editing-fähig (POST /v1/images/edits). " +
+      "Default für image_edit backend='pollinations': wenige Content-Filter " +
+      "(kein Flagging bei Fashion-Editorial), healthy. Alias: aurora. quality-Parameter supported.",
+    style: "photorealistic, cinematic, image-editing",
+    speed: "medium",
+    access: "pro",
+    source: "pollinations",
+    cost: "~0.05 pollen",
+  },
+  {
     id: "x-ai/grok-imagine-image-2.0",
     description:
       "Grok Imagine 2.0 — xAI, sehr hohe Qualität. " +
-      "Unterstützt quality-Parameter.",
+      "Empfohlen für hochwertige Fashion-Editorials (keine strengen Content-Filter). " +
+      "Unterstützt quality-Parameter (low/medium/high/hd).",
     style: "photorealistic, cinematic",
     speed: "medium",
     access: "pro",
@@ -137,9 +161,9 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
   {
     id: "x-ai/grok-imagine-image",
     description:
-      "Grok Imagine — xAI, erste Generation. " +
-      "Solide Qualität, schnellere Inferenz.",
-    style: "photorealistic, artistic",
+      "Grok Imagine — xAI, erste Generation, editing-fähig (POST /v1/images/edits). " +
+      "Günstigste Grok-Edit-Option, schnellere Inferenz, keine strengen Filter.",
+    style: "photorealistic, artistic, image-editing",
     speed: "fast",
     access: "pro",
     source: "pollinations",
@@ -212,6 +236,7 @@ export interface PollinationsGenerateOptions {
  * Modelle mit dokumentiertem quality-Support (APIDOCS).
  * quality wird nur für diese Modelle im POST-Body gesendet, sonst still ignoriert.
  * Unterstützt: gptimage, gptimage-large, gpt-image-2*, grok-imagine-image-2.0
+ * Hinweis: grok-imagine-image-2.0 ist das empfohlene High-Quality-Modell auf pollinations für Fashion-Editorial.
  */
 const QUALITY_SUPPORTED_HINTS = [
   "gpt-image",
@@ -313,6 +338,62 @@ export function buildPollinationsGenGetUrl(opts: PollinationsGenerateOptions): s
     params.set("nologo", "true");
   }
   return `${base}?${params.toString()}`;
+}
+
+export interface PollinationsEditOptions {
+  prompt: string;
+  model: string;
+  imageBuffer: Buffer;
+  imageMime: string;
+  /** API key (enter.pollinations.ai). Pflicht seit Sep 2026. */
+  apiKey: string;
+  quality?: "low" | "medium" | "high" | "hd";
+}
+
+/**
+ * Baut den multipart/form-data Request für POST /v1/images/edits
+ * (Image-Editing-Endpoint, akzeptiert JSON ODER multipart).
+ *
+ * multipart mit Datei-Upload, weil der 'image'-Parameter lokal als Buffer vorliegt
+ * (JSON-Schema erwartet eine URL). safe=false + private + nologo wie bei generations.
+ * quality nur bei Modellen mit dokumentiertem Support (gpt-image/grok-imagine-image-2.0).
+ */
+export function buildPollinationsEditForm(opts: PollinationsEditOptions): {
+  url: string;
+  headers: Record<string, string>;
+  form: FormData;
+  qualityDropped: boolean;
+} {
+  const url = "https://gen.pollinations.ai/v1/images/edits";
+  const headers: Record<string, string> = {};
+  if (opts.apiKey) {
+    headers["Authorization"] = `Bearer ${opts.apiKey}`;
+  }
+
+  const form = new FormData();
+  form.append("prompt", opts.prompt);
+  form.append("model", opts.model || POLLINATIONS_DEFAULT_EDIT_MODEL);
+  form.append("response_format", "b64_json");
+  form.append("safe", "false");
+  form.append("private", "true");
+  form.append("nologo", "true");
+
+  let qualityDropped = false;
+  if (opts.quality) {
+    if (isQualitySupportedModel(opts.model || POLLINATIONS_DEFAULT_EDIT_MODEL)) {
+      form.append("quality", opts.quality);
+    } else {
+      qualityDropped = true;
+    }
+  }
+
+  const ext = opts.imageMime.includes("png") ? "png"
+    : opts.imageMime.includes("webp") ? "webp"
+    : "jpg";
+  const blob = new Blob([new Uint8Array(opts.imageBuffer)], { type: opts.imageMime });
+  form.append("image", blob, `reference.${ext}`);
+
+  return { url, headers, form, qualityDropped };
 }
 
 /**

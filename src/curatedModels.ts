@@ -99,11 +99,24 @@ export const CURATED_MODELS: ModelInfo[] = [
     license: "Stability Community",
   },
   {
+    id: "black-forest-labs/FLUX.2-dev",
+    description:
+      "FLUX.2-dev — Modernes Edit-Flaggschiff: instruction-based image-to-image " +
+      "(32B, Nachfolger von FLUX.1-Kontext). fal-ai/replicate. " +
+      "Default für image_edit; Basis-T2I-Modelle haben kein I2I-Mapping. Freischaltung nötig.",
+    style: "image-editing, photorealistic",
+    speed: "medium",
+    access: "pro",
+    source: "curated",
+    parameters: "32B",
+    license: "Non-Commercial",
+  },
+  {
     id: "black-forest-labs/FLUX.1-Kontext-dev",
     description:
-      "FLUX.1-Kontext-dev — DAS Edit-Modell: instruction-based image-to-image " +
-      "(Pose behalten, Outfit/Licht tauschen). fal-ai/replicate/wavespeed. " +
-      "Default für image_edit; Basis-T2I-Modelle haben kein I2I-Mapping. Freischaltung nötig.",
+      "FLUX.1-Kontext-dev — Bewährtes Edit-Modell (Alternative zu FLUX.2-dev): " +
+      "instruction-based image-to-image (Pose behalten, Outfit/Licht tauschen). " +
+      "fal-ai/replicate/wavespeed. Basis-T2I-Modelle haben kein I2I-Mapping. Freischaltung nötig.",
     style: "image-editing, photorealistic",
     speed: "medium",
     access: "pro",
@@ -114,8 +127,8 @@ export const CURATED_MODELS: ModelInfo[] = [
   {
     id: "Qwen/Qwen-Image-Edit",
     description:
-      "Qwen-Image-Edit — Präzise Bildbearbeitung (Apache 2.0). Alternative zu Kontext-dev " +
-      "für image_edit. fal-ai/replicate/wavespeed.",
+      "Qwen-Image-Edit — Präzise Bildbearbeitung (Apache 2.0). Alternative " +
+      "zu FLUX.2-dev für image_edit. fal-ai/replicate/wavespeed.",
     style: "image-editing, photorealistic",
     speed: "medium",
     access: "free",
@@ -142,6 +155,7 @@ export const CURATED_MODELS: ModelInfo[] = [
  * Quelle für list_models source='image-edit' und Doku. Bei Neuzugängen Mapping prüfen!
  */
 export const EDIT_MODEL_IDS: readonly string[] = [
+  "black-forest-labs/FLUX.2-dev",
   "black-forest-labs/FLUX.1-Kontext-dev",
   "Qwen/Qwen-Image-Edit",
 ];

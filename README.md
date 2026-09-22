@@ -52,9 +52,9 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 | Content filter | Provider-side moderation | Strict filter off by default (`safe=off`); illegal content still moderated |
 | Negative prompt | ✅ supported | ❌ ignored (reported in response notes) |
 | LoRA (`lora_id`) | ✅ FLUX via fal-ai | ❌ rejected with a clear error |
-| Image editing | ✅ `image_edit` tool | ❌ (deferred) |
+| Image editing | ✅ `image_edit` (editing-native HF models) | ✅ `image_edit` (`POST /v1/images/edits`, default grok) |
 | Rate limit | Config cooldown + daily cap | Same, plus 15s anon / 5s with-key tier gap |
-| Best for | Quality, LoRAs, editing, precise control | Quick tests, permissive fashion/editorial takes |
+| Best for | Quality, LoRAs, precise control | Quick tests, permissive fashion/editorial takes & edits |
 
 **Rule of thumb:** HuggingFace IDs ↔ `backend="hf"`, Pollinations IDs ↔ `backend="pollinations"`, editing-native IDs ↔ `image_edit`. Mixing them fails — the tools say so explicitly.
 

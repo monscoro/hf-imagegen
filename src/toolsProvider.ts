@@ -28,6 +28,7 @@ import {
   POLLINATIONS_ANON_COOLDOWN_MS,
 } from "./pollinations";
 import { getAllCosts, getCacheInfo } from "./costCache";
+import { getModelCacheInfo } from "./modelCache";
 import {
   getAllDirectives,
   getActiveDirective,
@@ -614,34 +615,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           ALIASES: only "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
           "seedream5" (= seedream-5.0-lite). Use FULL IDs for all other models.
 
-          FREE (no pollen cost):
-          "flux.1-schnell" (alias: flux) — solid baseline, fast
-          "flux.1-kontext-pro" (alias: kontext) — instruction editing, STRICT content filter
-          "flux.2-klein-4b" — fast, small, for quick tests
-          "z-image-turbo" — API default model
-
-          PAID (require pollen balance, costs are approximate per request):
-          "flux.2-pro" — highest quality FLUX-2 (~0.03 pollen)
-          "flux.2-flex" — fast FLUX-2 variant (paid)
-          "grok-imagine-image-2.0" — very high quality, supports quality param (~0.07 pollen)
-          "grok-imagine-image" — fast xAI model (~0.02 pollen)
-          "ideogram-v4-turbo" — best for text-in-image, logos (~0.03 pollen)
-          "wan-2.7-image" — good for detailed scenes (~0.03 pollen)
-          "qwen-image-3" — strong prompt adherence (~0.04 pollen)
-          "gemini-3.1-flash-image" — fast Gemini (~0.07 pollen)
-          "seedream-5.0-lite" (alias: seedream5) — very high quality, VERY strict content filter
-          "seedream-5.0-pro" — highest ByteDance quality (paid)
-          "gemini-3-pro-image" — 4K, slow, highest quality (paid)
-
-          DECISION: Use the best model for the task, not the cheapest.
-          Paid models produce better results — the user expects quality over cost savings.
-          Each model's 'cost' field is fetched live from the Pollinations API (cached 12h).
-          Snapshot Sep 2026 — prices may change.
-
         Rule of thumb: IDs from curated/provider/trending/downloads only work with
         generate_image backend='hf'; IDs from source='pollinations' only with
         backend='pollinations'; IDs from source='image-edit' only with image_edit.
         LoRA lookup (include_loras) and the list_loras tool are HF-only.
+        Model lists are cached for 12 hours to reduce API calls.
       `,
       parameters: {
         source: z.enum(["curated", "provider", "trending", "downloads", "pollinations", "image-edit"])
@@ -727,6 +705,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         // Merge dynamic costs from cache (Pollinations API + HF hardcoded)
         const costMap = await getAllCosts();
         const cacheInfo = await getCacheInfo();
+        const modelCacheInfo = getModelCacheInfo();
 
         return json({
           source,
@@ -739,6 +718,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             fetched_at: cacheInfo.fetchedAt.toISOString(),
             expires_in_hours: Math.round(cacheInfo.expiresInMs / 3600000),
             models_priced: cacheInfo.modelCount,
+          },
+          model_cache: {
+            provider: modelCacheInfo.provider,
+            trending: modelCacheInfo.trending,
+            downloads: modelCacheInfo.downloads,
+            pollinations: modelCacheInfo.pollinations,
           },
           models: models.map((m) => ({
             ...m,
@@ -754,9 +739,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   "Canonical IDs preferred, aliases (flux, kontext, seedream5) also work. " +
                   "Each model's 'cost' field is fetched live from the Pollinations API (12h cache). " +
                   "Use full IDs — only flux/kontext/seedream5 are valid aliases. No LoRAs on this backend."
-              : source === "image-edit"
-                ? "Editing-native IDs for the image_edit tool (verified image-to-image mapping). image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing."
-                : "HuggingFace IDs for generate_image backend='hf'. Pass model_id to generate_image to use a model.",
+                : source === "image-edit"
+                  ? "Editing-native IDs for the image_edit tool (verified image-to-image mapping). image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing."
+                  : "HuggingFace IDs for generate_image backend='hf'. Pass model_id to generate_image to use a model.",
         });
       }),
     }),

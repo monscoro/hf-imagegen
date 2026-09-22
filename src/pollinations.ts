@@ -1,4 +1,8 @@
 import type { ModelInfo } from "./types";
+import {
+  getCachedPollinationsModels,
+  setCachedPollinationsModels,
+} from "./modelCache";
 
 /**
  * Pollinations.ai backend — zweites Backend neben HuggingFace.
@@ -186,6 +190,10 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
 ];
 
 export function getPollinationsModels(): ModelInfo[] {
+  const cached = getCachedPollinationsModels();
+  if (cached) return cached;
+
+  setCachedPollinationsModels(POLLINATIONS_KNOWN_MODELS);
   return POLLINATIONS_KNOWN_MODELS;
 }
 

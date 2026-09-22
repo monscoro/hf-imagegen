@@ -1,5 +1,13 @@
 import { type ModelInfo, type LoRAInfo, type ModelSource } from "./types";
 import { CURATED_MODELS } from "./curatedModels";
+import {
+  getCachedProviderModels,
+  setCachedProviderModels,
+  getCachedTrendingModels,
+  setCachedTrendingModels,
+  getCachedDownloadedModels,
+  setCachedDownloadedModels,
+} from "./modelCache";
 
 const HF_API_BASE = "https://huggingface.co/api";
 
@@ -26,6 +34,9 @@ export async function getProviderModels(
   limit: number = 20,
   token?: string
 ): Promise<ModelInfo[]> {
+  const cached = getCachedProviderModels(provider, limit);
+  if (cached) return cached;
+
   const url = `${HF_API_BASE}/models?inference_provider=${provider}&pipeline_tag=text-to-image&sort=trending&limit=${limit}`;
 
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -36,7 +47,7 @@ export async function getProviderModels(
 
   const models = (await res.json()) as HFModel[];
 
-  return models.map((m) => ({
+  const result = models.map((m) => ({
     id: m.id,
     description: `${m.id} — Text-to-Image model via ${provider}`,
     style: "varies",
@@ -48,12 +59,18 @@ export async function getProviderModels(
       : undefined,
     license: m.cardData?.license,
   }));
+
+  setCachedProviderModels(provider, limit, result);
+  return result;
 }
 
 export async function getTrendingModels(
   limit: number = 20,
   token?: string
 ): Promise<ModelInfo[]> {
+  const cached = getCachedTrendingModels(limit);
+  if (cached) return cached;
+
   const url = `${HF_API_BASE}/models?pipeline_tag=text-to-image&sort=trending&limit=${limit}`;
 
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -64,7 +81,7 @@ export async function getTrendingModels(
 
   const models = (await res.json()) as HFModel[];
 
-  return models.map((m) => ({
+  const result = models.map((m) => ({
     id: m.id,
     description: `${m.id} — Trending text-to-image model`,
     style: "varies",
@@ -76,12 +93,18 @@ export async function getTrendingModels(
       : undefined,
     license: m.cardData?.license,
   }));
+
+  setCachedTrendingModels(limit, result);
+  return result;
 }
 
 export async function getDownloadedModels(
   limit: number = 20,
   token?: string
 ): Promise<ModelInfo[]> {
+  const cached = getCachedDownloadedModels(limit);
+  if (cached) return cached;
+
   const url = `${HF_API_BASE}/models?pipeline_tag=text-to-image&sort=downloads&limit=${limit}`;
 
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -92,7 +115,7 @@ export async function getDownloadedModels(
 
   const models = (await res.json()) as HFModel[];
 
-  return models.map((m) => ({
+  const result = models.map((m) => ({
     id: m.id,
     description: `${m.id} — Popular text-to-image model`,
     style: "varies",
@@ -104,6 +127,9 @@ export async function getDownloadedModels(
       : undefined,
     license: m.cardData?.license,
   }));
+
+  setCachedDownloadedModels(limit, result);
+  return result;
 }
 
 export async function getLoRAsForModel(

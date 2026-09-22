@@ -49,4 +49,12 @@ export const pluginConfigSchematics = createConfigSchematics()
       "Maximum number of images that can be generated per day. " +
       "Resets at midnight. Default: 75.",
   }, 75)
+  .field("enableInclinationPrompts", "boolean", {
+    displayName: "Enable Inclination Prompts",
+    subtitle:
+      "Master switch for the Neigungsprompt/Stimmungsprompt subsystem " +
+      "(inclination_prompt_list, inclination_prompt_set, inclination_prompt_manage). " +
+      "Off hides these tools and stops injecting the active style profile into the LLM context. " +
+      "A previously active profile stays stored and resumes when re-enabled. Default: on.",
+  }, true)
   .build();

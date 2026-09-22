@@ -20,14 +20,10 @@ import { listOutputImages } from "./workspace";
 import {
   getPollinationsModels,
   buildPollinationsPostBody,
-  buildPollinationsGenGetUrl,
   buildPollinationsEditForm,
   detectImageMime,
-  isQualitySupportedModel,
-  isSeedSupportedModel,
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_DEFAULT_EDIT_MODEL,
-  POLLINATIONS_ANON_COOLDOWN_MS,
 } from "./pollinations";
 import { getAllCosts, getCacheInfo } from "./costCache";
 import { getModelCacheInfo } from "./modelCache";
@@ -114,6 +110,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     cooldownMs: Number(cfg.get("rateLimitCooldown")) || 5000,
     dailyCap: Number(cfg.get("rateLimitDailyCap")) || 75,
   });
+  // Config-Schalter für das Neigungsprompt-Subsystem (default an).
+  const inclinationsEnabled = cfg.get("enableInclinationPrompts") !== false;
 
   let isGenerating = false;
   let lastPollinationsCall = 0;
@@ -144,8 +142,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         PARAMETERS:
         • prompt: descriptive text — subject, style, lighting, mood, quality terms.
-        • width/height: pollinations only. POST needs BOTH; GET supports single dimension.
-        • seed: model-specific (flux.1-schnell, z-image-turbo, flux.2-klein-4b). POST ignores seed.
+        • width/height: pollinations only. POST needs BOTH (a single dimension is ignored).
+        • seed: POST never sends seed — any seed value is ignored (note in result).
         • quality: only for gptimage/grok-imagine-image-2.0 family; ignored otherwise.
         • negative_prompt: HF only, ignored with pollinations.
         • lora_id: HF only, rejected with error on pollinations.
@@ -187,13 +185,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "0 = backend default."
         ),
         seed: z.number().int().min(0).default(0).describe(
-          "Seed for reproducible results (backend='pollinations' only, ignored with backend='hf'). " +
-          "0 = random. Only supported via GET (anonymous path); ignored for POST with API key (note in result)."
+          "Seed (backend='pollinations' only, ignored with backend='hf'). " +
+          "0 = random. POST /v1/images/generations does not accept seed — any value is ignored (note in result)."
         ),
         quality: z.enum(["low", "medium", "high", "hd"]).optional().describe(
           "Image quality (backend='pollinations' only, ignored with backend='hf'). " +
           "Blank or unset = medium (server default). " +
-          "Only documented for gpt-image models; for other models it is ignored and a note is added to the result."
+          "Only documented for gpt-image and grok-imagine models; for other models it is ignored and a note is added to the result."
         ),
       },
       implementation: safe_impl("generate_image", async ({ prompt, model_id, backend, negative_prompt, lora_id, lora_scale, width, height, seed, quality }, ctx) => {
@@ -223,9 +221,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           throw new Error(rateLimitResult.error);
         }
         const pollinationsKey = usePollinations ? getPollinationsKey() : "";
+        if (usePollinations && !pollinationsKey) {
+          throw new Error(
+            "Pollinations API key is not set (required since Sep 2026). " +
+            "Set pollinationsApiKey in plugin config (get one at https://enter.pollinations.ai/keys) " +
+            "or use backend='hf'."
+          );
+        }
         if (usePollinations) {
-          // Anonymous: 1 req/15s; with key (Seed tier): 1 req/5s.
-          const pollinationsCooldownMs = pollinationsKey ? 5_000 : POLLINATIONS_ANON_COOLDOWN_MS;
+          // Key ist oben garantiert: ~1 Request pro 5s (Seed tier).
+          const pollinationsCooldownMs = 5_000;
           const waited = Date.now() - lastPollinationsCall;
           if (waited < pollinationsCooldownMs) {
             throw new Error(
@@ -257,90 +262,55 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               notes.push("negative_prompt is not supported by Pollinations and was ignored.");
             }
 
-            if (pollinationsKey) {
-              // Neue API: POST /v1/images/generations mit Bearer-Auth
-              // Hinweis: seed ist im POST-Schema nicht dokumentiert und wird nicht gesendet;
-              // quality nur bei Modellen mit dokumentiertem Support (gpt-image-Familie).
-              const { url, headers, body, qualityDropped } = buildPollinationsPostBody({
-                prompt,
-                model: modelToUse,
-                width: width || undefined,
-                height: height || undefined,
-                quality,
-                apiKey: pollinationsKey,
-              });
-              if (seed) {
-                if (isSeedSupportedModel(modelToUse)) {
-                  notes.push("seed is supported for this model via GET /image/{prompt}, but POST /v1/images/generations ignores seed. Use GET for reproducible results.");
-                } else {
-                  notes.push(`seed is not supported by '${modelToUse}' (only flux.1-schnell, z-image-turbo, seedream-4.0, flux.2-klein-4b) and was ignored.`);
-                }
-              }
-              if (qualityDropped) {
-                notes.push(`quality='${quality}' is only documented for gpt-image models and was ignored for '${modelToUse}'.`);
-              }
-              if ((width && !height) || (!width && height)) {
-                notes.push("POST size needs width AND height (WIDTHxHEIGHT); a single dimension was ignored. Use both for exact size.");
-              }
-              ctx.status(`Calling Pollinations API (${modelToUse}, quality=${quality ?? "medium"}, auth=key)…`);
-              const res = await fetch(url, {
-                method: "POST",
-                headers,
-                body: JSON.stringify(body),
-                signal: AbortSignal.timeout(180_000),
-              });
-              if (!res.ok) {
-                const errText = await res.text().catch(() => "");
-                if (res.status === 402 || res.status === 403) {
-                  throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText} — paid_only model or exhausted Pollen budget? Check key balance / use a free model.`);
-                }
-                throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText}`);
-              }
-              const jsonRes = await res.json() as { data?: { b64_json?: string }[] };
-              if (!jsonRes.data?.[0]?.b64_json) {
-                throw new Error("Pollinations API returned no image data");
-              }
-              buffer = Buffer.from(jsonRes.data[0].b64_json, "base64");
-              mimeType = detectImageMime(buffer);
-              notes.push("Pollinations API (gen.pollinations.ai POST): safe=false, private (hidden from public feed), no watermark with key. Credit consumed.");
-            } else {
-              // GET auf gen.pollinations.ai: Key wird als Query-Param übergeben (key=).
-              // ACHTUNG: API verlangt jetzt immer einen Key — 401 ohne Key.
-              const url = buildPollinationsGenGetUrl({
-                prompt,
-                model: modelToUse,
-                width: width || undefined,
-                height: height || undefined,
-                seed: seed || undefined,
-                quality,
-                apiKey: pollinationsKey || undefined,
-              });
-              if (quality !== undefined && !isQualitySupportedModel(modelToUse)) {
-                notes.push(`quality='${quality}' is only documented for gpt-image/grok-imagine-image-2.0 models and was ignored for '${modelToUse}'.`);
-              }
-              if (seed && !isSeedSupportedModel(modelToUse)) {
-                notes.push(`seed is not supported by '${modelToUse}' (only flux.1-schnell, z-image-turbo, seedream-4.0, flux.2-klein-4b) and was ignored.`);
-              }
-              ctx.status(`Calling Pollinations (${modelToUse}, quality=${quality ?? "medium"}, auth=${pollinationsKey ? "key" : "anon"})…`);
-              const res = await fetch(url, { signal: AbortSignal.timeout(180_000) });
-              if (!res.ok) {
-                if (res.status === 401) {
-                  throw new Error("Pollinations API error: 401 Unauthorized — API key is required. Set pollinationsApiKey in plugin config (get one at https://enter.pollinations.ai/keys).");
-                }
-                throw new Error(`Pollinations error: ${res.status} ${res.statusText}`);
-              }
-              buffer = Buffer.from(await res.arrayBuffer());
-              mimeType = res.headers.get("content-type") || "image/jpeg";
-              if (!mimeType.startsWith("image/")) {
-                const preview = buffer.toString("utf-8").slice(0, 200);
-                throw new Error(`Pollinations returned non-image content (${mimeType}): ${preview}`);
-              }
-              if (pollinationsKey) {
-                notes.push("Pollinations API (gen.pollinations.ai GET): safe=false, private (hidden from public feed), no watermark with key. Credit consumed.");
-              } else {
-                notes.push("Pollinations API key is NOT configured. Set pollinationsApiKey in plugin config to use Pollinations (required since Sep 2026).");
-              }
+            // POST /v1/images/generations mit Bearer-Auth (einziger Pfad: anonymer
+            // Zugang wurde Sep 2026 entfernt, Key ist oben garantiert).
+            // Hinweis: seed ist im POST-Schema nicht dokumentiert und wird nicht gesendet;
+            // quality nur bei Modellen mit dokumentiertem Support (gpt-image/grok-imagine).
+            const { url, headers, body, qualityDropped } = buildPollinationsPostBody({
+              prompt,
+              model: modelToUse,
+              width: width || undefined,
+              height: height || undefined,
+              quality,
+              apiKey: pollinationsKey,
+            });
+            if (seed) {
+              notes.push("seed is not sent by POST /v1/images/generations and was ignored.");
             }
+            if (qualityDropped) {
+              notes.push(`quality='${quality}' is only documented for gpt-image and grok-imagine models and was ignored for '${modelToUse}'.`);
+            }
+            if ((width && !height) || (!width && height)) {
+              notes.push("POST size needs width AND height (WIDTHxHEIGHT); a single dimension was ignored. Use both for exact size.");
+            }
+            ctx.status(`Calling Pollinations API (${modelToUse}, quality=${quality ?? "medium"}, auth=key)…`);
+            const res = await fetch(url, {
+              method: "POST",
+              headers,
+              body: JSON.stringify(body),
+              signal: AbortSignal.timeout(180_000),
+            });
+            if (!res.ok) {
+              const errText = await res.text().catch(() => "");
+              if (res.status === 401) {
+                throw new Error("Pollinations API error: 401 Unauthorized — invalid or expired key. Check pollinationsApiKey in plugin config (get one at https://enter.pollinations.ai/keys).");
+              }
+              if (res.status === 402 || res.status === 403) {
+                throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText} — paid_only model or exhausted Pollen budget? Check key balance / use a free model.`);
+              }
+              throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText}`);
+            }
+            const jsonRes = await res.json() as { data?: { b64_json?: string }[] };
+            if (!jsonRes.data?.[0]?.b64_json) {
+              throw new Error("Pollinations API returned no image data");
+            }
+            buffer = Buffer.from(jsonRes.data[0].b64_json, "base64");
+            mimeType = detectImageMime(buffer);
+            if (!mimeType.startsWith("image/")) {
+              const preview = buffer.toString("utf-8").slice(0, 200);
+              throw new Error(`Pollinations returned non-image content (${mimeType}): ${preview}`);
+            }
+            notes.push("Pollinations API (gen.pollinations.ai POST): safe=false, private (hidden from public feed), no watermark with key. Credit consumed.");
             lastPollinationsCall = Date.now();
           } else {
             const token = getToken();
@@ -514,8 +484,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               "or use backend='hf'."
             );
           }
-          // Gleicher Cooldown wie generate_image (gleicher Account/Rate-Limit).
-          const pollinationsCooldownMs = pollinationsKey ? 5_000 : POLLINATIONS_ANON_COOLDOWN_MS;
+          // Key ist oben garantiert: ~1 Request pro 5s (gleicher Account/Rate-Limit wie generate_image).
+          const pollinationsCooldownMs = 5_000;
           const waited = Date.now() - lastPollinationsCall;
           if (waited < pollinationsCooldownMs) {
             throw new Error(
@@ -1099,6 +1069,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     }),
 
   ];
+
+  if (!inclinationsEnabled) {
+    // Config-Schalter aus: Neigungsprompt-Tools nicht registrieren
+    // (Injektion läuft separat über promptPreprocessor).
+    return tools.filter((t) => !t.name.startsWith("inclination_prompt_"));
+  }
 
   return tools;
 };

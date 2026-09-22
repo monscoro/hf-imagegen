@@ -40,6 +40,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 | Output Directory | `~/hf-images` | Where images are saved. Created automatically. Supports `~/` prefix. Also the search base for bare filenames in `image_edit` and the scope of `list_output_images`. |
 | Generation Cooldown (ms) | `5000` | Minimum gap between generations (both backends). |
 | Daily Generation Limit | `75` | Max images per day, resets at **local** midnight. This is the plugin's own guard — it does **not** track HF credits. |
+| Enable Inclination Prompts | `true` | Master switch for the Neigungsprompt subsystem. Off hides `inclination_prompt_*` tools and stops style-profile injection (a stored active profile resumes when re-enabled). |
 
 ---
 
@@ -130,15 +131,15 @@ list_output_images(sort?, limit?, offset?, filter?)
 
 Paginated, compact listing of the output directory (newest first; `limit=1` = latest image). Use instead of reading large folders at once; feed `filename` into `image_edit`.
 
-### `inclination_prompt_list` / `set` / `manage` — Style profiles
+### `inclination_prompt_list` / `set` / `manage` — Style profiles (gated by Enable Inclination Prompts)
 
-Persistent mood/style directives that indirectly guide how the LLM formulates image prompts (see below). `manage(action="create")` turns user descriptions into full profiles (LLM generates id/description/prompt); `set` activates; empty/`none` deactivates.
+Persistent mood/style directives that indirectly guide how the LLM formulates image prompts (see below). `manage(action="create")` turns user descriptions into full profiles (LLM generates id/description/prompt); `set` activates; empty/`none` deactivates. Gated by the `Enable Inclination Prompts` config switch (default on) — when off, these tools are not registered and no style profile is injected into the LLM context.
 
 ---
 
 ## Neigungsprompt System (Stimmungsprompts)
 
-Active profiles are injected as system context every turn and act **indirectly**: the LLM weaves mood, style, and staging into `generate_image`/`image_edit` prompts instead of prefixing them.
+Active profiles are injected as system context every turn and act **indirectly**: the LLM weaves mood, style, and staging into `generate_image`/`image_edit` prompts instead of prefixing them. The whole subsystem can be switched off via the `Enable Inclination Prompts` config field.
 
 **Sources:** `curated` (read-only examples in code) + `user` (LLM-created via `inclination_prompt_manage`, persisted in plugin storage `directives.json`).
 

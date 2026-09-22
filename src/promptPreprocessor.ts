@@ -3,6 +3,7 @@ import {
   type PromptPreprocessorController,
 } from "@lmstudio/sdk";
 import { getActiveDirective } from "./directiveStore";
+import { pluginConfigSchematics } from "./config";
 
 const SYSTEM_RULES = `\
 [System: Image Generation Plugin]
@@ -64,6 +65,35 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 == AFTER GENERATION ==
 Always report the full file path where the image was saved and the model used.`;
 
+/**
+ * Entfernt Neigungsprompt-Regeln, wenn das Subsystem per Config-Schalter aus ist
+ * (die Tools sind dann nicht registriert — das LLM darf sie nicht angeboten bekommen):
+ * - Routing-Bullet mit inclination_prompt_-Tools
+ * - komplette == IMAGE SYSTEM PROMPT / STIMMUNG ==-Sektion
+ * Bei aktiviertem Schalter bleibt SYSTEM_RULES byte-identisch (nur Strip bei aus).
+ */
+function stripInclinationRules(rules: string): string {
+  const lines = rules.split("\n");
+  const out: string[] = [];
+  let skipSection = false;
+  for (const line of lines) {
+    if (line.startsWith("== IMAGE SYSTEM PROMPT")) {
+      skipSection = true;
+      continue;
+    }
+    if (skipSection) {
+      if (line.startsWith("== AFTER GENERATION")) {
+        skipSection = false;
+        out.push(line);
+      }
+      continue;
+    }
+    if (line.includes("inclination_prompt_")) continue;
+    out.push(line);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
 function buildActiveDirectiveBlock(configText: string): string {
   try {
     const active = getActiveDirective(configText);
@@ -79,8 +109,17 @@ export async function promptPreprocessor(
   userMessage: ChatMessage,
 ): Promise<string | ChatMessage> {
   const history = await ctl.pullHistory();
-  const activeBlock = buildActiveDirectiveBlock("");
-  const fullRules = `${SYSTEM_RULES}${activeBlock}`;
+  // Config-Schalter für das Neigungsprompt-Subsystem (default an).
+  let inclinationsEnabled = true;
+  try {
+    inclinationsEnabled =
+      ctl.getPluginConfig(pluginConfigSchematics).get("enableInclinationPrompts") !== false;
+  } catch {
+    // Config nicht lesbar → bisheriges Verhalten (an) beibehalten.
+  }
+  const activeBlock = inclinationsEnabled ? buildActiveDirectiveBlock("") : "";
+  const rules = inclinationsEnabled ? SYSTEM_RULES : stripInclinationRules(SYSTEM_RULES);
+  const fullRules = `${rules}${activeBlock}`;
 
   if (history.length === 0) {
     if (await ctl.needsNaming()) {

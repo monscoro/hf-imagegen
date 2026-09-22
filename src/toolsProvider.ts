@@ -836,14 +836,21 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           models: models.map((m) => ({
             ...m,
             cost: costMap[m.id]?.cost ?? m.cost,
-            is_default: m.id === currentDefault,
+            // is_default bezieht sich auf den Default des jeweiligen Katalogs:
+            // pollinations → Pollinations-T2I-Default, image-edit → HF-Edit-Default, sonst HF-T2I-Default.
+            is_default:
+              source === "pollinations"
+                ? m.id === POLLINATIONS_DEFAULT_MODEL
+                : source === "image-edit"
+                  ? m.id === editDefault
+                  : m.id === currentDefault,
           })),
           note: loraTruncated
             ? `LoRA lookup capped to first ${LORA_CAP} models to avoid API flood. Use list_loras with base_model for others.`
             : source === "curated"
               ? "Expert-verified HuggingFace IDs for generate_image backend='hf'. Use list_loras with base_model to find compatible LoRAs."
               : source === "pollinations"
-                ? "Pollinations IDs for generate_image backend='pollinations' (requires pollinationsApiKey). " +
+                ? "Pollinations IDs for generate_image or image_edit with backend='pollinations' (requires pollinationsApiKey). " +
                   "Canonical IDs preferred, aliases (flux, kontext, seedream5) also work. " +
                   "Each model's 'cost' field is fetched live from the Pollinations API (12h cache). " +
                   "Use full IDs — only flux/kontext/seedream5 are valid aliases. No LoRAs on this backend."

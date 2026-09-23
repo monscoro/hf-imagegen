@@ -123,13 +123,13 @@ list_loras(base_model?, search?, limit?)
 
 Avoid `search` (HF search is strict, often empty) — filter by `base_model` only. Pass `id` as `lora_id` with `backend="hf"`.
 
-### `list_output_images` — Browse results
+### `list_output_images` — Browse results & inputs
 
 ```
 list_output_images(sort?, limit?, offset?, filter?)
 ```
 
-Paginated, compact listing of the output directory (newest first; `limit=1` = latest image). Use instead of reading large folders at once; for `image_edit`, pass the absolute `output_directory` + `filename` (preferred over a bare filename).
+Paginated, compact listing of the output directory — generated results **and** input/reference images (`image_edit` resolves bare filenames against it first; newest first, `limit=1` = latest image). Use instead of reading large folders at once; for `image_edit`, pass the absolute `output_directory` + `filename` (preferred over a bare filename).
 
 ### `inclination_prompt_list` / `set` / `manage` — Style profiles (gated by Enable Inclination Prompts)
 
@@ -248,7 +248,7 @@ Active profiles are injected as system context every turn and act **indirectly**
 
 **LoRAs via fal-ai.** `generate_image` routes LoRA calls to `fal-ai`; I2I LoRA passthrough exists and is honestly marked "under verification". Curated prompts stay under ~150 words to bound token cost on every-turn injection.
 
-**Output browsing instead of directory dumps.** LLMs choke on large folders — `list_output_images` paginates the single output directory (the only place the plugin reads), and bare filenames resolve against it first (then the process CWD). Tools return the absolute `output_dir`/`file_path`, explicitly telling the LLM *not* to strip paths to bare filenames when handing results to other plugins — absolute paths are preferred everywhere, since relative paths resolve against the plugin process CWD, not the chat directory.
+**Output browsing instead of directory dumps.** LLMs choke on large folders — `list_output_images` paginates the single output directory (the only place the plugin reads: generated results and input/reference images alike), and bare filenames resolve against it first (then the process CWD). Tools return the absolute `output_dir`/`file_path`, explicitly telling the LLM *not* to strip paths to bare filenames when handing results to other plugins — absolute paths are preferred everywhere, since relative paths resolve against the plugin process CWD, not the chat directory.
 
 **Daily guard is local, and it's not HF credits.** The quota block (`limit/used/remaining/resets_in_hours`) reflects the config'd `Daily Generation Limit`. After a live-test confusion ("0 remaining despite HF credits!"), the counter was rebuilt on the **local calendar day** (ready to reset at local midnight) and the response now labels itself a *plugin guard*, names the reset, and appends a clear warning at `remaining: 0`.
 

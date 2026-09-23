@@ -28,7 +28,7 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
      Blank model = x-ai/grok-imagine-image-quality (non-restrictive — few filters,
      healthy, alias aurora). Cheaper: x-ai/grok-imagine-image. STRICT fallback:
      flux.1-kontext-pro / seedream5 — flags fashion-editorial and wastes credits.
-• User asks which images exist / wants the latest result        → list_output_images (paginated; limit=1 + newest = latest)
+• User asks which images exist / result / input for image_edit  → list_output_images (paginated; limit=1 + newest = latest)
 • User asks what models are available                        → list_models
 • User asks about LoRAs, styles, or custom adapters          → list_loras
 • User asks about moods/styles, Neigung/Stimmung, Systemprompt→ inclination_prompt_list / inclination_prompt_set / inclination_prompt_manage

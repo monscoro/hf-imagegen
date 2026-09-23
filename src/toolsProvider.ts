@@ -678,14 +678,17 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "list_output_images",
       description: text`
-        List images in the plugin output directory (where generate_image/image_edit save files).
+        List images in the plugin output directory — the shared workspace holding both
+        generated results (generate_image/image_edit) and input/reference images
+        (image_edit resolves bare filenames against this directory first).
         Paginated and compact — use it instead of reading a large directory at once.
 
-        Use when the user asks which images exist, wants the latest result, or needs a
-        file path as reference 'image' for image_edit (newest first by default, so
-        limit=1 returns the latest image). Entries return 'filename'; for image_edit,
-        prefer the absolute path output_directory + filename. Walk large folders page
-        by page via offset. Scoped to the output directory only.
+        Use when the user asks which images exist, wants the latest result, or needs to
+        locate an input/reference image for image_edit — a prior result or a file placed
+        in this directory (newest first by default, so limit=1 returns the latest image).
+        Entries return 'filename'; for image_edit, prefer the absolute path
+        output_directory + filename. Walk large folders page by page via offset.
+        Scoped to the output directory only.
       `,
       parameters: {
         sort: z.enum(["newest", "oldest", "name"]).default("newest").describe(

@@ -19,7 +19,9 @@ export type OutputImageSort = "newest" | "oldest" | "name";
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
 
 /**
- * Kompakte, paginierte Auflistung der Bilder im Output-Verzeichnis.
+ * Kompakte, paginierte Auflistung der Bilder im Output-Verzeichnis —
+ * gleichzeitig generierte Ergebnisse (generate_image/image_edit) UND
+ * Input-/Referenzbilder, gegen die image_edit bloße Dateinamen zuerst auflöst.
  * Absichtlich auf dieses eine Verzeichnis begrenzt (kein beliebiger Dateizugriff):
  * große Verzeichnisse werden in häppchenweisen Seiten gelesen statt komplett in den Kontext.
  * Fehlendes Verzeichnis = leere Liste, kein Fehler.

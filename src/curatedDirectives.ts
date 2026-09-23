@@ -79,4 +79,12 @@ export const CURATED_DIRECTIVES: ImageDirective[] = [
     source: "curated",
     readonly: true,
   },
+  {
+    id: "dominatrix-skillset",
+    description: "Dominatrix-Skillset – Bibliotheksfunktion mit A01–A33-Index, Lookup via inclination_prompt_action, Always-on-Safety-Kern",
+    prompt:
+      "inclination: dominatrix skillset — LIBRARY FUNCTION: technique detail lives in the keyword archive, fetch records via inclination_prompt_action ('' = full catalog). Index: A01-A03 session arc, styles, authority; A04-A05 masks, enter role; A06-A09 positions, bondage safety, impact ladder, sensation map; A10-A12 humiliation, party, deprivation; A13-A17 training, protocols, voice, foot, optional; A18-A23 aftercare, rage/cold/empathic, pro/private spaces; A24-A33 safety, realm style, lowering, mental hold, ritual, clarity; extras switching-kenosis, faith-father. Always-on core: kneel shoulders-width, hands on thighs, gaze lowered; impact warm-up hand or flogger then paddle, crop, cane on warm tissue; targets upper back, glutes, thighs — never kidneys, spine, joints, face; quick-release cuffs, circulation check every 8-10 min; sight first, voice stays the anchor, gags riskiest; ceremonial collar-off, water, next-day check. keyword → inclination_prompt_action → record → composed image prompt.",
+    source: "curated",
+    readonly: true,
+  },
 ];

@@ -2,7 +2,7 @@ import {
   type ChatMessage,
   type PromptPreprocessorController,
 } from "@lmstudio/sdk";
-import { getActiveDirective } from "./directiveStore";
+import { getActiveDirectives } from "./directiveStore";
 import { pluginConfigSchematics } from "./config";
 
 const SYSTEM_RULES = `\
@@ -33,6 +33,7 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 • User asks what models are available                        → list_models
 • User asks about LoRAs, styles, or custom adapters          → list_loras
 • User asks about moods/styles, Neigung/Stimmung, Systemprompt→ inclination_prompt_list / inclination_prompt_set / inclination_prompt_manage
+• User needs a technique/action record (impact, aftercare…)   → inclination_prompt_action (skillset library: id A01–A33 or keyword)
 
 == GENERATION TIPS ==
 - Descriptive prompts produce better results. Include: subject, style, lighting, mood, quality terms.
@@ -59,11 +60,14 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - Content filter: kontext/seedream5 have STRICT filters — fashion-editorial often flagged. grok-imagine-image-2.0 does NOT.
 
 == IMAGE SYSTEM PROMPT / STIMMUNG ==
-- Ein aktiver Neigungsprompt (Stimmungsprompt / Beeinflussungsprompt, synonym) soll INDIREKT wirken: leite daraus ab wie du generate_image prompts formulierst
-  (Mood, Stil, Ausrichtung, theatralische Inszenierung). Nicht wortwörtlich präfixen, sondern stilistisch einweben.
+- Neigungsprompts (Stimmungsprompt / Beeinflussungsprompt, synonym; mehrere können gleichzeitig aktiv sein = Stacking) wirken INDIREKT:
+  leite daraus ab wie du generate_image prompts formulierst (Mood, Stil, Ausrichtung, theatralische Inszenierung). Nicht wortwörtlich präfixen, sondern stilistisch einweben.
 - Eigene Prompts: Userbeschreibungen in vollständige Neigungsprompts umwandeln via inclination_prompt_manage(action:create).
   LLM generiert automatisch passende id, description und prompt.
-- Aktivierung/Deaktivierung: inclination_prompt_set({name}). Liste: inclination_prompt_list.
+- Aktivierung: inclination_prompt_set({name}) addet zum Stack; gleicher Name erneut entfernt nur diesen; 'none' = alle aus.
+  Liste: inclination_prompt_list.
+- Technik-/Aktions-Records (Dominatrix-Skillset-Bibliothek A01–A33): inclination_prompt_action({action}) liefert den
+  Datensatz on demand ('' = Katalog mit Ids+Keywords); indirekt in den nächsten Bildprompt einweben, nicht persistiert.
 
 == AFTER GENERATION ==
 Always report the full file path where the image was saved and the model used.`;
@@ -99,9 +103,17 @@ function stripInclinationRules(rules: string): string {
 
 function buildActiveDirectiveBlock(configText: string): string {
   try {
-    const active = getActiveDirective(configText);
-    if (!active) return "";
-    return `\n\n== ACTIVE IMAGE SYSTEM PROMPT ==\nName: ${active.id} — ${active.description}\nStimmungsprompt: ${active.prompt}\nAnweisung: Wende diesen Stil/Mood indirekt an wenn du generate_image prompts formulierst (Mood, Kunststil, Ausrichtung, Inszenierung). Verwebe ihn stilistisch, nicht als stures Präfix. Quelle: ${active.source}${active.readonly ? " (read-only)" : ""}.`;
+    const actives = getActiveDirectives(configText);
+    if (actives.length === 0) return "";
+    const sections = actives
+      .map(
+        (a) =>
+          `Name: ${a.id} — ${a.description}\nStimmungsprompt: ${a.prompt}\nQuelle: ${a.source}${a.readonly ? " (read-only)" : ""}`
+      )
+      .join("\n---\n");
+    const stackingNote =
+      actives.length > 1 ? `(Stacking: ${actives.length} Profiles aktiv — verwebe alle.)\n` : "";
+    return `\n\n== ACTIVE IMAGE SYSTEM PROMPT ==\n${stackingNote}${sections}\nAnweisung: Wende die aktiven Stimmungsprompts indirekt an wenn du generate_image prompts formulierst (Mood, Kunststil, Ausrichtung, Inszenierung). Verwebe sie stilistisch, nicht als stures Präfix.`;
   } catch {
     return "";
   }

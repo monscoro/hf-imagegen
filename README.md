@@ -40,7 +40,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 | Output Directory | `~/hf-images` | Where images are saved. Created automatically. Supports `~/` prefix. Also the search base for bare filenames in `image_edit` and the scope of `list_output_images`. |
 | Generation Cooldown (ms) | `5000` | Minimum gap between generations (both backends). |
 | Daily Generation Limit | `75` | Max images per day, resets at **local** midnight. This is the plugin's own guard — it does **not** track HF credits. |
-| Enable Inclination Prompts | `true` | Master switch for the Neigungsprompt subsystem. Off hides `inclination_prompt_*` tools and stops style-profile injection (a stored active profile resumes when re-enabled). |
+| Enable Inclination Prompts | `true` | Master switch for the Neigungsprompt subsystem. Off hides `inclination_prompt_*` tools and stops style-profile injection (stored active profiles resume when re-enabled). |
 
 ---
 
@@ -134,15 +134,15 @@ list_output_images(sort?, limit?, offset?, filter?)
 
 Paginated, compact listing of the output directory — generated results **and** input/reference images (`image_edit` resolves bare filenames against it first; newest first, `limit=1` = latest image). Use instead of reading large folders at once; for `image_edit`, pass the absolute `output_directory` + `filename` (preferred over a bare filename).
 
-### `inclination_prompt_list` / `set` / `manage` — Style profiles (gated by Enable Inclination Prompts)
+### `inclination_prompt_list` / `set` / `manage` / `action` — Style profiles (gated by Enable Inclination Prompts)
 
-Persistent mood/style directives that indirectly guide how the LLM formulates image prompts (see below). `manage(action="create")` turns user descriptions into full profiles (LLM generates id/description/prompt); `set` activates; empty/`none` deactivates. Gated by the `Enable Inclination Prompts` config switch (default on) — when off, these tools are not registered and no style profile is injected into the LLM context.
+Persistent mood/style directives that indirectly guide how the LLM formulates image prompts (see below). `manage(action="create")` turns user descriptions into full profiles (LLM generates id/description/prompt); `set` adds a profile to the active stack (same name again removes just that one; empty/`none` clears all — **multiple profiles can be active at once**). `action` is the **Dominatrix-Skillset library lookup**: `action=''` lists the catalog (`A01`–`A33` + `switching-kenosis`/`faith-father`, ids + keywords), an exact id or keyword returns the full German technique record for the LLM to weave into the *next* image prompt (on-demand, not persisted — source: `kristina-lorebook-archive-layer.md` §D + TavernCard `character_book`). Gated by the `Enable Inclination Prompts` config switch (default on) — when off, these tools are not registered and no style profile is injected into the LLM context.
 
 ---
 
 ## Neigungsprompt System (Stimmungsprompts)
 
-Active profiles are injected as system context every turn and act **indirectly**: the LLM weaves mood, style, and staging into `generate_image`/`image_edit` prompts instead of prefixing them. The whole subsystem can be switched off via the `Enable Inclination Prompts` config field.
+Active profiles are injected as system context every turn and act **indirectly**: the LLM weaves mood, style, and staging into `generate_image`/`image_edit` prompts instead of prefixing them. **Stacking:** several profiles can be active at once (e.g. visual layer + `voice-martha` + `dominatrix-lorebook`) — all are injected, separated by `---`. The whole subsystem can be switched off via the `Enable Inclination Prompts` config field.
 
 **Sources:** `curated` (read-only examples in code) + `user` (LLM-created via `inclination_prompt_manage`, persisted in plugin storage `directives.json`).
 
@@ -153,8 +153,9 @@ Active profiles are injected as system context every turn and act **indirectly**
 | `pose-action`, `interaction`, `setting`, `narrative`, `camera-intimate` | Visual basics | Pose, relation, place, story, lens |
 | `dark-fashion-editorial` (~119 words) | Aesthetic | Silhouette, materials, light-as-design, gates, designer anchor, intensity 6 |
 | `power-spice-editorial` (~150 words) | Dynamics | Dominant/submissive as styling, exchange vector, editorial trance, power-read designers |
-| `voice-martha` (~137 words) | Voice | How results are *talked about*: millennial, sharp, no AI filler — combinable with the visual layers |
+| `voice-martha` (~137 words) | Voice | How results are *talked about*: millennial, sharp, no AI filler — combinable with the visual layers (stacking) |
 | `dominatrix-lorebook` (~136 words) | Craft/Character | Session arc (role → service → peak → ceremonial wind-down), Lorelei masks, Seven Realm Arts, tones (rage/cold/empathic/party), Kristina look, hard filters — source: `kristina-lorebook-archive-layer.md` + TavernCard |
+| `dominatrix-skillset` (~127 words) | Library lookup | **Bibliotheksfunktion:** full distillation with explicit `A01`–`A33` index (thematic groups) → fetch records via `inclination_prompt_action` (keyword/`''`=catalog); always-on core keeps role posture, impact ladder/safe zones, circulation checks, deprivation order, exit record |
 
 **Typical workflow:** user describes moods → LLM creates entries via `inclination_prompt_manage(action="create")` → activates via `inclination_prompt_set` → every generation/edit follows the style. Methodology and 20+ examples: `Prompt-Inclination-Techniques.md`.
 

@@ -17,6 +17,7 @@ import { getCuratedEditModels } from "./curatedModels";
 import { checkRateLimit, recordGeneration } from "./rateLimit";
 import { resolveImageInput } from "./imageInput";
 import { listOutputImages } from "./workspace";
+import { ACTION_RECORDS, lookupActionRecords } from "./actionRecords";
 import {
   getPollinationsModels,
   buildPollinationsPostBody,
@@ -29,9 +30,11 @@ import { getAllCosts, getCacheInfo } from "./costCache";
 import { getModelCacheInfo } from "./modelCache";
 import {
   getAllDirectives,
-  getActiveDirective,
-  getActiveId,
-  setActiveDirective,
+  getActiveIds,
+  getActiveDirectives,
+  addActiveDirective,
+  removeActiveDirective,
+  clearActiveDirectives,
   createDirective,
   updateDirective,
   deleteDirective,
@@ -980,7 +983,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Curated are only examples (few, not exhaustive) – main library is user-created via inclination_prompt_manage.
 
         Use this to discover available moods before calling inclination_prompt_set.
-        The active profile is highlighted and also injected into the LLM system context to guide generate_image prompt creation.
+        Active profiles are highlighted (stacking: several can be active at once) and injected
+        into the LLM system context to guide generate_image prompt creation.
         Hinweis: list ist auch via inclination_prompt_manage({action:"list"}) verfügbar (vereinheitlicht).
       `,
       parameters: {
@@ -989,20 +993,20 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       implementation: safe_impl("inclination_prompt_list", async ({ filter }, _ctx) => {
         const text_ = "";
         const all = getAllDirectives(text_);
-        const activeId = getActiveId();
-        const active = getActiveDirective(text_);
+        const activeIds = getActiveIds();
+        const activeDirectives = getActiveDirectives(text_);
         const f = filter.trim().toLowerCase();
         const filtered = f ? all.filter((d) => d.id.includes(f) || d.description.toLowerCase().includes(f)) : all;
         return json({
-          active_id: activeId,
-          active_directive: active,
+          active_ids: activeIds,
+          active_directives: activeDirectives,
           count: filtered.length,
           total_count: all.length,
           directives: filtered.map((d) => ({
             ...d,
-            is_active: d.id === activeId,
+            is_active: activeIds.includes(d.id),
           })),
-          note: "Use inclination_prompt_set({name}) to activate. Curated=read-only examples, user=via inclination_prompt_manage.",
+          note: "Use inclination_prompt_set({name}) to activate — multiple stack; same name again removes it; ''/'none' clears all. Curated=read-only examples, user=via inclination_prompt_manage.",
           config_hint: "Eigene Prompts via inclination_prompt_manage(action:create). Aktivierung via inclination_prompt_set.",
         });
       }),
@@ -1011,36 +1015,54 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "inclination_prompt_set",
       description: text`
-        Activate or clear the Neigungsprompt (Stimmungsprompt / Beeinflussungsprompt, synonym) for indirect prompt guidance – einheitlicher Prefix inclination_prompt_.
+        Activate or clear Neigungsprompts (Stimmungsprompt / Beeinflussungsprompt, synonym) for indirect prompt guidance – einheitlicher Prefix inclination_prompt_.
 
-        Manages the whole profile set by simple name. The active prompt is injected as system context
-        and guides the Tool LLM to create stylistically aligned generate_image prompts (Mood, Kunststil, Ausrichtung, Inszenierung).
+        Supports STACKING: multiple profiles can be active at once (e.g. a visual layer
+        plus voice-martha plus dominatrix-lorebook). All active profiles are injected as
+        system context and guide the Tool LLM to create stylistically aligned generate_image prompts.
 
-        - Pass a name from inclination_prompt_list to activate (e.g. "pose-action", "interaction").
-        - Pass empty string or "none"/"clear" to deactivate.
+        - Pass a name from inclination_prompt_list to add it to the active stack.
+        - Pass the SAME name again to remove just that profile from the stack.
+        - Pass empty string or "none"/"clear" to deactivate ALL profiles.
         Use inclination_prompt_list first to discover available profiles.
       `,
       parameters: {
-        name: z.string().describe("Profile id to activate (e.g. 'pose-action'). Use '' or 'none' to clear/deactivate."),
+        name: z.string().describe(
+          "Profile id to toggle onto the active stack (e.g. 'pose-action'). " +
+          "Same name again = remove it. Use '' or 'none' to clear all."
+        ),
       },
       implementation: safe_impl("inclination_prompt_set", async ({ name }, _ctx) => {
         const text_ = "";
         const clean = name.trim().toLowerCase();
         if (!clean || clean === "none" || clean === "clear") {
-          setActiveDirective(null, text_);
+          clearActiveDirectives();
           return json({
             success: true,
-            active_id: null,
-            active_directive: null,
-            message: "Neigungsprompt deaktiviert. generate_image nutzt wieder neutralen Stil.",
+            active_ids: [],
+            active_directives: [],
+            message: "Alle Neigungsprompts deaktiviert. generate_image nutzt wieder neutralen Stil.",
           });
         }
-        const activated = setActiveDirective(clean, text_);
+        if (getActiveIds().includes(clean)) {
+          removeActiveDirective(clean);
+          const remaining = getActiveIds();
+          return json({
+            success: true,
+            active_ids: remaining,
+            active_directives: getActiveDirectives(text_),
+            message: `Deaktiviert: ${clean}. Aktiv:${remaining.length ? " " + remaining.join(", ") : " keine"}.`,
+          });
+        }
+        const activated = addActiveDirective(clean, text_);
+        const activeIds = getActiveIds();
         return json({
           success: true,
-          active_id: activated!.id,
-          active_directive: activated,
-          message: `Aktiviert: ${activated!.id} — ${activated!.description}. Wird jetzt indirekt bei generate_image berücksichtigt.`,
+          active_ids: activeIds,
+          active_directives: getActiveDirectives(text_),
+          message:
+            `Aktiviert (Stacking): ${activated.id} — ${activated.description}. ` +
+            `Aktive Profiles: ${activeIds.join(", ")}. Wird indirekt bei generate_image berücksichtigt.`,
         });
       }),
     }),
@@ -1067,20 +1089,20 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         if (action === "list") {
           const all = getAllDirectives(text_);
-          const activeId = getActiveId();
-          const active = getActiveDirective(text_);
+          const activeIds = getActiveIds();
+          const activeDirectives = getActiveDirectives(text_);
           const f = (filter as string).trim().toLowerCase();
           const filtered = f ? all.filter((d) => d.id.includes(f) || d.description.toLowerCase().includes(f)) : all;
           return json({
-            active_id: activeId,
-            active_directive: active,
+            active_ids: activeIds,
+            active_directives: activeDirectives,
             count: filtered.length,
             total_count: all.length,
             directives: filtered.map((d) => ({
               ...d,
-              is_active: d.id === activeId,
+              is_active: activeIds.includes(d.id),
             })),
-            note: "Use inclination_prompt_set({name}) to activate. Vereinheitlicht: list via manage action list oder via inclination_prompt_list.",
+            note: "Use inclination_prompt_set({name}) to activate — multiple stack; same name again removes it. Vereinheitlicht: list via manage action list oder via inclination_prompt_list.",
           });
         }
 
@@ -1108,12 +1130,66 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           case "get": {
             const found = getDirectiveById(cleanName, text_);
             if (!found) throw new Error(`Profil "${cleanName}" nicht gefunden.`);
-            const activeId = getActiveId();
-            return json({ success: true, action, directive: found, is_active: found.id === activeId });
+            return json({ success: true, action, directive: found, is_active: getActiveIds().includes(found.id) });
           }
           default:
             throw new Error(`Unknown action ${action}`);
         }
+      }),
+    }),
+
+    tool({
+      name: "inclination_prompt_action",
+      description: text`
+        Look up an action/technique record from the Dominatrix skillset LIBRARY (A01–A33 + extras) – einheitlicher Prefix inclination_prompt_.
+
+        Records are keyword-indexed technique entries (session structure, positions, impact ladder, bondage safety, sensory, aftercare, realm style, tones, safety …).
+        Call with:
+        - '' (blank) → full catalog: ids + keywords only (compact).
+        - an exact id ('A01'–'A33', 'switching-kenosis', 'faith-father') → the full record content.
+        - a keyword ('impact', 'aftercare', 'collar' …) → exact key hit returns the full record;
+          partial hits return a narrowed candidate list (pick an id from it).
+
+        Returned content is STAGING GUIDANCE FOR YOU: weave it indirectly into the next
+        generate_image/image_edit prompt — do not paste it verbatim as image-model text.
+        On-demand only: not persisted, not injected every turn. For persistent style layers
+        use inclination_prompt_set (stacking).
+      `,
+      parameters: {
+        action: z.string().default("").describe(
+          "Action id ('A01'–'A33', 'switching-kenosis', 'faith-father'), a keyword from the record keys, " +
+          "or '' to list the full catalog (ids + keywords)."
+        ),
+      },
+      implementation: safe_impl("inclination_prompt_action", async ({ action }, _ctx) => {
+        const q = action.trim();
+        if (!q) {
+          return json({
+            count: ACTION_RECORDS.length,
+            catalog: ACTION_RECORDS.map((r) => ({ id: r.id, keys: r.keys })),
+            usage: "Call again with an exact id (e.g. 'A08') to get the full record content.",
+          });
+        }
+        const hits = lookupActionRecords(q);
+        if (hits.length === 0) {
+          throw new Error(
+            `Kein Action-Record für "${q}". Mit '' aufrufen für den Katalog (Ids + Keywords).`
+          );
+        }
+        if (hits.length === 1) {
+          return json({
+            record: hits[0],
+            usage:
+              "Staging-Guidance für dich: indirekt in den nächsten generate_image/image_edit-Prompt " +
+              "einweben (nicht wörtlich präfixen). On-demand, nicht persistiert — dauerhafter Style " +
+              "via inclination_prompt_set (Stacking).",
+          });
+        }
+        return json({
+          matches: hits.map((r) => ({ id: r.id, keys: r.keys })),
+          count: hits.length,
+          usage: `Mehrere Treffer — wähle eine exakte id, z.B. inclination_prompt_action({action:"${hits[0].id}"}).`,
+        });
       }),
     }),
 

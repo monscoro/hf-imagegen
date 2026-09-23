@@ -17,7 +17,7 @@ const STORE_FILE = (() => {
 })();
 
 interface PersistedStore {
-  activeId: string | null;
+  activeIds: string[];
   directives: ImageDirective[];
 }
 
@@ -25,10 +25,10 @@ function loadPersisted(): PersistedStore {
   try {
     if (fs.existsSync(STORE_FILE)) {
       const raw = fs.readFileSync(STORE_FILE, "utf-8");
-      const parsed = JSON.parse(raw) as PersistedStore;
+      const parsed = JSON.parse(raw) as PersistedStore & { activeId?: string | null };
       if (
         parsed &&
-        ("activeId" in parsed || "directives" in parsed) &&
+        ("activeIds" in parsed || "activeId" in parsed || "directives" in parsed) &&
         Array.isArray(parsed.directives)
       ) {
         // sanitize
@@ -41,19 +41,31 @@ function loadPersisted(): PersistedStore {
             source: "user" as DirectiveSource,
             readonly: false,
           }));
-        return { activeId: parsed.activeId ?? null, directives: dirs };
+        const fromArray = Array.isArray(parsed.activeIds)
+          ? parsed.activeIds.filter((id): id is string => typeof id === "string" && !!id.trim())
+          : [];
+        const legacy = typeof parsed.activeId === "string" && parsed.activeId.trim()
+          ? [parsed.activeId]
+          : [];
+        const activeIds = [...new Set([...(fromArray.length ? fromArray : legacy)].map((id) => id.trim().toLowerCase()))];
+        return { activeIds, directives: dirs };
       }
     }
   } catch {
     // ignore corrupt file
   }
-  return { activeId: null, directives: [] };
+  return { activeIds: [], directives: [] };
 }
 
 function savePersisted(store: PersistedStore): void {
   try {
     fs.mkdirSync(path.dirname(STORE_FILE), { recursive: true });
-    fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2), "utf-8");
+    fs.writeFileSync(
+      STORE_FILE,
+      // activeId als Mirror für Abwärtskompatibilität (ältere Plugin-Versionen lesen nur dieses Feld)
+      JSON.stringify({ activeId: store.activeIds[0] ?? null, ...store }, null, 2),
+      "utf-8"
+    );
   } catch {
     // best-effort
   }
@@ -233,36 +245,51 @@ export function getAllDirectives(configText: string): ImageDirective[] {
   return Array.from(map.values());
 }
 
-export function getActiveDirective(configText: string): ImageDirective | null {
-  const activeId = cache.activeId;
-  if (!activeId) return null;
+export function getActiveIds(): string[] {
+  return [...cache.activeIds];
+}
+
+export function getActiveDirectives(configText: string): ImageDirective[] {
+  if (cache.activeIds.length === 0) return [];
   const all = getAllDirectives(configText);
-  const found = all.find((d) => d.id === activeId) ?? null;
-  if (!found) {
-    // Dangling activeId (e.g., config entry removed) – clear zombie
-    cache.activeId = null;
+  const kept: string[] = [];
+  for (const id of cache.activeIds) {
+    if (all.some((d) => d.id === id) && !kept.includes(id)) kept.push(id);
+  }
+  if (kept.length !== cache.activeIds.length) {
+    // Dangling ids (z.B. gelöschter Config-Eintrag) prUNEN
+    cache.activeIds = kept;
     savePersisted(cache);
   }
-  return found;
+  return kept
+    .map((id) => all.find((d) => d.id === id))
+    .filter((d): d is ImageDirective => d !== undefined);
 }
 
-export function getActiveId(): string | null {
-  return cache.activeId;
-}
-
-export function setActiveDirective(id: string | null, configText: string): ImageDirective | null {
-  if (id === null || id === "") {
-    cache.activeId = null;
-    savePersisted(cache);
-    return null;
-  }
+export function addActiveDirective(id: string, configText: string): ImageDirective {
   const norm = id.trim().toLowerCase();
   const all = getAllDirectives(configText);
   const found = all.find((d) => d.id === norm);
   if (!found) throw new Error(`Stimmungsprompt "${id}" nicht gefunden. Nutze inclination_prompt_list um verfügbare Namen zu sehen.`);
-  cache.activeId = found.id;
-  savePersisted(cache);
+  if (!cache.activeIds.includes(found.id)) {
+    cache.activeIds.push(found.id);
+    savePersisted(cache);
+  }
   return found;
+}
+
+export function removeActiveDirective(id: string): boolean {
+  const norm = id.trim().toLowerCase();
+  if (!cache.activeIds.includes(norm)) return false;
+  cache.activeIds = cache.activeIds.filter((i) => i !== norm);
+  savePersisted(cache);
+  return true;
+}
+
+export function clearActiveDirectives(): void {
+  if (cache.activeIds.length === 0) return;
+  cache.activeIds = [];
+  savePersisted(cache);
 }
 
 export function createDirective(
@@ -357,7 +384,7 @@ export function deleteDirective(id: string, configText: string): void {
     if (shadowIdx !== -1) {
       // Delete only the shadow, revert to config base
       cache.directives.splice(shadowIdx, 1);
-      if (cache.activeId === norm) cache.activeId = null;
+      cache.activeIds = cache.activeIds.filter((i) => i !== norm);
       savePersisted(cache);
       return;
     }
@@ -369,7 +396,7 @@ export function deleteDirective(id: string, configText: string): void {
   const idx = cache.directives.findIndex((d) => d.id === norm);
   if (idx === -1) throw new Error(`Profil "${norm}" nicht gefunden.`);
   cache.directives.splice(idx, 1);
-  if (cache.activeId === norm) cache.activeId = null;
+  cache.activeIds = cache.activeIds.filter((i) => i !== norm);
   savePersisted(cache);
 }
 

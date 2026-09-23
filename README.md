@@ -154,6 +154,7 @@ Active profiles are injected as system context every turn and act **indirectly**
 | `dark-fashion-editorial` (~119 words) | Aesthetic | Silhouette, materials, light-as-design, gates, designer anchor, intensity 6 |
 | `power-spice-editorial` (~150 words) | Dynamics | Dominant/submissive as styling, exchange vector, editorial trance, power-read designers |
 | `voice-martha` (~137 words) | Voice | How results are *talked about*: millennial, sharp, no AI filler — combinable with the visual layers |
+| `dominatrix-lorebook` (~136 words) | Craft/Character | Session arc (role → service → peak → ceremonial wind-down), Lorelei masks, Seven Realm Arts, tones (rage/cold/empathic/party), Kristina look, hard filters — source: `kristina-lorebook-archive-layer.md` + TavernCard |
 
 **Typical workflow:** user describes moods → LLM creates entries via `inclination_prompt_manage(action="create")` → activates via `inclination_prompt_set` → every generation/edit follows the style. Methodology and 20+ examples: `Prompt-Inclination-Techniques.md`.
 

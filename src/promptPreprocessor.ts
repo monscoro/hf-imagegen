@@ -63,8 +63,9 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - Neigungsprompts (Stimmungsprompt / Beeinflussungsprompt, synonym; mehrere können gleichzeitig aktiv sein = Stacking) wirken INDIREKT:
   leite daraus ab wie du generate_image prompts formulierst (Mood, Stil, Ausrichtung, theatralische Inszenierung). Nicht wortwörtlich präfixen, sondern stilistisch einweben.
 - Eigene Prompts: Userbeschreibungen in vollständige Neigungsprompts umwandeln via inclination_prompt_manage(action:create).
-  LLM generiert automatisch passende id, description und prompt.
+  LLM generiert automatisch passende id, description, prompt. Profil-Inhalt lesen (ohne zu aktivieren): inclination_prompt_manage(action:get).
 - Aktivierung: inclination_prompt_set({name}) addet zum Stack; gleicher Name erneut entfernt nur diesen; 'none' = alle aus.
+  Ergebnis bestätigt nur Aktivierung (Ids+Descriptions) — Prompt-Text via _manage(action:get) / _list holen.
   Liste: inclination_prompt_list.
 - Technik-/Aktions-Records (Dominatrix-Skillset-Bibliothek A01–A33): inclination_prompt_action({action}) liefert den
   Datensatz on demand ('' = Katalog mit Ids+Keywords); indirekt in den nächsten Bildprompt einweben, nicht persistiert.

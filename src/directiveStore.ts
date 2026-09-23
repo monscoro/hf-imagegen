@@ -270,7 +270,7 @@ export function addActiveDirective(id: string, configText: string): ImageDirecti
   const norm = id.trim().toLowerCase();
   const all = getAllDirectives(configText);
   const found = all.find((d) => d.id === norm);
-  if (!found) throw new Error(`Stimmungsprompt "${id}" nicht gefunden. Nutze inclination_prompt_list um verfügbare Namen zu sehen.`);
+  if (!found) throw new Error(`Stimmungsprompt "${id}" nicht gefunden. Nutze inclination_prompt_list für Namen oder inclination_prompt_manage({action:"create", …}) für ein neues Profil.`);
   if (!cache.activeIds.includes(found.id)) {
     cache.activeIds.push(found.id);
     savePersisted(cache);

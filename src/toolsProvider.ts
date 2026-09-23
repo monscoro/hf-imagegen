@@ -1024,25 +1024,47 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         - Pass a name from inclination_prompt_list to add it to the active stack.
         - Pass the SAME name again to remove just that profile from the stack.
         - Pass empty string or "none"/"clear" to deactivate ALL profiles.
+        - Unknown name → error tells you exactly how to create it first via
+          inclination_prompt_manage({action:"create", ...}).
+        - Result confirms ACTIVATION ONLY (ids + descriptions). To READ a profile's full
+          prompt text without side effects use inclination_prompt_manage({action:"get"})
+          or inclination_prompt_list — do not call set just to inspect content.
         Use inclination_prompt_list first to discover available profiles.
       `,
       parameters: {
         name: z.string().describe(
           "Profile id to toggle onto the active stack (e.g. 'pose-action'). " +
-          "Same name again = remove it. Use '' or 'none' to clear all."
+          "Same name again = remove it. Use '' or 'none' to clear all. " +
+          "Unknown names: create first via inclination_prompt_manage(action:'create')."
         ),
       },
       implementation: safe_impl("inclination_prompt_set", async ({ name }, _ctx) => {
         const text_ = "";
         const clean = name.trim().toLowerCase();
+        const slimActive = () =>
+          getActiveDirectives(text_).map(({ id, description }) => ({ id, description }));
         if (!clean || clean === "none" || clean === "clear") {
           clearActiveDirectives();
           return json({
             success: true,
             active_ids: [],
-            active_directives: [],
+            active: [],
             message: "Alle Neigungsprompts deaktiviert. generate_image nutzt wieder neutralen Stil.",
           });
+        }
+        const found = getDirectiveById(clean, text_);
+        if (!found) {
+          const close = getAllDirectives(text_)
+            .map((d) => d.id)
+            .filter((id) => id.includes(clean) || clean.includes(id))
+            .slice(0, 5);
+          throw new Error(
+            `Stimmungsprompt "${clean}" nicht gefunden.` +
+            (close.length ? ` Meintest du: ${close.join(", ")}?` : "") +
+            ` Neues Profil anlegen: inclination_prompt_manage({action:"create", name:"${clean}", ` +
+            `description:"Kurzbeschreibung", prompt:"inclination: …"}). ` +
+            `Verfügbare Namen: inclination_prompt_list.`
+          );
         }
         if (getActiveIds().includes(clean)) {
           removeActiveDirective(clean);
@@ -1050,7 +1072,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           return json({
             success: true,
             active_ids: remaining,
-            active_directives: getActiveDirectives(text_),
+            active: slimActive(),
             message: `Deaktiviert: ${clean}. Aktiv:${remaining.length ? " " + remaining.join(", ") : " keine"}.`,
           });
         }
@@ -1059,7 +1081,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         return json({
           success: true,
           active_ids: activeIds,
-          active_directives: getActiveDirectives(text_),
+          activated: { id: activated.id, description: activated.description },
+          active: slimActive(),
           message:
             `Aktiviert (Stacking): ${activated.id} — ${activated.description}. ` +
             `Aktive Profiles: ${activeIds.join(", ")}. Wird indirekt bei generate_image berücksichtigt.`,
@@ -1072,10 +1095,17 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       description: text`
         Create, update, delete, get, or list Neigungsprompts (Stimmungsprompts / Beeinflussungsprompts, synonym) – einheitlicher Prefix inclination_prompt_, LLM-managed, persisted in the plugin storage (directives.json). Vereinheitlicht list+manage via action:"list".
 
-        Curated (source=curated) are examples only, always read-only.
-        User (source=user) profiles are fully manageable here.
+        This is THE tool for content and lifecycle — its advantages over set/list:
+        - action:"get": read one profile's FULL prompt text without activating anything
+          (safe getter — inclination_prompt_set only toggles activation and returns
+          ids+descriptions, never the prompt text).
+        - action:"create": turn a user description into a complete profile in one call
+          (LLM picks id/description/prompt) — the only way to add NEW profiles; set on an
+          unknown name fails with a pointer back here.
+        - action:"update"/"delete": edit or remove user/[rw] profiles (curated stay read-only).
+        - action:"list": same as inclination_prompt_list (unified).
 
-        Typical workflow: User provides one or more prompt texts, LLM creates entries with fitting name/description/prompt via action:"create", then activates via inclination_prompt_set.
+        Typical workflow: User provides one or more prompt texts → action:"create" → activate via inclination_prompt_set (stacking allows several active at once).
       `,
       parameters: {
         action: z.enum(["create", "update", "delete", "get", "list"]).describe("Action to perform. Use list to list all (unified with inclination_prompt_list)."),

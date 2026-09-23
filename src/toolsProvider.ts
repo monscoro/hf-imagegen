@@ -70,22 +70,35 @@ function resolvePath(p: string): string {
   return path.resolve(p);
 }
 
-function timestampedFilename(ext: "png" | "jpeg" | "webp", prefix: "hf" | "pl" = "hf"): string {
+function slugifyFilename(raw: string): string {
+  return raw
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/^-+|-+$/g, "");
+}
+
+function timestampedFilename(ext: "png" | "jpeg" | "webp", prefix: "hf" | "pl" = "hf", name = ""): string {
   const ts = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
-  return `${prefix}-${ts}.${ext}`;
+  const slug = slugifyFilename(name);
+  return `${prefix}-${ts}${slug ? `-${slug}` : ""}.${ext}`;
 }
 
 async function saveImageBuffer(
   buffer: Buffer,
   mimeType: string,
   outputDir: string,
-  prefix: "hf" | "pl" = "hf"
+  prefix: "hf" | "pl" = "hf",
+  name = ""
 ): Promise<{ filePath: string; filename: string }> {
   const ext: "png" | "jpeg" | "webp" =
     mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpeg"
     : mimeType.includes("webp") ? "webp"
     : "png";
-  const filename = timestampedFilename(ext, prefix);
+  const filename = timestampedFilename(ext, prefix, name);
   const filePath = path.join(outputDir, filename);
   await writeFile(filePath, buffer);
   return { filePath, filename };
@@ -148,9 +161,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         • negative_prompt: HF only, ignored with pollinations.
         • lora_id: HF only, rejected with error on pollinations.
 
-        FILES: saved under plugin output directory (config 'Output Directory'). Hand the image
-        to other tools as the returned absolute file_path (image_edit accepts it from ANY earlier
-        tool result — do NOT strip it to a bare filename). Find results via list_output_images.
+        FILES: saved under plugin output directory (config 'Output Directory'). Optional
+        'name' appends a readable filename slug (sanitized) after the timestamp — set it
+        when the user asks to name/label the file; it also makes list_output_images
+        filtering useful. Hand the image to other tools as the returned absolute
+        file_path (image_edit accepts it from ANY earlier tool result — do NOT strip it
+        to a bare filename). Find results via list_output_images.
         quota.remaining counts plugin daily limit, not HF credits.
       `,
       parameters: {
@@ -190,12 +206,18 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "0 = random. POST /v1/images/generations does not accept seed — any value is ignored (note in result)."
         ),
         quality: z.enum(["low", "medium", "high", "hd"]).optional().describe(
-          "Image quality (backend='pollinations' only, ignored with backend='hf'). " +
+          "Output quality (backend='pollinations' only, ignored with backend='hf'). " +
           "Blank or unset = medium (server default). " +
           "Only documented for gpt-image and grok-imagine models; for other models it is ignored and a note is added to the result."
         ),
+        name: z.string().default("").describe(
+          "Optional filename label (e.g. 'red cat runway'). Sanitized to lowercase " +
+          "a-z0-9- (max 40 chars) and appended after the timestamp: " +
+          "hf-2026-09-23_12-00-00_red-cat-runway.png. Blank or fully sanitized away " +
+          "= timestamp only. Pass it when the user asks to name/label the file."
+        ),
       },
-      implementation: safe_impl("generate_image", async ({ prompt, model_id, backend, negative_prompt, lora_id, lora_scale, width, height, seed, quality }, ctx) => {
+      implementation: safe_impl("generate_image", async ({ prompt, model_id, backend, negative_prompt, lora_id, lora_scale, width, height, seed, quality, name }, ctx) => {
         ctx.status("Generating image…");
         const usePollinations = backend === "pollinations";
         const cleanLora = lora_id.trim();
@@ -334,7 +356,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             buffer = Buffer.from(await blob.arrayBuffer());
           }
 
-          const { filePath, filename } = await saveImageBuffer(buffer, mimeType, outputDir, usePollinations ? "pl" : "hf");
+          const { filePath, filename } = await saveImageBuffer(buffer, mimeType, outputDir, usePollinations ? "pl" : "hf", name);
 
           recordGeneration();
           const quota = checkRateLimit(getRateLimitConfig());
@@ -405,7 +427,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         with pollinations).
 
         FILES: the edited image is saved under the plugin output directory (config
-        'Output Directory', returned as output_dir). Use the returned absolute file_path when
+        'Output Directory', returned as output_dir); optional 'name' appends a readable
+        filename slug (sanitized) after the timestamp — set it when the user asks to
+        name/label the result. Use the returned absolute file_path when
         handing the image to other tools (incl. further image_edit calls) — do NOT strip it
         to a bare filename. Find results via
         list_output_images. quota.remaining counts the plugin's own daily limit, not HF credits.
@@ -454,8 +478,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "Blank = medium (server default). Only documented for gpt-image/grok-imagine-image-2.0; " +
           "for other models it is ignored and a note is added to the result."
         ),
+        name: z.string().default("").describe(
+          "Optional filename label for the result (e.g. 'latex-v2'). Sanitized to " +
+          "lowercase a-z0-9- (max 40 chars) and appended after the timestamp: " +
+          "hf-2026-09-23_12-00-00_latex-v2.png. Blank or fully sanitized away = " +
+          "timestamp only. Pass it when the user asks to name/label the file."
+        ),
       },
-      implementation: safe_impl("image_edit", async ({ image, prompt, backend, model_id, provider, negative_prompt, lora_id, lora_scale, quality }, ctx) => {
+      implementation: safe_impl("image_edit", async ({ image, prompt, backend, model_id, provider, negative_prompt, lora_id, lora_scale, quality, name }, ctx) => {
         ctx.status("Reading reference image…");
         const usePollinations = backend === "pollinations";
         const cleanLora = lora_id.trim();
@@ -635,7 +665,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             outBuffer = Buffer.from(await blob.arrayBuffer());
           }
 
-          const { filePath, filename } = await saveImageBuffer(outBuffer, mimeType, outputDir, usePollinations ? "pl" : "hf");
+          const { filePath, filename } = await saveImageBuffer(outBuffer, mimeType, outputDir, usePollinations ? "pl" : "hf", name);
 
           recordGeneration();
           const quota = checkRateLimit(getRateLimitConfig());

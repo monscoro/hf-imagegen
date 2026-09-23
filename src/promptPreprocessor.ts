@@ -27,7 +27,8 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
    - backend="pollinations": needs pollinationsApiKey; POST /v1/images/edits
      Blank model = x-ai/grok-imagine-image-quality (non-restrictive — few filters,
      healthy, alias aurora). Cheaper: x-ai/grok-imagine-image. STRICT fallback:
-     flux.1-kontext-pro / seedream5 — flags fashion-editorial and wastes credits.
+      flux.1-kontext-pro / seedream5 — flags fashion-editorial and wastes credits.
+• User wants the file named / labeled                           → generate_image/image_edit 'name' param (slug, auto-sanitized)
 • User asks which images exist / result / input for image_edit  → list_output_images (paginated; limit=1 + newest = latest)
 • User asks what models are available                        → list_models
 • User asks about LoRAs, styles, or custom adapters          → list_loras

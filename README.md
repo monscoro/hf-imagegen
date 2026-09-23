@@ -66,7 +66,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 ### `generate_image` — Generate from text
 
 ```
-generate_image(prompt, model_id?, backend?, negative_prompt?, lora_id?, lora_scale?, width?, height?, seed?)
+generate_image(prompt, model_id?, backend?, negative_prompt?, lora_id?, lora_scale?, width?, height?, seed?, quality?, name?)
 ```
 
 | Parameter | Default | Description |
@@ -79,13 +79,15 @@ generate_image(prompt, model_id?, backend?, negative_prompt?, lora_id?, lora_sca
 | `lora_scale` | `1.0` | 0.5–1.0 subtle, higher = stronger. |
 | `width` / `height` | `0` (= default) | Pollinations only (0–2048). Portrait e.g. 768×1152 for fashion editorial. |
 | `seed` | `0` (= random) | Pollinations only, for reproducible results. |
+| `quality` | unset (=`medium`) | Pollinations only; documented for gpt-image/grok-imagine-image-2.0. |
+| `name` | `""` | Optional filename slug — sanitized to lowercase `a-z0-9-` (max 40) and appended after the timestamp (`hf-2026-09-23_12-00-00_red-cat.png`). Blank = timestamp only. |
 
 Returns `file_path`, `output_dir`, `backend`, `model_used`, sizes, a `quota` block (plugin daily limit → `remaining`, `used`, `limit`, `resets_in_hours` — *plugin guard, not HF credits*), and `notes` (ignored params, watermark hints). Use `file_path` as-is when handing images to other tools — other plugins may not find bare filenames.
 
 ### `image_edit` — Edit a reference image (hf or pollinations)
 
 ```
-image_edit(image, prompt, backend?, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?, quality?)
+image_edit(image, prompt, backend?, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?, quality?, name?)
 ```
 
 Reference image = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` prefers an **absolute** local path (the `file_path` returned by an earlier result — relative paths resolve against the plugin process working directory, not the chat directory); a bare filename (looked up in the output directory first) or a public URL also work.
@@ -96,6 +98,7 @@ Reference image = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gate
 | `model_id` | _(backend default)_ | hf: `defaultEditModel` (`FLUX.2-dev`). pollinations: blank = `x-ai/grok-imagine-image-quality` (few filters); edit-capable IDs with `/v1/images/edits` include grok-imagine-image/-quality, kontext (strict), flux.2-*, gpt-image-2*. |
 | `provider` / `negative_prompt` / `lora_id` | | HF only — ignored or rejected with pollinations. |
 | `quality` | unset | pollinations only; documented for gpt-image/grok-imagine-image-2.0. |
+| `name` | `""` | Optional filename slug for the result — same sanitize/append rules as `generate_image`. |
 
 **hf:** only editing-native models work — base T2I models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping and fail; the error message says exactly that. `lora_id` is passed through to fal-ai (I2I effectiveness under verification). **pollinations:** default is deliberately non-restrictive (`grok-imagine-image-quality`) — kontext/seedream strict filters flag fashion-editorial and burn credits on failed edits; use them only as explicit fallback. Returns `file_path`, `output_dir`, `backend`, the full `quota` block, and a clear warning when the plugin's daily limit is hit.
 

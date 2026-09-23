@@ -20,6 +20,8 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
      Note: kontext/seedream5 have STRICT filters — fashion-editorial often flagged. grok-imagine-image-2.0 does NOT filter fashion-editorial (safe=off).
      For permissive fashion-editorial takes, prefer grok-imagine-image-2.0 over kontext/seedream5.
 • User provides a reference image + change instruction            → image_edit (reference = KEEP, prompt = CHANGE)
+   - 'image': prefer the ABSOLUTE file_path from an earlier generate_image/image_edit result —
+     bare/relative paths resolve against the plugin process CWD, not the chat directory
    - backend="hf" (default): needs HF token; editing-native models only → list_models source="image-edit"
      (FLUX.2-dev default, Kontext-dev, Qwen-Image-Edit — base T2I models have no I2I mapping)
    - backend="pollinations": needs pollinationsApiKey; POST /v1/images/edits

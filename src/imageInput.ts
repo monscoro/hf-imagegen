@@ -44,8 +44,10 @@ function expandHome(p: string): string {
 
 /**
  * Normalisiert den image_edit-Input zu Bytes: lokaler Pfad (inkl. ~) oder öffentliche URL.
- * Bloße Dateinamen werden zusätzlich in extraBases (z.B. Output-Verzeichnis) gesucht —
- * das deckt Prompts wie "nimm das Bild NAME aus dem Working Dir" ab.
+ * Bloße Dateinamen: zuerst in extraBases (z.B. Output-Verzeichnis), dann Prozess-CWD —
+ * deckt "nimm das Bild NAME" (Output-Dir, wie im Describe dokumentiert) und
+ * "aus dem Working Dir"-Prompts ab. Relative Pfade mit Ordneranteil prüfen zuerst CWD.
+ * Absolute Pfade (empfohlen: file_path aus Tool-Ergebnissen) werden direkt verwendet.
  * Unbekannte/fehlende Dateien, tote URLs und Nicht-Bilder scheitern mit klaren Fehlern
  * inkl. der durchsuchten Orte.
  */
@@ -75,9 +77,13 @@ export async function resolveImageInput(
   }
 
   const expanded = expandHome(clean);
+  const baseCandidates = extraBases.map((b) => path.join(b, expanded));
+  const isBareFilename = !/[\\/]/.test(expanded);
   const candidates = path.isAbsolute(expanded)
     ? [expanded]
-    : [path.resolve(expanded), ...extraBases.map((b) => path.join(b, expanded))];
+    : isBareFilename
+      ? [...baseCandidates, path.resolve(expanded)]
+      : [path.resolve(expanded), ...baseCandidates];
 
   let buffer: Buffer | null = null;
   for (const candidate of candidates) {
@@ -91,7 +97,8 @@ export async function resolveImageInput(
   if (!buffer) {
     throw new Error(
       `Reference image not found: "${clean}". Searched: ${candidates.join(" | ")}. ` +
-      `Use an existing local path, a bare filename from the output directory, or a public http(s) URL.`
+      `Prefer an absolute path (file_path from a generate_image/image_edit result), ` +
+      `a bare filename from the output directory, or a public http(s) URL.`
     );
   }
   const mimeType = sniffImageMime(buffer, path.extname(clean));

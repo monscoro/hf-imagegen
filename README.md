@@ -88,7 +88,7 @@ Returns `file_path`, `output_dir`, `backend`, `model_used`, sizes, a `quota` blo
 image_edit(image, prompt, backend?, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?, quality?)
 ```
 
-Reference image = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` accepts a local path, a bare filename (looked up in the output directory first), or a public URL.
+Reference image = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` prefers an **absolute** local path (the `file_path` returned by an earlier result — relative paths resolve against the plugin process working directory, not the chat directory); a bare filename (looked up in the output directory first) or a public URL also work.
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -129,7 +129,7 @@ Avoid `search` (HF search is strict, often empty) — filter by `base_model` onl
 list_output_images(sort?, limit?, offset?, filter?)
 ```
 
-Paginated, compact listing of the output directory (newest first; `limit=1` = latest image). Use instead of reading large folders at once; feed `filename` into `image_edit`.
+Paginated, compact listing of the output directory (newest first; `limit=1` = latest image). Use instead of reading large folders at once; for `image_edit`, pass the absolute `output_directory` + `filename` (preferred over a bare filename).
 
 ### `inclination_prompt_list` / `set` / `manage` — Style profiles (gated by Enable Inclination Prompts)
 
@@ -199,13 +199,13 @@ Active profiles are injected as system context every turn and act **indirectly**
 
 **Generate:** describe → `generate_image` → file path. Use `backend="pollinations"` for quick iterations or permissive takes (requires API key).
 
-**Edit (KEEP/CHANGE):** reference (prior result, bare filename, or URL) + change instruction → `image_edit`. Example: *"same pose, latex dress instead of silk, keep everything else monochrome."* Backend `hf` (FLUX.2-dev etc.) or `pollinations` (default `grok-imagine-image-quality` — non-restrictive; via `/v1/images/edits`).
+**Edit (KEEP/CHANGE):** reference (prior result's absolute `file_path`, bare filename, or URL) + change instruction → `image_edit`. Example: *"same pose, latex dress instead of silk, keep everything else monochrome."* Backend `hf` (FLUX.2-dev etc.) or `pollinations` (default `grok-imagine-image-quality` — non-restrictive; via `/v1/images/edits`).
 
 **Own style library:** *"Create these Neigungsprompts: cinematic-noir, dreamy-pastel"* → LLM builds entries → `inclination_prompt_set` activates one.
 
 **Community-alpha fallback (Pollinations):** if a `community/*` model fails, retry with `klein` or `flux`.
 
-**Find results:** `list_output_images({limit:1})` → latest file → straight into `image_edit`.
+**Find results:** `list_output_images({limit:1})` → `output_directory` + `filename` (absolute path) → straight into `image_edit`.
 
 ---
 
@@ -248,7 +248,7 @@ Active profiles are injected as system context every turn and act **indirectly**
 
 **LoRAs via fal-ai.** `generate_image` routes LoRA calls to `fal-ai`; I2I LoRA passthrough exists and is honestly marked "under verification". Curated prompts stay under ~150 words to bound token cost on every-turn injection.
 
-**Output browsing instead of directory dumps.** LLMs choke on large folders — `list_output_images` paginates the single output directory (the only place the plugin reads), and bare filenames resolve against it. Tools return the absolute `output_dir`/`file_path`, explicitly telling the LLM *not* to strip paths to bare filenames when handing results to other plugins.
+**Output browsing instead of directory dumps.** LLMs choke on large folders — `list_output_images` paginates the single output directory (the only place the plugin reads), and bare filenames resolve against it first (then the process CWD). Tools return the absolute `output_dir`/`file_path`, explicitly telling the LLM *not* to strip paths to bare filenames when handing results to other plugins — absolute paths are preferred everywhere, since relative paths resolve against the plugin process CWD, not the chat directory.
 
 **Daily guard is local, and it's not HF credits.** The quota block (`limit/used/remaining/resets_in_hours`) reflects the config'd `Daily Generation Limit`. After a live-test confusion ("0 remaining despite HF credits!"), the counter was rebuilt on the **local calendar day** (ready to reset at local midnight) and the response now labels itself a *plugin guard*, names the reset, and appends a clear warning at `remaining: 0`.
 

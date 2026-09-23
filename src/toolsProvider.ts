@@ -148,9 +148,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         • negative_prompt: HF only, ignored with pollinations.
         • lora_id: HF only, rejected with error on pollinations.
 
-        FILES: saved under plugin output directory (config 'Output Directory'). Use the returned
-        absolute file_path when handing the image to other tools — do NOT strip to bare filename.
-        Find results via list_output_images. quota.remaining counts plugin daily limit, not HF credits.
+        FILES: saved under plugin output directory (config 'Output Directory'). Hand the image
+        to other tools as the returned absolute file_path (image_edit accepts it from ANY earlier
+        tool result — do NOT strip it to a bare filename). Find results via list_output_images.
+        quota.remaining counts plugin daily limit, not HF credits.
       `,
       parameters: {
         prompt: z.string().min(1).describe(
@@ -393,21 +394,28 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           flux.2-*, gpt-image-2*, seedream-5*.
           Browse with list_models source='pollinations'.
 
-        The 'image' parameter accepts a local file path (also from earlier generate_image
-        results) or a public image URL. To generate from scratch, use generate_image instead.
+        The 'image' parameter prefers an absolute local file path — use the file_path
+        returned by any earlier generate_image/image_edit result as-is; relative paths
+        resolve against the plugin process working directory (NOT the chat working dir),
+        which is why bare or relative paths can miss. A bare filename is also accepted
+        (output directory first, then process CWD), as is a public image URL.
+        To generate from scratch, use generate_image instead.
         An active Neigungsprompt guides how the change is formulated, same as generate_image.
         Optional lora_id/negative_prompt/provider: HF backend only (rejected or ignored
         with pollinations).
 
         FILES: the edited image is saved under the plugin output directory (config
         'Output Directory', returned as output_dir). Use the returned absolute file_path when
-        handing the image to other tools — do NOT strip it to a bare filename. Find results via
+        handing the image to other tools (incl. further image_edit calls) — do NOT strip it
+        to a bare filename. Find results via
         list_output_images. quota.remaining counts the plugin's own daily limit, not HF credits.
       `,
       parameters: {
         image: z.string().min(1).describe(
-          "Reference image: local file path, bare filename (looked up in the output directory first), " +
-          "or public http(s) URL."
+          "Reference image: absolute local file path PREFERRED (the file_path from an earlier " +
+          "generate_image/image_edit result — relative paths resolve against the plugin process " +
+          "CWD, not the chat directory). Also accepted: bare filename (output directory first), " +
+          "relative path, or public http(s) URL."
         ),
         prompt: z.string().min(1).describe(
           "CHANGE instruction: what to transform (subject, garment, material, light, mood). " +
@@ -675,8 +683,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         Use when the user asks which images exist, wants the latest result, or needs a
         file path as reference 'image' for image_edit (newest first by default, so
-        limit=1 returns the latest image). Walk large folders page by page via offset.
-        Scoped to the output directory only.
+        limit=1 returns the latest image). Entries return 'filename'; for image_edit,
+        prefer the absolute path output_directory + filename. Walk large folders page
+        by page via offset. Scoped to the output directory only.
       `,
       parameters: {
         sort: z.enum(["newest", "oldest", "name"]).default("newest").describe(
@@ -700,7 +709,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           output_directory: outputDir,
           ...result,
           has_more: result.offset + result.entries.length < result.total,
-          usage: "Pass a 'filename' as image in image_edit (same directory).",
+          usage: "For image_edit pass the absolute path: output_directory + filename (preferred over bare filename).",
         });
       }),
     }),

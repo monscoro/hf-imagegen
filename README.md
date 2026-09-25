@@ -140,7 +140,11 @@ list_models(source?, provider?, limit?, include_loras?, include_catalog?, filter
 | `trending` / `downloads` | `generate_image` + `hf` | Live HF catalog, ranked by `trendingScore` or `downloads`. |
 | `pollinations` | `generate_image`/`image_edit` + `pollinations` | 7 curated models plus `catalog_extras` with the full live catalog (77 entries). Requires API key. Aliases: `flux`, `kontext`, `seedream5`. |
 
-`include_catalog` and `filter` apply to `source="pollinations"` (`catalog_extras`); `limit` applies to every source except `curated`.
+`include_catalog` and `filter` apply to `source="pollinations"` (`catalog_extras`); `filter` has no effect on any other source. `limit` applies to every source except `curated`.
+
+**The response only contains what the requested source needs.** Diagnostic blocks appear per source rather than always: `catalog_cache` only for `pollinations`, `hf_catalog_cache` only for the HF sources, `model_cache` only for `provider`/`trending`/`downloads`. Consequently a `curated` call reads no cache file at all, a `trending` call reads only the HF catalog, and a `pollinations` call only the Pollinations one. Before, every call read both (~357 KB of JSON parsed per call, ~5.5 ms warm); now it is 0 / 228 / 65 KB and 0.1 / 2.7 / 2.0 ms respectively. Costs are source-specific for the same reason: HF rows get the static `HF_COSTS` table, Pollinations rows the live catalog. Mixing them could have shown a Pollinations price on a model the caller was about to run through `backend='hf'`.
+
+**`default_not_in_list` warns when the configured default is filtered out.** The artifact and pre-SDXL filters can exclude a configured `defaultModel` or `defaultEditModel` — a LoRA or a pre-2023 checkpoint, or simply a model that no provider serves. In that case no row is flagged `is_default` and the field names the missing model plus the likely cause, instead of the response quietly pointing at a default that is not in the list.
 
 LoRA lookup (`include_loras`) and `list_loras` are HF-only.
 

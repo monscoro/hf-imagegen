@@ -67,20 +67,38 @@ async function pollinationsCosts(): Promise<Record<string, CostEntry>> {
   return costs;
 }
 
-export async function getCost(modelId: string): Promise<string | undefined> {
-  const all = await getAllCosts();
-  return all[modelId]?.cost;
+/**
+ * Nur die HF-Preise, synchron und ohne Katalogzugriff.
+ *
+ * list_models braucht je nach Quelle genau eine der beiden Haelften: eine
+ * `trending`-Liste hat mit den Pollinations-Preisen nichts zu tun und ein
+ * `pollinations`-Katalog nichts mit den HF-Tabellen. Beides zu mischen
+ * erzwang previously, den Pollinations-Katalog auch dann zu laden, wenn die
+ * Quelle ihn nicht anzeigt.
+ */
+export function getHfCosts(): Record<string, CostEntry> {
+  return { ...HF_COSTS };
+}
+
+export async function getPollinationsCostMap(): Promise<Record<string, CostEntry>> {
+  return pollinationsCosts();
 }
 
 export async function getAllCosts(): Promise<Record<string, CostEntry>> {
   return { ...HF_COSTS, ...(await pollinationsCosts()) };
 }
 
-export async function getCacheInfo(): Promise<{ fetchedAt: Date; expiresInMs: number; modelCount: number }> {
-  const info = getPollinationsCatalogCacheInfo();
-  return {
-    fetchedAt: info.fetchedAt ?? new Date(0),
-    expiresInMs: info.expiresInMs,
-    modelCount: Object.keys(await getAllCosts()).length,
-  };
+/**
+ * Zustand des Pollinations-Katalogcaches. `modelCount` wird NICHT mehr hier
+ * ermittelt: das hiesse, die Preismap ein zweites Mal zu bauen, nur um ihre
+ * Laenge zu zaehlen. Die Aufruferin hat sie ohnehin gerade erzeugt.
+ */
+export function getCatalogState(): {
+  fetchedAt: Date | null;
+  expiresInMs: number;
+  file: string;
+  persisted: boolean;
+  lastFetchFailureAt: Date | null;
+} {
+  return getPollinationsCatalogCacheInfo();
 }

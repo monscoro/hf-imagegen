@@ -325,16 +325,26 @@ export function getHfCatalogCacheInfo(): {
   const now = Date.now();
   // Ueber eindeutige IDs zaehlen, nicht ueber die rohen Array-Eintraege: ein
   // Modell steht in beiden Task-Seiten und wuerde sonst doppelt gezaehlt.
-  const unique = disk ? indexHfCatalog(disk.models) : null;
+  // Bewusst ein Set statt indexHfCatalog(): der Merge der Providerlisten ist
+  // fuer zwei Zaehlwerte unnoetig teuer, und diese Funktion laeuft bei jedem
+  // list_models-Aufruf.
+  const seen = new Set<string>();
+  let modelsWithProviders = 0;
+  if (disk) {
+    const withProviders = new Set<string>();
+    for (const entry of disk.models) {
+      seen.add(entry.id);
+      if (entry.providers.length > 0) withProviders.add(entry.id);
+    }
+    modelsWithProviders = withProviders.size;
+  }
   return {
     fetchedAt: disk ? new Date(disk.fetchedAt) : null,
     expiresInMs: disk ? Math.max(0, HF_CATALOG_TTL_MS - (now - disk.fetchedAt)) : 0,
     file: getHfCatalogCacheFile(),
     persisted: disk !== null,
-    models: unique ? unique.size : 0,
-    modelsWithProviders: unique
-      ? [...unique.values()].filter((e) => e.providers.length > 0).length
-      : 0,
+    models: seen.size,
+    modelsWithProviders,
     lastFetchFailureAt: lastHfFetchFailureAt > 0 ? new Date(lastHfFetchFailureAt) : null,
   };
 }

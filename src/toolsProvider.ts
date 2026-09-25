@@ -41,7 +41,6 @@ import {
   getHfCatalogCacheInfo,
   ensureCatalogBestEffort,
 } from "./hfApi";
-import { getCuratedEditModels } from "./curatedModels";
 import { checkRateLimit, recordGeneration } from "./rateLimit";
 import { resolveImageInput } from "./imageInput";
 import { listOutputImages } from "./workspace";
@@ -76,10 +75,9 @@ import {
   detectImageMime,
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_DEFAULT_EDIT_MODEL,
-  getPollinationsCatalogCacheInfo,
   type PollinationsEditModelCapabilities,
 } from "./pollinations";
-import { getAllCosts, getCacheInfo } from "./costCache";
+import { getHfCosts, getPollinationsCostMap, getCatalogState } from "./costCache";
 import { getModelCacheInfo } from "./modelCache";
 import {
   getAllDirectives,
@@ -1201,7 +1199,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           .describe("source='pollinations' only: also list the live /image/models entries that are not in the curated list (sorted by max_reference_images). Set false to save tokens."),
         filter: z.string()
           .default("")
-          .describe("source='pollinations' only: substring filter for the catalog_extras block (id, alias, title, publisher). Empty = all."),
+          .describe("source='pollinations' ONLY: substring filter for the catalog_extras block (id, alias, title, publisher). Empty = all. Has NO effect on any other source — those lists are already narrowed by the built-in filters, so use include_catalog:false to cut the extras block entirely."),
       },
       implementation: safe_impl("list_models", async ({ source, provider, limit, include_loras, include_catalog, filter }, ctx) => {
         const token = getToken();
@@ -1266,38 +1264,53 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           }
         }
 
-        // Merge dynamic costs (Pollinations aus dem Katalog-Cache + HF statisch)
-        const costMap = await getAllCosts();
-        const cacheInfo = await getCacheInfo();
-        const modelCacheInfo = getModelCacheInfo();
-        const catalogInfo = getPollinationsCatalogCacheInfo();
-        // HF-Katalog laden, damit hf_providers/hf_latency/image_edit gefuellt sind.
-        // Best effort: ohne Katalog liefern die Quellen weiterhin ihre Liste.
-        await ensureCatalogBestEffort();
-        const rawHfCatalogInfo = getHfCatalogCacheInfo();
-        const hfCatalogInfo = {
-          file: rawHfCatalogInfo.file,
-          persisted: rawHfCatalogInfo.persisted,
-          fetched_at: rawHfCatalogInfo.fetchedAt?.toISOString() ?? null,
-          expires_in_hours: Math.round(rawHfCatalogInfo.expiresInMs / 3600000),
-          last_fetch_failure: rawHfCatalogInfo.lastFetchFailureAt?.toISOString() ?? null,
-          models: rawHfCatalogInfo.models,
-          models_with_providers: rawHfCatalogInfo.modelsWithProviders,
-        };
+        // Alles Folgende ist quellenabhaengig. Vorher liefen Katalogzugriffe und
+        // Preismaps bei JEDEM Aufruf, egal welche Quelle angefragt war: eine
+        // trending-Liste las den Pollinations-Preis-Katalog (2x 64 KB) und
+        // einen Pollinations-Cache-Zustand, den sie nie ausgibt, und eine
+        // pollinations-Liste las den 228-KB-HF-Katalog und indizierte 2000
+        // Eintraege fuer einen Block, den sie nicht ausgibt.
+        const isPollinations = source === "pollinations";
+        // curated ist handgepflegt und braucht weder Preise noch Katalog.
+        const needsHfCatalog = source !== "curated" && !isPollinations;
+        const usesModelCache =
+          source === "provider" || source === "trending" || source === "downloads";
+
+        // Preise: eine Quelle braucht genau eine Haelfte. curated/image-edit/
+        // provider/trending/downloads zeigen HF-Modelle, nur source=pollinations
+        // zeigt Pollinations-Preise aus dem Live-Katalog.
+        const costMap = isPollinations ? await getPollinationsCostMap() : getHfCosts();
+
+        const catalogState = isPollinations ? getCatalogState() : null;
+        const modelCacheInfo = usesModelCache ? getModelCacheInfo() : null;
+        let hfCatalogInfo: Record<string, unknown> | null = null;
+        if (needsHfCatalog) {
+          // Best effort: ohne Katalog liefern die Quellen weiterhin ihre Liste.
+          await ensureCatalogBestEffort();
+          const raw = getHfCatalogCacheInfo();
+          hfCatalogInfo = {
+            file: raw.file,
+            persisted: raw.persisted,
+            fetched_at: raw.fetchedAt?.toISOString() ?? null,
+            expires_in_hours: Math.round(raw.expiresInMs / 3600000),
+            last_fetch_failure: raw.lastFetchFailureAt?.toISOString() ?? null,
+            models: raw.models,
+            models_with_providers: raw.modelsWithProviders,
+          };
+        }
 
         // Multi-Image-Faehigkeit ausweisen: Pollinations aus dem Live-Katalog
         // (/image/models, gleiche Quelle + gleicher 12h-Cache wie image_edit),
         // HF-Edit-Modelle sind per Plugin-Bauweise auf genau eine Referenz begrenzt.
         let referenceNote: string | undefined;
-        const capabilityMap =
-          source === "pollinations" ? await loadPollinationsCapabilities() : null;
-        if (source === "pollinations" && !capabilityMap) {
+        const capabilityMap = isPollinations ? await loadPollinationsCapabilities() : null;
+        if (isPollinations && !capabilityMap) {
           referenceNote =
             "max_reference_images/multi_image fehlen: /image/models nicht erreichbar. " +
             "Für 2+ Referenzen empirisch geprüft: klein (10), gpt-image-2 (16), seedream5 (14), nanobanana-pro (14).";
         }
         const catalogExtras =
-          source === "pollinations" && include_catalog && capabilityMap
+          isPollinations && include_catalog && capabilityMap
             ? listPollinationsCatalogExtras(
                 capabilityMap,
                 models.map((m) => m.id),
@@ -1305,29 +1318,59 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               )
             : null;
 
+        // Der gemeldete Default muss auch wirklich in der Liste stehen. Die
+        // Filterkette (Altlasten, LoRAs, Quantisierungen, ohne Provider) kann
+        // einen konfigurierten Default aussortieren — dann waere die Antwort
+        // irrefuehrend: sie nennt einen Default, den keine Zeile traegt.
+        const effectiveDefault = isPollinations
+          ? POLLINATIONS_DEFAULT_MODEL
+          : source === "image-edit"
+            ? editDefault
+            : currentDefault;
+        const defaultPresent = models.some((m) => m.id === effectiveDefault);
+        const defaultWarning = defaultPresent
+          ? undefined
+          : source === "image-edit"
+            ? `image_edit_default_model '${effectiveDefault}' steht nicht in dieser Liste — ` +
+              "vermutlich von der Filterkette ausgeschlossen (vor SDXL, LoRA, Quantisierung " +
+              "oder kein Provider) oder nicht (mehr) image-to-image-fähig. " +
+              "Die Liste oben nutzen oder defaultEditModel in den Plugin-Einstellungen korrigieren."
+            : `current_default_model '${effectiveDefault}' steht nicht in dieser Liste — ` +
+              "vermutlich von der Filterkette ausgeschlossen (vor SDXL, LoRA, Quantisierung " +
+              "oder kein Provider). Die Liste oben nutzen oder defaultModel in den " +
+              "Plugin-Einstellungen korrigieren.";
+
         return json({
           source,
           current_default_model: currentDefault,
-          ...(source === "pollinations"
+          ...(isPollinations
             ? { pollinations_default_model: POLLINATIONS_DEFAULT_MODEL }
             : {}),
           ...(source === "image-edit" ? { image_edit_default_model: editDefault } : {}),
-          catalog_cache: {
-            source: "https://gen.pollinations.ai/image/models",
-            file: catalogInfo.file,
-            persisted: catalogInfo.persisted,
-            fetched_at: catalogInfo.fetchedAt?.toISOString() ?? null,
-            expires_in_hours: Math.round(catalogInfo.expiresInMs / 3600000),
-            last_fetch_failure: catalogInfo.lastFetchFailureAt?.toISOString() ?? null,
-            models_priced: cacheInfo.modelCount,
-          },
-          model_cache: {
-            provider: modelCacheInfo.provider,
-            trending: modelCacheInfo.trending,
-            downloads: modelCacheInfo.downloads,
-          },
-          // Nur fuer die HF-Quellen relevant, sonst stoert der Block nur.
-          ...(source === "pollinations" ? {} : { hf_catalog_cache: hfCatalogInfo }),
+          ...(catalogState
+            ? {
+                catalog_cache: {
+                  source: "https://gen.pollinations.ai/image/models",
+                  file: catalogState.file,
+                  persisted: catalogState.persisted,
+                  fetched_at: catalogState.fetchedAt?.toISOString() ?? null,
+                  expires_in_hours: Math.round(catalogState.expiresInMs / 3600000),
+                  last_fetch_failure: catalogState.lastFetchFailureAt?.toISOString() ?? null,
+                  models_priced: Object.keys(costMap).length,
+                },
+              }
+            : {}),
+          ...(modelCacheInfo
+            ? {
+                model_cache: {
+                  provider: modelCacheInfo.provider,
+                  trending: modelCacheInfo.trending,
+                  downloads: modelCacheInfo.downloads,
+                },
+              }
+            : {}),
+          ...(hfCatalogInfo ? { hf_catalog_cache: hfCatalogInfo } : {}),
+          ...(defaultWarning ? { default_not_in_list: defaultWarning } : {}),
           models: models.map((m) => {
             // is_default bezieht sich auf den Default des jeweiligen Katalogs:
             // pollinations → Pollinations-T2I-Default, image-edit → HF-Edit-Default, sonst HF-T2I-Default.
@@ -1385,8 +1428,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   "For image_edit pick by 'multi_image'/'max_reference_images'; the catalog value is advisory. " +
                   "Use full IDs — only flux/kontext/seedream5 are valid aliases. No LoRAs on this backend."
                 : source === "image-edit"
-                  ? "Editing-native IDs for the image_edit tool (verified image-to-image mapping). image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing. " +
-                    "backend='hf' accepts exactly ONE reference image — for 2+ use source='pollinations'."
+                  ? "Editing-native IDs for the image_edit tool, taken from the cached image-to-image catalog " +
+                    "(curated first, then the most-liked models a provider currently serves). " +
+                    "image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing. " +
+                    "backend='hf' accepts exactly ONE reference image — for 2+ use multi_image_edit or source='pollinations'."
                   : "HuggingFace IDs for generate_image backend='hf'. Pass model_id to generate_image to use a model.",
         });
       }),

@@ -26,9 +26,18 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
    - backend="hf" (default): needs HF token; editing-native models only → list_models source="image-edit"
      (FLUX.2-dev default, Kontext-dev, Qwen-Image-Edit — base T2I models have no I2I mapping)
    - backend="pollinations": needs pollinationsApiKey; POST /v1/images/edits
-     Blank model = x-ai/grok-imagine-image-quality (non-restrictive — few filters,
-     healthy, alias aurora). Cheaper: x-ai/grok-imagine-image. STRICT fallback:
-      flux.1-kontext-pro / seedream5 — flags fashion-editorial and wastes credits.
+     MULTI-IMAGE: for 2+ references pass image=["/abs/subject.jpg", "/abs/style.png"]
+     and pick a model with a high max_reference_images; verified examples:
+     black-forest-labs/flux.2-klein-4b (10), google/gemini-2.5-flash-image (3),
+     bytedance/seedream-5.0-lite (14), openai/gpt-image-2 (16). Exceeding the declared
+     limit only warns (catalog is advisory) — but flux.1-kontext-pro really drops image 2.
+      Blank model = x-ai/grok-imagine-image-quality (non-restrictive — few filters,
+      healthy, alias aurora, declares 1 but processes 2). Cheaper: x-ai/grok-imagine-image.
+      BEST for a single reference: flux.1-kontext-pro (alias kontext, free) — editing-native,
+      hält Pose/Komposition/Identität zuverlässig und folgt komplexen Edit-Anweisungen präzise;
+      dafür sind die Content-Filter streng (intimate Fashion-Editorial wird geflaggt und
+      kostet trotzdem Credits) — für solche Edits grok-imagine-image-quality nehmen.
+      seedream5 ebenfalls STRICT (nur als expliziter Fallback).
 • User wants the file named / labeled                           → generate_image/image_edit 'name' param (slug, auto-sanitized)
 • User asks which images exist / result / input for image_edit  → list_output_images (paginated; limit=1 + newest = latest)
 • User asks what models are available                        → list_models
@@ -46,7 +55,8 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - FIRST CHOICE for complex prompts: use backend="hf" with FLUX.1-dev — best quality.
 - Pollinations supports high-quality models too: x-ai/grok-imagine-image-2.0 with quality: medium, google/gemini-3-pro-image (4K).
   For permissive fashion-editorial without strict content filters, prefer grok-imagine-image-2.0.
-- image_edit works on both backends: hf (FLUX.2-dev etc.) and pollinations (kontext / grok-imagine edits).
+- image_edit works on both backends: hf (FLUX.2-dev etc.) and pollinations — for one reference
+  recommend kontext (precise, keeps pose/composition), for 2+ references a multi-image model.
 - First call to an inactive model may take 20-60s on HF free tier — this is normal.
 - If you get a 403 on FLUX.2, tell the user to accept the model license at huggingface.co first.
 

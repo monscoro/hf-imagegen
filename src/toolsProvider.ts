@@ -41,6 +41,7 @@ import {
   getPollinationsModels,
   buildPollinationsPostBody,
   buildPollinationsEditForm,
+  inspectPollinationsEditReferences,
   detectImageMime,
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_DEFAULT_EDIT_MODEL,
@@ -473,15 +474,28 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "image_edit",
       description: text`
-        Edit an existing image (image-to-image). Backends: hf or pollinations.
+        Edit one or more existing images from a text instruction. Backends: hf or pollinations.
 
-        Use when the user provides a reference image plus a change instruction
+        MULTI-IMAGE / MULTI-REFERENCE (POLLINATIONS): for 2+ starting images, set
+        backend='pollinations' and pass an ordered array in 'image', for example
+        image=['/absolute/subject.jpg', 'https://example.com/style.png']. All references
+        are sent together in one POST /v1/images/edits request, so the prompt can combine
+        roles such as "use image 1 as the subject and image 2 only as the visual style".
+        The selected model's max_reference_images is checked live against Pollinations
+        /image/models (limits currently range from 1 to 16). Exceeding it is a WARNING in
+        the result notes, not a hard error: the catalog is advisory (grok-imagine-image-quality
+        declares 1 but does process 2, flux.1-kontext-pro declares 1 and silently drops the
+        second image).         'black-forest-labs/flux.2-klein-4b' (10), 'google/gemini-2.5-flash-image' (3),
+        'bytedance/seedream-5.0-lite' (14) or 'openai/gpt-image-2' (16).
+        HF supports exactly one reference image and rejects arrays of 2+ images.
+
+        Use when the user provides reference image(s) plus a change instruction
         (e.g. a generated portrait + "same pose, latex dress instead of silk").
-        Reference image = KEEP, prompt = CHANGE — mirrors the Neigungsprompt gates:
+        Reference image(s) = KEEP, prompt = CHANGE — mirrors the Neigungsprompt gates:
         pose/composition stay, the instruction transforms material, light, or details.
 
         Backends (parameter 'backend'):
-        - "hf" (default): HuggingFace Inference Providers, needs HF API token.
+        - "hf" (default for a single image): HuggingFace Inference Providers, needs HF API token.
           Editing-native models ONLY — base T2I models (FLUX.1-dev, SDXL, Qwen-Image)
           have NO image-to-image provider mapping and fail. Working models:
           - "black-forest-labs/FLUX.2-dev" (default): instruction editing, fal-ai/replicate
@@ -489,18 +503,25 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           - "Qwen/Qwen-Image-Edit": precise edits, fal-ai/replicate/wavespeed
           Browse with list_models source='image-edit'.
         - "pollinations": Pollinations.ai POST /v1/images/edits, needs pollinationsApiKey.
-          Blank model_id defaults to "x-ai/grok-imagine-image-quality" (alias "aurora") —
-          deliberately non-restrictive (strict filters on kontext/seedream flag fashion-editorial
-          and burn credits on failed edits). Other edit-capable IDs with /v1/images/edits:
-          x-ai/grok-imagine-image (cheaper), black-forest-labs/flux.1-kontext-pro (STRICT),
-          flux.2-*, gpt-image-2*, seedream-5*.
+          Supports both single-image edits and ordered multi-reference edits on compatible
+          models. Blank model_id defaults to "x-ai/grok-imagine-image-quality" (alias "aurora"),
+          which is non-restrictive and works with 2 references despite declaring 1. Other
+          edit-capable IDs include x-ai/grok-imagine-image (one), x-ai/grok-imagine-image-2.0
+          (three), flux.2-*, gpt-image-2*, seedream-5* and Gemini image models with
+          model-specific limits.
+          RECOMMENDED for a single reference: "black-forest-labs/flux.1-kontext-pro" (alias
+          "kontext", free) — editing-native, keeps pose/composition/identity reliably and
+          follows complex change instructions precisely. Its content filter is strict, so
+          intimate fashion-editorial edits get flagged (and still cost credits); use
+          grok-imagine-image-quality for those.
           Browse with list_models source='pollinations'.
 
-        The 'image' parameter prefers an absolute local file path — use the file_path
-        returned by any earlier generate_image/image_edit result as-is; relative paths
-        resolve against the plugin process working directory (NOT the chat working dir),
-        which is why bare or relative paths can miss. A bare filename is also accepted
-        (output directory first, then process CWD), as is a public image URL.
+        The 'image' parameter accepts one string or an ordered string array. A string prefers
+        an absolute local file path — use the file_path returned by any earlier
+        generate_image/image_edit result as-is; relative paths resolve against the plugin
+        process working directory (NOT the chat working dir), which is why bare or relative
+        paths can miss. A bare filename is also accepted (output directory first, then process
+        CWD), as is a public image URL. Every array entry follows the same rules and order.
         To generate from scratch, use generate_image instead.
         An active Neigungsprompt guides how the change is formulated, same as generate_image.
         Optional lora_id/negative_prompt/provider: HF backend only (rejected or ignored
@@ -515,11 +536,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         list_output_images. quota.remaining counts the plugin's own daily limit, not HF credits.
       `,
       parameters: {
-        image: z.string().min(1).describe(
-          "Reference image: absolute local file path PREFERRED (the file_path from an earlier " +
-          "generate_image/image_edit result — relative paths resolve against the plugin process " +
-          "CWD, not the chat directory). Also accepted: bare filename (output directory first), " +
-          "relative path, or public http(s) URL."
+        image: z.union([
+          z.string().min(1),
+          z.array(z.string().min(1)).min(1).max(16),
+        ]).describe(
+          "One reference image as a string, or an ordered array of 1–16 reference images/URLs. " +
+          "Absolute local file paths are PREFERRED (use file_path from earlier tool results). " +
+          "Each entry may also be a bare filename, relative path, or public http(s) URL. " +
+          "Arrays with 2+ entries require backend='pollinations'; if the model declares a lower " +
+          "max_reference_images the request still runs and a warning is returned in notes."
         ),
         prompt: z.string().min(1).describe(
           "CHANGE instruction: what to transform (subject, garment, material, light, mood). " +
@@ -533,9 +558,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "Model override. backend='hf': editing-native HF ID, blank = defaultEditModel " +
           "('black-forest-labs/FLUX.2-dev'); alternatives 'black-forest-labs/FLUX.1-Kontext-dev', " +
           "'Qwen/Qwen-Image-Edit' (list_models source='image-edit'). " +
-          "backend='pollinations': full ID or alias (e.g. 'x-ai/grok-imagine-image-quality', " +
-          "'x-ai/grok-imagine-image', 'black-forest-labs/flux.1-kontext-pro'), " +
-          "blank = 'x-ai/grok-imagine-image-quality' (few filters)."
+          "backend='pollinations': full ID or alias. For 3+ references pick a model with a high " +
+          "max_reference_images such as 'black-forest-labs/flux.2-klein-4b' (10), " +
+          "'bytedance/seedream-5.0-lite' (14), 'google/gemini-2.5-flash-image' (3) or " +
+          "'openai/gpt-image-2' (16). Blank = 'x-ai/grok-imagine-image-quality' (few filters, " +
+          "declares 1 reference but does process 2)."
         ),
         provider: z.string().default("auto").describe(
           "HF inference sub-provider (auto, fal-ai, replicate, wavespeed). " +
@@ -566,8 +593,18 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         ),
       },
       implementation: safe_impl("image_edit", async ({ image, prompt, backend, model_id, provider, negative_prompt, lora_id, lora_scale, quality, name }, ctx) => {
-        ctx.status("Reading reference image…");
         const usePollinations = backend === "pollinations";
+        const imageInputs = (Array.isArray(image) ? image : [image]).map((value) => value.trim());
+        if (imageInputs.some((value) => !value)) {
+          throw new Error("Every image entry must be a non-empty file path or public image URL.");
+        }
+        if (!usePollinations && imageInputs.length !== 1) {
+          throw new Error(
+            `backend='hf' supports exactly one reference image, but ${imageInputs.length} were supplied. ` +
+            "Use backend='pollinations' and a model whose max_reference_images is high enough."
+          );
+        }
+        ctx.status(`Reading ${imageInputs.length === 1 ? "reference image" : `${imageInputs.length} reference images`}…`);
         const cleanLora = lora_id.trim();
         const cleanNegative = negative_prompt.trim();
 
@@ -620,33 +657,56 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         try {
           const outputDir = getOutputDir();
-          const { buffer: inputBuffer, mimeType: inputMime, source: inputSource } =
-            await resolveImageInput(image, [outputDir]);
           await mkdir(outputDir, { recursive: true });
 
-           let outBuffer: Buffer;
-           let mimeType: string;
-           let modelToUse: string;
-           const notes: string[] = [];
+          const modelToUse = usePollinations
+            ? model_id.trim() || POLLINATIONS_DEFAULT_EDIT_MODEL
+            : model_id.trim() || getEditModel();
+          let maxReferenceImages: number | undefined;
+          let referenceWarning: string | null = null;
+          if (usePollinations && imageInputs.length > 1) {
+            const referenceCheck = await inspectPollinationsEditReferences(
+              modelToUse,
+              imageInputs.length
+            );
+            maxReferenceImages = referenceCheck.maxReferenceImages;
+            referenceWarning = referenceCheck.warning;
+          }
 
-           if (quality !== undefined && !usePollinations) {
-             notes.push("quality is only supported with backend='pollinations' and was ignored here.");
-           }
+          const inputImages = await Promise.all(
+            imageInputs.map((imageInput) => resolveImageInput(imageInput, [outputDir]))
+          );
+          const primaryInput = inputImages[0];
 
-           if (usePollinations) {
-            modelToUse = model_id.trim() || POLLINATIONS_DEFAULT_EDIT_MODEL;
+          let outBuffer: Buffer;
+          let mimeType: string;
+          const notes: string[] = [];
+
+          if (quality !== undefined && !usePollinations) {
+            notes.push("quality is only supported with backend='pollinations' and was ignored here.");
+          }
+
+          if (usePollinations) {
             if (cleanNegative) {
               notes.push("negative_prompt is not supported by Pollinations and was ignored.");
             }
             if (provider.trim() && provider.trim() !== "auto") {
               notes.push(`provider='${provider.trim()}' is HF-only and was ignored (backend='pollinations').`);
             }
+            if (imageInputs.length > 1) {
+              notes.push(
+                `Sent ${imageInputs.length} ordered reference images to Pollinations in one request; ` +
+                `catalog limit for '${modelToUse}' is max_reference_images: ${maxReferenceImages}.`
+              );
+            }
+            if (referenceWarning) {
+              notes.push(referenceWarning);
+            }
 
             const { url, headers, form, qualityDropped } = buildPollinationsEditForm({
               prompt,
               model: modelToUse,
-              imageBuffer: inputBuffer,
-              imageMime: inputMime,
+              images: inputImages,
               apiKey: pollinationsKey,
               quality,
             });
@@ -704,13 +764,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             notes.push("Pollinations API (gen.pollinations.ai POST /v1/images/edits): safe=false, private, no watermark with key. Credit consumed.");
           } else {
             const token = getToken();
-            modelToUse = model_id.trim() || getEditModel();
             const providerToUse = (provider.trim() || "auto") as
               "auto" | "fal-ai" | "replicate" | "wavespeed" | "together" | "nscale";
 
             const hf = new InferenceClient(token);
             // Copy out of the Node buffer pool so TS accepts it as BlobPart.
-            const inputBlob = new Blob([new Uint8Array(inputBuffer)], { type: inputMime });
+            const inputBlob = new Blob([new Uint8Array(primaryInput.buffer)], {
+              type: primaryInput.mimeType,
+            });
 
             const parameters: Record<string, unknown> = {};
             if (cleanNegative) parameters.negative_prompt = cleanNegative;
@@ -757,8 +818,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             output_dir: outputDir,
             backend: usePollinations ? "pollinations" : "hf",
             model_used: modelToUse,
-            input_image: image,
-            input_source: inputSource,
+            input_image: imageInputs.length === 1 ? imageInputs[0] : imageInputs,
+            input_image_count: imageInputs.length,
+            input_source: primaryInput.source,
+            input_sources: inputImages.map((input) => input.source),
+            max_reference_images: maxReferenceImages,
             prompt,
             negative_prompt: cleanNegative || null,
             lora_used: cleanLora || null,

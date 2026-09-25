@@ -53,7 +53,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 | Content filter | Provider-side moderation | Strict filter off by default (`safe=off`); illegal content still moderated |
 | Negative prompt | ✅ supported | ❌ ignored (reported in response notes) |
 | LoRA (`lora_id`) | ✅ FLUX via fal-ai | ❌ rejected with a clear error |
-| Image editing | ✅ `image_edit` (editing-native HF models) | ✅ `image_edit` (`POST /v1/images/edits`, default grok) |
+| Image editing | ✅ `image_edit` (editing-native HF models, one reference) | ✅ `image_edit` (single **or multi-reference** via `POST /v1/images/edits`, model-specific limits) |
 | Rate limit | Config cooldown + daily cap | Same, plus 15s anon / 5s with-key tier gap |
 | Best for | Quality, LoRAs, precise control | Quick tests, permissive fashion/editorial takes & edits |
 
@@ -84,23 +84,26 @@ generate_image(prompt, model_id?, backend?, negative_prompt?, lora_id?, lora_sca
 
 Returns `file_path`, `output_dir`, `backend`, `model_used`, sizes, a `quota` block (plugin daily limit → `remaining`, `used`, `limit`, `resets_in_hours` — *plugin guard, not HF credits*), and `notes` (ignored params, watermark hints). Use `file_path` as-is when handing images to other tools — other plugins may not find bare filenames.
 
-### `image_edit` — Edit a reference image (hf or pollinations)
+### `image_edit` — Edit one or many reference images (hf or pollinations)
 
 ```
 image_edit(image, prompt, backend?, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?, quality?, name?)
 ```
 
-Reference image = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` prefers an **absolute** local path (the `file_path` returned by an earlier result — relative paths resolve against the plugin process working directory, not the chat directory); a bare filename (looked up in the output directory first) or a public URL also work.
+Reference image(s) = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` accepts either one string or an ordered array of 1–16 strings. Absolute local paths are preferred (the `file_path` returned by an earlier result); bare filenames, relative paths and public URLs also work.
+
+**Multi-image editing is supported by the `pollinations` backend:** pass 2+ references as an array and all are uploaded together in one `POST /v1/images/edits` request. The tool reads `max_reference_images` from the live model catalog and puts a note in the result when the count exceeds it — it does **not** block, because the catalog is only advisory (`x-ai/grok-imagine-image-quality` declares 1 but processes 2, `flux.1-kontext-pro` declares 1 and silently drops the second image). Models verified to combine several references: `black-forest-labs/flux.2-klein-4b` (10), `google/gemini-2.5-flash-image` (3), `bytedance/seedream-5.0-lite` (14), `openai/gpt-image-2` (16). HF remains single-reference only.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `backend` | `"hf"` | `"hf"` (needs HF token) or `"pollinations"` (needs pollinationsApiKey, `POST /v1/images/edits`). |
-| `model_id` | _(backend default)_ | hf: `defaultEditModel` (`FLUX.2-dev`). pollinations: blank = `x-ai/grok-imagine-image-quality` (few filters); edit-capable IDs with `/v1/images/edits` include grok-imagine-image/-quality, kontext (strict), flux.2-*, gpt-image-2*. |
+| `image` | _(required)_ | One image path/URL, or an ordered array of 1–16 paths/URLs. Arrays with 2+ entries require `backend="pollinations"`. |
+| `backend` | `"hf"` | `"hf"` (needs HF token, exactly one image) or `"pollinations"` (needs pollinationsApiKey, single or multi-reference). |
+| `model_id` | _(backend default)_ | hf: `defaultEditModel` (`FLUX.2-dev`). pollinations: blank = `x-ai/grok-imagine-image-quality` (few filters, declares 1 reference but does process 2); for 3+ references pick a model with a higher `max_reference_images`, e.g. `flux.2-klein-4b` or `seedream5`. |
 | `provider` / `negative_prompt` / `lora_id` | | HF only — ignored or rejected with pollinations. |
 | `quality` | unset | pollinations only; documented for gpt-image/grok-imagine-image-2.0. |
 | `name` | `""` | Optional filename slug for the result — same sanitize/append rules as `generate_image`. |
 
-**hf:** only editing-native models work — base T2I models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping and fail; the error message says exactly that. `lora_id` is passed through to fal-ai (I2I effectiveness under verification). **pollinations:** default is deliberately non-restrictive (`grok-imagine-image-quality`) — kontext/seedream strict filters flag fashion-editorial and burn credits on failed edits; use them only as explicit fallback. Returns `file_path`, `output_dir`, `backend`, the full `quota` block, and a clear warning when the plugin's daily limit is hit.
+**hf:** only editing-native models work — base T2I models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping and fail; the error message says exactly that. `lora_id` is passed through to fal-ai (I2I effectiveness under verification). **pollinations:** default is deliberately non-restrictive (`grok-imagine-image-quality`) — kontext/seedream strict filters flag fashion-editorial and burn credits on failed edits. For a single reference that still needs precise KEEP/CHANGE work, `flux.1-kontext-pro` is the recommended pick (free, editing-native, holds pose/composition/identity and follows complex instructions); only intimate fashion-editorial edits need the permissive default. Returns `file_path`, `output_dir`, `backend`, the full `quota` block, and a clear warning when the plugin's daily limit is hit.
 
 ### `list_models` — Browse models per backend
 
@@ -194,7 +197,7 @@ Active profiles are injected as system context every turn and act **indirectly**
 | Model | Alias | Access | Notes |
 |---|---|---|---|
 | `flux.1-schnell` | `flux` | free | Default model, fast |
-| `flux.1-kontext-pro` | `kontext` | free | Instruction editing (`/v1/images/edits`), **strict filter** — flags fashion-editorial |
+| `flux.1-kontext-pro` | `kontext` | free | Recommended `image_edit` model: editing-native, keeps pose/composition/identity, precise on complex change instructions (1 reference). **strict filter** — flags intimate fashion-editorial |
 | `flux.2-klein-4b` | — | free | Fast, small, for quick tests |
 | `z-image-turbo` | — | free | API default model |
 | `flux.2-pro` | — | paid | Highest quality FLUX-2 |
@@ -217,6 +220,8 @@ Active profiles are injected as system context every turn and act **indirectly**
 **Generate:** describe → `generate_image` → file path. Use `backend="pollinations"` for quick iterations or permissive takes (requires API key).
 
 **Edit (KEEP/CHANGE):** reference (prior result's absolute `file_path`, bare filename, or URL) + change instruction → `image_edit`. Example: *"same pose, latex dress instead of silk, keep everything else monochrome."* Backend `hf` (FLUX.2-dev etc.) or `pollinations` (default `grok-imagine-image-quality` — non-restrictive; via `/v1/images/edits`).
+
+**Multi-reference edit:** `image_edit({backend:"pollinations", model_id:"black-forest-labs/flux.2-klein-4b", image:["/abs/subject.jpg", "/abs/style.png"], prompt:"Use image 1 as the subject and image 2 only as the visual style."})` sends both ordered references in one request. Result: `input_image` is the array, plus `input_image_count`, `input_sources` and `max_reference_images`; a too-high count relative to the catalog limit shows up as a note.
 
 **Own style library:** *"Create these Neigungsprompts: cinematic-noir, dreamy-pastel"* → LLM builds entries → `inclination_prompt_manage({action:"activate"})` activates them.
 

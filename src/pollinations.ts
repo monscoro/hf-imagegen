@@ -18,7 +18,8 @@ import {
  * Qualitäts-Hinweise für komplexe, detailreiche Prompts:
  * - `x-ai/grok-imagine-image-2.0` (quality: medium): Empfohlen für hochwertige Fashion-Editorials, keine strengen Content-Filter
  * - `black-forest-labs/flux.1-schnell`: Solide Basis, 1024px
- * - `black-forest-labs/flux.1-kontext-pro`: Azure-FLUX, ideal für komplexe Prompts (STRENGE Filter)
+ * - `black-forest-labs/flux.1-kontext-pro`: Azure-FLUX, starkes image_edit-Modell für
+ *   komplexe Edit-Anweisungen und präzise KEEP/CHANGE-Umsetzung (gratis, 1 Referenz; STRENGE Filter)
  * - `bytedance/seedream-5.0-lite`: ByteDance, sehr hoch, min 1920x1920 (paid_only, STRENGE Filter)
  * - `google/gemini-3-pro-image`: Gemini 3 Pro, bis 4K, höchste Qualität
  */
@@ -29,7 +30,8 @@ export const POLLINATIONS_DEFAULT_MODEL = "black-forest-labs/flux.1-schnell";
  * bewusst NICHT restriktiv: kontext/seedream haben strenge Filter, die
  * Fashion-Editorial flaggen und Credits verbrennen (fehlgeschlagene Edits kosten).
  * grok-imagine-image-quality: healthy, edit-fähig, wenige Filter.
- * Günstige Alternative: x-ai/grok-imagine-image. Strict-Fallback: flux.1-kontext-pro.
+ * Günstige Alternative: x-ai/grok-imagine-image.
+ * Präzise Alternative für komplexe Edit-Anweisungen: flux.1-kontext-pro.
  */
 export const POLLINATIONS_DEFAULT_EDIT_MODEL = "x-ai/grok-imagine-image-quality";
 
@@ -50,9 +52,11 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
     id: "black-forest-labs/flux.1-kontext-pro",
     description:
       "FLUX.1 Kontext Pro — Azure-FLUX, editing-nativ (POST /v1/images/edits). " +
-      "ACHTUNG: Strenge Content-Filter — Fashion-Editorial mit intimen Details kann als " +
-      "Sexual_Prompt geflaggt werden (gefilterte Edits kosten trotzdem). " +
-      "Nicht-Restriktiver Edit-Default: x-ai/grok-imagine-image-quality.",
+      "Starkes image_edit-Modell: hält Pose/Komposition/Identität zuverlässig und folgt " +
+      "komplexen Edit-Anweisungen präzise; gratis. Ein Referenzbild. " +
+      "Hinweis: strenge Content-Filter — Fashion-Editorial mit intakten Details kann als " +
+      "Sexual_Prompt geflaggt werden (gefilterte Edits kosten trotzdem). Für ungefilterte " +
+      "Fashion-Edits: x-ai/grok-imagine-image-quality.",
     style: "photorealistic, artistic, editing",
     speed: "medium",
     access: "free",
@@ -341,14 +345,130 @@ export function buildPollinationsGenGetUrl(opts: PollinationsGenerateOptions): s
   return `${base}?${params.toString()}`;
 }
 
+export interface PollinationsEditImage {
+  buffer: Buffer;
+  mimeType: string;
+}
+
 export interface PollinationsEditOptions {
   prompt: string;
   model: string;
-  imageBuffer: Buffer;
-  imageMime: string;
+  images: PollinationsEditImage[];
   /** API key (enter.pollinations.ai). Pflicht seit Sep 2026. */
   apiKey: string;
   quality?: "low" | "medium" | "high" | "hd";
+}
+
+interface PollinationsEditModelCapabilities {
+  name: string;
+  aliases?: string[];
+  input_modalities?: string[];
+  supported_endpoints?: string[];
+  max_reference_images?: number;
+}
+
+const EDIT_CAPABILITIES_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours, same TTL as costCache
+
+interface EditCapabilitiesCache {
+  fetchedAt: number;
+  capabilities: Map<string, PollinationsEditModelCapabilities>;
+}
+
+let editCapabilitiesCache: EditCapabilitiesCache | null = null;
+let editModelCapabilitiesPromise: Promise<Map<string, PollinationsEditModelCapabilities>> | null = null;
+
+async function getPollinationsEditModelCapabilities(): Promise<Map<string, PollinationsEditModelCapabilities>> {
+  if (editCapabilitiesCache && Date.now() - editCapabilitiesCache.fetchedAt < EDIT_CAPABILITIES_CACHE_TTL_MS) {
+    return editCapabilitiesCache.capabilities;
+  }
+  if (!editModelCapabilitiesPromise) {
+    editModelCapabilitiesPromise = (async () => {
+      const response = await fetch("https://gen.pollinations.ai/image/models", {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) {
+        throw new Error(
+          `Could not load Pollinations model capabilities: ${response.status} ${response.statusText}`
+        );
+      }
+      const payload = await response.json() as PollinationsEditModelCapabilities[];
+      if (!Array.isArray(payload)) {
+        throw new Error("Pollinations model capability response was not an array.");
+      }
+      const capabilities = new Map<string, PollinationsEditModelCapabilities>();
+      for (const model of payload) {
+        if (!model || typeof model.name !== "string") continue;
+        capabilities.set(model.name.toLowerCase(), model);
+        for (const alias of model.aliases ?? []) {
+          capabilities.set(alias.toLowerCase(), model);
+        }
+      }
+      editCapabilitiesCache = { fetchedAt: Date.now(), capabilities };
+      return capabilities;
+    })().catch((error: unknown) => {
+      editModelCapabilitiesPromise = null;
+      throw error;
+    });
+  }
+  return editModelCapabilitiesPromise;
+}
+
+export interface PollinationsEditReferenceCheck {
+  model: string;
+  maxReferenceImages: number;
+  /** true wenn mehr Referenzen geschickt werden als der Katalog für das Modell ausweist. */
+  exceedsDeclaredLimit: boolean;
+  /** Warntext für exceedsDeclaredLimit, sonst null. */
+  warning: string | null;
+}
+
+/**
+ * Prüft Modell + Referenzanzahl gegen den Live-Katalog (/image/models).
+ *
+ * Bewusst NICHT blockierend, wenn imageCount > max_reference_images: der Katalog
+ * ist nur ein Hinweis. Empirisch verarbeitet x-ai/grok-imagine-image-quality
+ * 2 Referenzen, obwohl der Katalog max_reference_images: 1 meldet, während
+ * flux.1-kontext-pro Bild 2 tatsächlich still verwirft. Harte Grenzen würden also
+ * funktionierende Modelle blockieren und Modelle mit stillem Verwerfen zulassen —
+ * beides vermeiden wir zugunsten einer sichtbaren Note im Ergebnis.
+ */
+export async function inspectPollinationsEditReferences(
+  model: string,
+  imageCount: number
+): Promise<PollinationsEditReferenceCheck> {
+  const capabilities = await getPollinationsEditModelCapabilities();
+  const modelCapabilities = capabilities.get(model.trim().toLowerCase());
+  if (!modelCapabilities) {
+    throw new Error(
+      `Pollinations model '${model}' was not found in /image/models. ` +
+      "Use list_models source='pollinations' and choose a listed model/alias."
+    );
+  }
+  if (
+    !modelCapabilities.input_modalities?.includes("image") ||
+    !modelCapabilities.supported_endpoints?.includes("/v1/images/edits")
+  ) {
+    throw new Error(
+      `Pollinations model '${modelCapabilities.name}' does not support image editing at /v1/images/edits.`
+    );
+  }
+  const maxReferenceImages = modelCapabilities.max_reference_images ?? 1;
+  const exceedsDeclaredLimit = imageCount > maxReferenceImages;
+  const suggestion = imageCount <= 3
+    ? "google/gemini-2.5-flash-image (up to 3)"
+    : "black-forest-labs/flux.2-klein-4b (up to 10)";
+  return {
+    model: modelCapabilities.name,
+    maxReferenceImages,
+    exceedsDeclaredLimit,
+    warning: exceedsDeclaredLimit
+      ? `Model '${modelCapabilities.name}' declares max_reference_images: ${maxReferenceImages}, but ` +
+        `${imageCount} were sent. Extra references may be ignored by the model (e.g. ` +
+        `flux.1-kontext-pro drops the second image); the catalog value is only advisory. ` +
+        `A model verified to accept ${imageCount} references is '${suggestion}'.`
+      : null,
+  };
 }
 
 /**
@@ -365,6 +485,9 @@ export function buildPollinationsEditForm(opts: PollinationsEditOptions): {
   form: FormData;
   qualityDropped: boolean;
 } {
+  if (opts.images.length === 0) {
+    throw new Error("Pollinations image editing requires at least one reference image.");
+  }
   const url = "https://gen.pollinations.ai/v1/images/edits";
   const headers: Record<string, string> = {};
   if (opts.apiKey) {
@@ -388,11 +511,15 @@ export function buildPollinationsEditForm(opts: PollinationsEditOptions): {
     }
   }
 
-  const ext = opts.imageMime.includes("png") ? "png"
-    : opts.imageMime.includes("webp") ? "webp"
-    : "jpg";
-  const blob = new Blob([new Uint8Array(opts.imageBuffer)], { type: opts.imageMime });
-  form.append("image", blob, `reference.${ext}`);
+  for (const [index, image] of opts.images.entries()) {
+    const ext = image.mimeType.includes("png") ? "png"
+      : image.mimeType.includes("webp") ? "webp"
+      : image.mimeType.includes("gif") ? "gif"
+      : image.mimeType.includes("bmp") ? "bmp"
+      : "jpg";
+    const blob = new Blob([new Uint8Array(image.buffer)], { type: image.mimeType });
+    form.append("image", blob, `reference-${index + 1}.${ext}`);
+  }
 
   return { url, headers, form, qualityDropped };
 }

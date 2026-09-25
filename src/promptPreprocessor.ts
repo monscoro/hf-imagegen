@@ -77,9 +77,13 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 == IMAGE SYSTEM PROMPT / STIMMUNG ==
 - Neigungsprompts (Profile) und Bibliotheks-Records wirken INDIREKT:
   leite daraus ab wie du generate_image prompts formulierst (Mood, Stil, Ausrichtung, theatralische Inszenierung). Nicht wortwörtlich präfixen, sondern stilistisch einweben. Mehrere können gleichzeitig aktiv sein = Stacking.
-- Übersicht (was existiert, was ist aktiv): inclination_prompt_list — Gesamtübersicht über Profile, Bücher und beide Stacks; detail:"full" liefert alle Texte.
+- Übersicht (was existiert, was ist aktiv): inclination_prompt_list — active.state "leer" = es wird nichts injiziert;
+  active zuerst, dann profiles (aktive Einträge zuerst, source/readonly am Abschnittskopf), dann library mit Facetten pro Buch.
+  detail:"full" liefert alle Texte.
 - Ändern/Anlegen/Aktivieren: inclination_prompt_manage, store entscheidet über die Domäne:
   profile (injiziertes Stimmungsprompt) | book (Bibliotheks-Buch) | record (Bibliotheks-Eintrag mit aspect + keys).
+  Der Id-Parameter heißt name (nicht id) — bei store:'record' zusätzlich book; aus einem ref "skillset/a01" wird also
+  book:"skillset" + name:"a01" (Groß/Klein egal).
   create legt an (record-create erzeugt fehlende Bücher automatisch), activate/deactivate sind idempotent
   (wiederholen ändert nichts — kein Umschalten), action:'clear' leert beide Stacks. curated ist read-only.
 - Profil-Inhalt ohne Aktivierung lesen: inclination_prompt_list({detail:"full"}) oder inclination_prompt_manage({store:"profile", action:"get", …}).

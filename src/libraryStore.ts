@@ -168,7 +168,7 @@ export function getBookById(id: string): LibraryBook | null {
 export function getRecordById(book: string, id: string): LibraryRecord | null {
   const b = book.trim().toLowerCase();
   const i = id.trim().toLowerCase();
-  return getAllRecords().find((r) => r.book === b && r.id === i) ?? null;
+  return getAllRecords().find((r) => r.book.toLowerCase() === b && r.id.toLowerCase() === i) ?? null;
 }
 
 /** Facetten = bekannte Ausprägungen ∪ in User-Records tatsächlich genutzte. */
@@ -318,7 +318,7 @@ export function getActiveRecordRefs(): string[] {
   const all = getAllRecords();
   const valid = cache.activeRecords.filter((ref) => {
     const parsed = parseRef(ref);
-    return !!parsed && all.some((r) => r.book === parsed.book && r.id === parsed.id);
+    return !!parsed && all.some((r) => r.book.toLowerCase() === parsed.book && r.id.toLowerCase() === parsed.id);
   });
   if (valid.length !== cache.activeRecords.length) {
     cache.activeRecords = valid; // hängende Refs prunen
@@ -333,7 +333,7 @@ export function getActiveRecords(): LibraryRecord[] {
   for (const ref of getActiveRecordRefs()) {
     const parsed = parseRef(ref);
     if (!parsed) continue;
-    const found = all.find((r) => r.book === parsed.book && r.id === parsed.id);
+    const found = all.find((r) => r.book.toLowerCase() === parsed.book && r.id.toLowerCase() === parsed.id);
     if (found && !out.some((r) => refOf(r.book, r.id) === ref)) out.push(found);
   }
   return out;

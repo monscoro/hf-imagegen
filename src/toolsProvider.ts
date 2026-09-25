@@ -65,6 +65,30 @@ function json(obj: unknown): string {
 }
 
 /**
+ * Liefert source/readonly nur dann als Abschnitts-Meta zurueck, wenn ALLE Eintraege
+ * identisch sind — sonst bleibt es pro Eintrag stehen. Spart bei kuratierten,
+ * read-only Sammlungen (der Normalfall) sehr viele Tokens.
+ */
+function uniformMeta<T extends { source: string; readonly: boolean }>(
+  items: readonly T[]
+): { source: T["source"]; readonly: boolean } | null {
+  if (items.length === 0) return null;
+  const first = items[0];
+  const same = items.every((i) => i.source === first.source && i.readonly === first.readonly);
+  return same ? { source: first.source, readonly: first.readonly } : null;
+}
+
+/** Facetten als kompakter String statt Objektliste: "aftercare×2, bondage, play". */
+function facetSummary(records: readonly { aspect: string }[]): string {
+  const counts = new Map<string, number>();
+  for (const r of records) counts.set(r.aspect, (counts.get(r.aspect) ?? 0) + 1);
+  return Array.from(counts.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([aspect, n]) => (n > 1 ? `${aspect}×${n}` : aspect))
+    .join(", ");
+}
+
+/**
  * Sammelt die Referenz-Reihenfolge fuer image_edit: 'image' (erste Referenz, immer
  * String) gefolgt von 'images' (optionale weitere Referenzen).
  *
@@ -1150,11 +1174,17 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       description: text`
         Gesamtübersicht über das Neigungsprompt-System (READ-ONLY, verändert nichts) – einheitlicher Prefix inclination_prompt_.
 
-        Drei Abschnitte:
-        - active: gerade injizierte Profile und aktive Bibliotheks-Records (Stacks).
-        - profiles: Stimmungsprompts (curated + user) mit is_active-Flag.
-        - library: Bücher mit Record-Zahl/Facetten + Facetten-Verteilung.
-        detail:"full" liefert zusätzlich alle Prompt-/Content-Texte (teuer); compact nur Namen/Beschreibungen.
+        Drei Abschnitte, oben steht zuerst, was WIRKLICH injiziert wird:
+        - active: state "leer"|"geladen" + profile_count/record_count + die aktiven Einträge
+          (Records als ref "book/id"). state "leer" heißt: es wird nichts injiziert.
+        - profiles: alle Stimmungsprompts. count/active_count; source+readonly stehen am
+          Abschnittskopf, wenn alle Einträge gleich sind, sonst pro Eintrag. Aktive Einträge zuerst.
+        - library: records_total, facets (Aspect-Übersicht) und books mit record_count,
+          active_count und den Facetten des jeweiligen Buchs.
+
+        filter: Substring über Profile, Bücher und Records (id/aspect/keys/Text).
+        detail:"full" hängt alle Texte an (teuer); compact = nur Übersicht (default).
+        "next" enthält fertige Tool-Aufrufe — Achtung: die Parameter heißen name/book, nicht id.
 
         Das ist DAS Einstiegstool, wenn unklar ist, was vorhanden ist und was gerade aktiv ist.
         Etwas ändern/anlegen/aktivieren → inclination_prompt_manage.
@@ -1183,73 +1213,99 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           r.keys.some((k) => k.toLowerCase().includes(f)) ||
           r.content.toLowerCase().includes(f);
 
-        const profileEntries = profiles.filter(matchProfile).map((d) => ({
-          id: d.id,
-          description: d.description,
-          source: d.source,
-          readonly: d.readonly,
-          is_active: activeProfileIds.includes(d.id),
-          ...(full ? { prompt: d.prompt } : {}),
-        }));
+        const profileEntries = profiles
+          .filter(matchProfile)
+          .map((d) => ({
+            id: d.id,
+            description: d.description,
+            source: d.source,
+            readonly: d.readonly,
+            is_active: activeProfileIds.includes(d.id),
+            ...(full ? { prompt: d.prompt } : {}),
+          }))
+          .sort((a, b) => Number(b.is_active) - Number(a.is_active));
 
-        const bookEntries = books
-          .filter(
-            (b) =>
-              !f ||
-              b.id.includes(f) ||
-              b.description.toLowerCase().includes(f) ||
-              records.some((r) => r.book === b.id && matchRecord(r))
-          )
-          .map((b) => {
-            const own = records.filter((r) => r.book === b.id);
-            return {
-              id: b.id,
-              description: b.description,
-              source: b.source,
-              readonly: b.readonly,
-              record_count: own.length,
-              active_count: own.filter((r) => activeRefs.includes(refOf(r.book, r.id))).length,
-              aspects: [...new Set(own.map((r) => r.aspect))].sort(),
-            };
-          });
-
-        const facetCounts = new Map<string, number>();
-        for (const r of records) facetCounts.set(r.aspect, (facetCounts.get(r.aspect) ?? 0) + 1);
-        const facets = Array.from(facetCounts.entries())
-          .map(([aspect, count]) => ({ aspect, count }))
-          .sort((a, b) => a.aspect.localeCompare(b.aspect));
+        const bookEntries = books.filter(
+          (b) =>
+            !f ||
+            b.id.includes(f) ||
+            b.description.toLowerCase().includes(f) ||
+            records.some((r) => r.book === b.id && matchRecord(r))
+        );
 
         const matchedRecords = records.filter(matchRecord);
+        const profileMeta = uniformMeta(profileEntries);
+        const activeTotal = activeProfileIds.length + activeRefs.length;
+
         return json({
           active: {
+            state: activeTotal === 0 ? "leer" : "geladen",
+            profile_count: activeProfileIds.length,
+            record_count: activeRefs.length,
+            ...(activeTotal === 0
+              ? { hint: "Nichts aktiv — es wird kein Stimmungsprompt/Record injiziert." }
+              : {}),
             profiles: activeProfileIds.map((id) => ({
               id,
               description: profiles.find((p) => p.id === id)?.description ?? "",
             })),
             records: activeRefs.map((ref) => {
               const r = records.find((x) => refOf(x.book, x.id) === ref);
-              return { ref, book: r?.book ?? "", id: r?.id ?? "", aspect: r?.aspect ?? "" };
+              return { ref, aspect: r?.aspect ?? "" };
             }),
           },
-          profiles: { count: profileEntries.length, entries: profileEntries },
-          library: {
-            books: bookEntries,
-            records_total: records.length,
-            records_matched: matchedRecords.length,
-            facets,
-            ...(full
-              ? {
-                  records: matchedRecords.map((r) => ({
-                    ref: refOf(r.book, r.id),
-                    ...r,
-                    is_active: activeRefs.includes(refOf(r.book, r.id)),
-                  })),
-                }
-              : {}),
+          profiles: {
+            count: profileEntries.length,
+            active_count: profileEntries.filter((p) => p.is_active).length,
+            ...(profileMeta ?? {}),
+            entries: profileEntries.map((p) => {
+              const { source, readonly, ...rest } = p;
+              return profileMeta ? rest : p;
+            }),
           },
-          filter: f || "(none)",
-          note: "Aktivieren/Deaktivieren: inclination_prompt_manage({action:'activate'|'deactivate', store:'profile'|'record'|'book'}) — idempotent, kein Toggle; store:'book' = alle Records des Buchs; action:'clear' leert beide Stacks.",
-          config_hint: "Neue Inhalte: inclination_prompt_manage({store:'profile'|'book'|'record', action:'create'}). Record-Inhalte nachschlagen: inclination_prompt_library.",
+          library: {
+            records_total: records.length,
+            ...(f ? { records_matched: matchedRecords.length } : {}),
+            facets: facetSummary(records),
+            books: bookEntries.map((b) => {
+              const own = records.filter((r) => r.book === b.id);
+              return {
+                id: b.id,
+                description: b.description,
+                record_count: own.length,
+                active_count: own.filter((r) => activeRefs.includes(refOf(r.book, r.id))).length,
+                facets: facetSummary(own),
+                ...(b.readonly ? { readonly: true } : {}),
+              };
+            }),
+          },
+          ...(full
+            ? {
+                records: matchedRecords.map((r) => ({
+                  ref: refOf(r.book, r.id),
+                  book: r.book,
+                  id: r.id,
+                  aspect: r.aspect,
+                  keys: r.keys,
+                  is_active: activeRefs.includes(refOf(r.book, r.id)),
+                  content: r.content,
+                })),
+              }
+            : {}),
+          ...(f ? { filter: f } : {}),
+          next: {
+            activate:
+              "inclination_prompt_manage({action:'activate', store:'profile', name:'<profil-id>'}) — " +
+              "bei store:'book' = name:'<book-id>' (aktiviert ALLE Records), bei store:'record' = " +
+              "book:'<book>' + name:'<record>'. Idempotent, kein Toggle; aus ref 'skillset/a01' wird " +
+              "book:'skillset' + name:'a01'. action:'clear' leert beide Stacks.",
+            deactivate: "inclination_prompt_manage({action:'deactivate', …}) mit denselben Angaben",
+            create:
+              "inclination_prompt_manage({action:'create', store:'profile'|'book'|'record', name, description, …})",
+            read_text:
+              "inclination_prompt_library({query:'<id oder keyword>'}) für den Volltext eines Records, " +
+              "detail:'full' hier für alle Texte auf einmal",
+          },
         });
       }),
     }),

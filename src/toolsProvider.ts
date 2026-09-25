@@ -1,4 +1,4 @@
-﻿import { text, tool, type Tool, type ToolCallContext, type ToolsProvider } from "@lmstudio/sdk";
+import { text, tool, type Tool, type ToolCallContext, type ToolsProvider } from "@lmstudio/sdk";
 
 /**
  * Argumente der geteilten image_edit-Kernfunktion. `image_edit` und
@@ -114,7 +114,7 @@ async function loadPollinationsCapabilities(): Promise<
 
 /**
  * Liefert source/readonly nur dann als Abschnitts-Meta zurueck, wenn ALLE Eintraege
- * identisch sind â€” sonst bleibt es pro Eintrag stehen. Spart bei kuratierten,
+ * identisch sind — sonst bleibt es pro Eintrag stehen. Spart bei kuratierten,
  * read-only Sammlungen (der Normalfall) sehr viele Tokens.
  */
 function uniformMeta<T extends { source: string; readonly: boolean }>(
@@ -126,13 +126,13 @@ function uniformMeta<T extends { source: string; readonly: boolean }>(
   return same ? { source: first.source, readonly: first.readonly } : null;
 }
 
-/** Facetten als kompakter String statt Objektliste: "aftercareÃ—2, bondage, play". */
+/** Facetten als kompakter String statt Objektliste: "aftercare×2, bondage, play". */
 function facetSummary(records: readonly { aspect: string }[]): string {
   const counts = new Map<string, number>();
   for (const r of records) counts.set(r.aspect, (counts.get(r.aspect) ?? 0) + 1);
   return Array.from(counts.entries())
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([aspect, n]) => (n > 1 ? `${aspect}Ã—${n}` : aspect))
+    .map(([aspect, n]) => (n > 1 ? `${aspect}×${n}` : aspect))
     .join(", ");
 }
 
@@ -221,7 +221,7 @@ function levenshtein(a: string, b: string): number {
   return prev[b.length];
 }
 
-/** Ã„hnlichkeits-VorschlÃ¤ge: Substring-Treffer zuerst, dann Edit-Distance (Tippfehler). */
+/** Ähnlichkeits-Vorschläge: Substring-Treffer zuerst, dann Edit-Distance (Tippfehler). */
 function suggestIds(candidates: string[], target: string): string[] {
   const t = target.toLowerCase();
   return candidates
@@ -241,7 +241,7 @@ function profileNotFound(clean: string): Error {
     `Profil "${clean}" nicht gefunden.` +
       (close.length ? ` Meintest du: ${close.join(", ")}?` : "") +
       ` Neues anlegen: inclination_prompt_manage({store:"profile", action:"create", name:"${clean}", ` +
-      `description:"Kurzbeschreibung", prompt:"inclination: â€¦"}). VerfÃ¼gbar: inclination_prompt_list.`
+      `description:"Kurzbeschreibung", prompt:"inclination: …"}). Verfügbar: inclination_prompt_list.`
   );
 }
 
@@ -251,8 +251,8 @@ function bookNotFound(clean: string): Error {
   return new Error(
     `Buch "${clean}" nicht gefunden.` +
       (close.length ? ` Meintest du: ${close.join(", ")}?` : "") +
-      ` Neues Buch: inclination_prompt_manage({store:"book", action:"create", name:"${clean}", description:"â€¦"}). ` +
-      `Vorhandene BÃ¼cher: ${all.map((b) => b.id).join(", ")}.`
+      ` Neues Buch: inclination_prompt_manage({store:"book", action:"create", name:"${clean}", description:"…"}). ` +
+      `Vorhandene Bücher: ${all.map((b) => b.id).join(", ")}.`
   );
 }
 
@@ -261,7 +261,7 @@ function recordNotFound(ref: string): Error {
   return new Error(
     `Record "${ref}" nicht gefunden.` +
       (close.length ? ` Meintest du: ${close.join(", ")}?` : "") +
-      ` Neuer Record: inclination_prompt_manage({store:"record", action:"create", book:"â€¦", name:"â€¦", aspect:"â€¦", content:"â€¦"}). ` +
+      ` Neuer Record: inclination_prompt_manage({store:"record", action:"create", book:"…", name:"…", aspect:"…", content:"…"}). ` +
       `Katalog: inclination_prompt_library({query:""}).`
   );
 }
@@ -325,13 +325,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     cooldownMs: Number(cfg.get("rateLimitCooldown")) || 5000,
     dailyCap: Number(cfg.get("rateLimitDailyCap")) || 75,
   });
-  // Config-Schalter fÃ¼r das Neigungsprompt-Subsystem (default an).
+  // Config-Schalter für das Neigungsprompt-Subsystem (default an).
   const inclinationsEnabled = cfg.get("enableInclinationPrompts") !== false;
 
   let isGenerating = false;
   let lastPollinationsCall = 0;
 
-  /** Geteilter Kern von image_edit und multi_image_edit â€” nicht doppelt pflegen. */
+  /** Geteilter Kern von image_edit und multi_image_edit — nicht doppelt pflegen. */
   const runImageEdit = async ({ image, images, prompt, backend, model_id, provider, negative_prompt, lora_id, lora_scale, quality, name }: ImageEditArgs, ctx: ToolContext): Promise<string> => {
       const usePollinations = backend === "pollinations";
       const imageInputs = normalizeImageEditReferences(image, images);
@@ -341,7 +341,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "Use backend='pollinations' and a model whose max_reference_images is high enough."
         );
       }
-      ctx.status(`Reading ${imageInputs.length === 1 ? "reference image" : `${imageInputs.length} reference images`}â€¦`);
+      ctx.status(`Reading ${imageInputs.length === 1 ? "reference image" : `${imageInputs.length} reference images`}…`);
       const cleanLora = lora_id.trim();
       const cleanNegative = negative_prompt.trim();
 
@@ -451,7 +451,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             notes.push(`quality='${quality}' is only documented for gpt-image/grok-imagine-image-2.0 models and was ignored for '${modelToUse}'.`);
           }
 
-          ctx.status(`Editing with Pollinations (${modelToUse})â€¦`);
+          ctx.status(`Editing with Pollinations (${modelToUse})…`);
           const res = await fetch(url, {
             method: "POST",
             headers,
@@ -461,10 +461,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           if (!res.ok) {
             const errText = await res.text().catch(() => "");
             if (res.status === 401) {
-              throw new Error("Pollinations API error: 401 Unauthorized â€” set pollinationsApiKey in plugin config.");
+              throw new Error("Pollinations API error: 401 Unauthorized — set pollinationsApiKey in plugin config.");
             }
             if (res.status === 402 || res.status === 403) {
-              throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText} â€” paid_only model or exhausted Pollen budget? Check key balance / use a free model.`);
+              throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText} — paid_only model or exhausted Pollen budget? Check key balance / use a free model.`);
             }
             throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText}`);
           }
@@ -514,7 +514,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           if (cleanNegative) parameters.negative_prompt = cleanNegative;
           if (cleanLora) parameters.loras = [{ path: cleanLora, scale: lora_scale }];
 
-          ctx.status(`Editing with ${modelToUse}â€¦`);
+          ctx.status(`Editing with ${modelToUse}…`);
           let blob: Blob;
           try {
             blob = await hf.imageToImage({
@@ -530,7 +530,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             const msg = err instanceof Error ? err.message : String(err);
             if (/not supported for task image-to-image/i.test(msg)) {
               throw new Error(
-                `${msg} â€” use an editing-native model instead: ` +
+                `${msg} — use an editing-native model instead: ` +
                 `'black-forest-labs/FLUX.2-dev' (default), 'black-forest-labs/FLUX.1-Kontext-dev' ` +
                 `or 'Qwen/Qwen-Image-Edit'. ` +
                 `Base text-to-image models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping.`
@@ -577,7 +577,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           message:
             `Edited image saved to ${filePath}` +
             (quota.remaining === 0
-              ? " â€” daily generation quota reached; next generation is blocked until local midnight."
+              ? " — daily generation quota reached; next generation is blocked until local midnight."
               : ""),
         });
       } finally {
@@ -597,37 +597,37 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         Backends (parameter 'backend'):
         - "hf" (default): HuggingFace Inference Providers. Requires HF API token from config.
-          Models are HuggingFace IDs â€” browse with list_models (source curated/provider/trending/downloads).
+          Models are HuggingFace IDs — browse with list_models (source curated/provider/trending/downloads).
           LoRAs: pass lora_id (fal-ai sub-provider); browse with list_loras.
-          BEST QUALITY for complex/detailed prompts â€” recommended for production.
-        - "pollinations": Pollinations.ai â€” requires pollinationsApiKey in config.
+          BEST QUALITY for complex/detailed prompts — recommended for production.
+        - "pollinations": Pollinations.ai — requires pollinationsApiKey in config.
           Uses gen.pollinations.ai API. Browse models with list_models source='pollinations'.
 
         MODEL IDS for pollinations backend:
-        â€¢ Use FULL canonical IDs (e.g. "black-forest-labs/flux.1-schnell").
-        â€¢ Valid short aliases: "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
+        • Use FULL canonical IDs (e.g. "black-forest-labs/flux.1-schnell").
+        • Valid short aliases: "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
           "seedream5" (= seedream-5.0-lite). ALL OTHER IDs MUST BE FULL FORM.
-        â€¢ Blank model_id defaults to "black-forest-labs/flux.1-schnell".
+        • Blank model_id defaults to "black-forest-labs/flux.1-schnell".
 
         PARAMETERS:
-        â€¢ prompt: descriptive text â€” subject, style, lighting, mood, quality terms.
-        â€¢ width/height: pollinations only. POST needs BOTH (a single dimension is ignored).
-        â€¢ seed: POST never sends seed â€” any seed value is ignored (note in result).
-        â€¢ quality: only for gptimage/grok-imagine-image-2.0 family; ignored otherwise.
-        â€¢ negative_prompt: HF only, ignored with pollinations.
-        â€¢ lora_id: HF only, rejected with error on pollinations.
+        • prompt: descriptive text — subject, style, lighting, mood, quality terms.
+        • width/height: pollinations only. POST needs BOTH (a single dimension is ignored).
+        • seed: POST never sends seed — any seed value is ignored (note in result).
+        • quality: only for gptimage/grok-imagine-image-2.0 family; ignored otherwise.
+        • negative_prompt: HF only, ignored with pollinations.
+        • lora_id: HF only, rejected with error on pollinations.
 
         FILES: saved under plugin output directory (config 'Output Directory'). Optional
-        'name' appends a readable filename slug (sanitized) after the timestamp â€” set it
+        'name' appends a readable filename slug (sanitized) after the timestamp — set it
         when the user asks to name/label the file; it also makes list_output_images
         filtering useful. Hand the image to other tools as the returned absolute
-        file_path (image_edit accepts it from ANY earlier tool result â€” do NOT strip it
+        file_path (image_edit accepts it from ANY earlier tool result — do NOT strip it
         to a bare filename). Find results via list_output_images.
         quota.remaining counts plugin daily limit, not HF credits.
       `,
       parameters: {
         prompt: z.string().min(1).describe(
-          "Text description of the image. Be specific â€” subject, style, lighting, mood, quality terms."
+          "Text description of the image. Be specific — subject, style, lighting, mood, quality terms."
         ),
         model_id: z.string().default("").describe(
           "Model override. For backend='hf': HuggingFace model ID (e.g. 'stabilityai/stable-diffusion-xl-base-1.0'), " +
@@ -640,14 +640,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         ),
         negative_prompt: z.string().default("").describe(
           "What to exclude from the image (e.g. 'blurry, low quality, text, watermark'). " +
-          "HF only â€” ignored with backend='pollinations'."
+          "HF only — ignored with backend='pollinations'."
         ),
         lora_id: z.string().default("").describe(
           "HuggingFace model ID of a LoRA adapter to apply (e.g. 'alvdansen/flux-koda'). " +
           "HF backend + FLUX base models only. Use list_loras to discover available LoRAs."
         ),
         lora_scale: z.number().min(0).max(2).default(1.0).describe(
-          "Strength of the LoRA adapter. 0.5â€“1.0 is typical; higher = stronger effect."
+          "Strength of the LoRA adapter. 0.5–1.0 is typical; higher = stronger effect."
         ),
         width: z.number().int().min(0).max(2048).default(0).describe(
           "Output width in pixels (backend='pollinations' only, ignored with backend='hf'). " +
@@ -659,7 +659,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         ),
         seed: z.number().int().min(0).default(0).describe(
           "Seed (backend='pollinations' only, ignored with backend='hf'). " +
-          "0 = random. POST /v1/images/generations does not accept seed â€” any value is ignored (note in result)."
+          "0 = random. POST /v1/images/generations does not accept seed — any value is ignored (note in result)."
         ),
         quality: z.enum(["low", "medium", "high", "hd"]).optional().describe(
           "Output quality (backend='pollinations' only, ignored with backend='hf'). " +
@@ -674,7 +674,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         ),
       },
       implementation: safe_impl("generate_image", async ({ prompt, model_id, backend, negative_prompt, lora_id, lora_scale, width, height, seed, quality, name }, ctx) => {
-        ctx.status("Generating imageâ€¦");
+        ctx.status("Generating image…");
         const usePollinations = backend === "pollinations";
         const cleanLora = lora_id.trim();
 
@@ -762,7 +762,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             if ((width && !height) || (!width && height)) {
               notes.push("POST size needs width AND height (WIDTHxHEIGHT); a single dimension was ignored. Use both for exact size.");
             }
-            ctx.status(`Calling Pollinations API (${modelToUse}, quality=${quality ?? "medium"}, auth=key)â€¦`);
+            ctx.status(`Calling Pollinations API (${modelToUse}, quality=${quality ?? "medium"}, auth=key)…`);
             const res = await fetch(url, {
               method: "POST",
               headers,
@@ -772,10 +772,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             if (!res.ok) {
               const errText = await res.text().catch(() => "");
               if (res.status === 401) {
-                throw new Error("Pollinations API error: 401 Unauthorized â€” invalid or expired key. Check pollinationsApiKey in plugin config (get one at https://enter.pollinations.ai/keys).");
+                throw new Error("Pollinations API error: 401 Unauthorized — invalid or expired key. Check pollinationsApiKey in plugin config (get one at https://enter.pollinations.ai/keys).");
               }
               if (res.status === 402 || res.status === 403) {
-                throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText} â€” paid_only model or exhausted Pollen budget? Check key balance / use a free model.`);
+                throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText} — paid_only model or exhausted Pollen budget? Check key balance / use a free model.`);
               }
               throw new Error(`Pollinations API error: ${res.status} ${res.statusText} ${errText}`);
             }
@@ -800,7 +800,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             if (cleanNegative) parameters.negative_prompt = cleanNegative;
             if (cleanLora) parameters.loras = [{ path: cleanLora, scale: lora_scale }];
 
-            ctx.status(`Calling ${modelToUse}â€¦`);
+            ctx.status(`Calling ${modelToUse}…`);
             const blob = await hf.textToImage({
               provider: cleanLora ? "fal-ai" : "auto",
               model: modelToUse,
@@ -838,7 +838,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               resets_in_hours: quota.resetInHours,
             },
             notes: notes.length > 0 ? notes : undefined,
-            message: `Image saved to ${filePath}${quota.remaining === 0 ? " â€” daily generation quota reached; next generation is blocked until local midnight." : ""}`,
+            message: `Image saved to ${filePath}${quota.remaining === 0 ? " — daily generation quota reached; next generation is blocked until local midnight." : ""}`,
           });
         } finally {
           isGenerating = false;
@@ -862,34 +862,34 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         multi_image_edit when combining is the actual task.
 
         REFERENCE IMAGES
-        â€¢ 'image' = the FIRST reference, always a plain string. Prefer the ABSOLUTE
+        • 'image' = the FIRST reference, always a plain string. Prefer the ABSOLUTE
           file_path from an earlier generate_image/image_edit result; a bare filename
           (output directory first) and public URLs also work, but relative paths resolve
           against the plugin process CWD, not the chat directory. For a single-image edit
-          this is all you need â€” leave 'images' unset.
-        â€¢ 'images' = OPTIONAL further references, 1â€“15, in order. Set it ONLY for 2+
+          this is all you need — leave 'images' unset.
+        • 'images' = OPTIONAL further references, 1–15, in order. Set it ONLY for 2+
           references and ONLY with backend='pollinations':
           image='/abs/subject.jpg', images=['/abs/style.png'].
-          Never put an array in 'image' â€” that parameter is a string.
-        â€¢ All references go into ONE request, so the prompt can address them by
+          Never put an array in 'image' — that parameter is a string.
+        • All references go into ONE request, so the prompt can address them by
           position: "use image 1 as the subject and image 2 only as the visual style".
-        â€¢ HF accepts exactly one reference and rejects additional ones.
+        • HF accepts exactly one reference and rejects additional ones.
 
         BACKENDS
-        â€¢ backend='hf' (default, one image): needs HF token. Editing-native models only â€”
+        • backend='hf' (default, one image): needs HF token. Editing-native models only —
           base T2I models have no I2I mapping and fail. Pick with list_models
           source='image-edit' (FLUX.2-dev is the default). lora_id/negative_prompt/
           provider are HF-only (ignored or rejected on pollinations).
-        â€¢ backend='pollinations': needs pollinationsApiKey. Blank model_id =
+        • backend='pollinations': needs pollinationsApiKey. Blank model_id =
           "x-ai/grok-imagine-image-quality" (few filters, also the safe pick for intimate
           fashion-editorial). For a single reference "black-forest-labs/flux.1-kontext-pro"
-          (alias kontext, free) is more precise, but its content filter is strict â€” it flags
+          (alias kontext, free) is more precise, but its content filter is strict — it flags
           intimate editorial edits and still charges credits. Browse with
           list_models source='pollinations'.
 
         MULTI-REFERENCE MODEL LIMITS
         Verified to combine several references: klein (10), gpt-image-2 (16),
-        seedream5 (14), nanobanana-pro (14) â€” or their full IDs. flux.1-kontext-pro
+        seedream5 (14), nanobanana-pro (14) — or their full IDs. flux.1-kontext-pro
         really drops image 2.
         A mismatch only produces a warning in notes, never a hard error, because the
         catalog limit is advisory (grok-imagine-image-quality declares 1 yet processes 2).
@@ -898,27 +898,27 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         FILES: saved under the plugin output directory (config 'Output Directory').
         Optional 'name' appends a sanitized filename slug after the timestamp. Hand the
-        result to other tools as the returned absolute file_path â€” do NOT strip it to a
+        result to other tools as the returned absolute file_path — do NOT strip it to a
         bare filename. Find results via list_output_images.
         quota.remaining counts the plugin's own daily limit, not HF credits.
       `,
       parameters: {
         image: z.string().trim().min(1).describe(
-          "The FIRST reference image â€” always a plain string, never an array. Absolute file_path " +
+          "The FIRST reference image — always a plain string, never an array. Absolute file_path " +
           "from an earlier result is PREFERRED; a bare filename, relative path or public http(s) " +
           "URL also work."
         ),
         images: z.array(z.string().trim().min(1)).min(1).max(15).optional().describe(
-          "OPTIONAL further reference images, 1â€“15 entries, in order. Only set this for 2+ " +
+          "OPTIONAL further reference images, 1–15 entries, in order. Only set this for 2+ " +
           "references, and only with backend='pollinations'. Example: image='/abs/subject.jpg', " +
-          "images=['/abs/style.png','/abs/pose.jpg']. All references â€” 'image' first, then " +
-          "'images' â€” go into ONE request, so the prompt can address them by position: " +
+          "images=['/abs/style.png','/abs/pose.jpg']. All references — 'image' first, then " +
+          "'images' — go into ONE request, so the prompt can address them by position: " +
           "'use image 1 as the subject and image 2 only as the style reference'. " +
           "Omit 'images' for a normal single-image edit."
         ),
         prompt: z.string().min(1).describe(
           "CHANGE instruction: what to transform (subject, garment, material, light, mood). " +
-          "Be specific â€” everything not mentioned tends to stay as in the reference."
+          "Be specific — everything not mentioned tends to stay as in the reference."
         ),
         backend: z.enum(["hf", "pollinations"]).default("hf").describe(
           "Edit backend: 'hf' (HuggingFace, needs token) or 'pollinations' " +
@@ -937,18 +937,18 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "HF inference sub-provider. Default auto resolves via the model's own " +
           "image-to-image mapping - always prefer it. Known providers, from the live " +
           "catalog: fal-ai, replicate, wavespeed, together, nscale, zai-org, " +
-          "hf-inference. HF backend only â€” ignored with backend='pollinations'."
+          "hf-inference. HF backend only — ignored with backend='pollinations'."
         ),
         negative_prompt: z.string().default("").describe(
           "What to exclude from the image (e.g. 'blurry, low quality, text, watermark'). " +
-          "HF only â€” ignored with backend='pollinations'."
+          "HF only — ignored with backend='pollinations'."
         ),
         lora_id: z.string().default("").describe(
           "HuggingFace LoRA adapter ID (e.g. 'alvdansen/flux-koda'). HF backend + FLUX base " +
-          "models only, passed through to fal-ai â€” rejected with backend='pollinations'."
+          "models only, passed through to fal-ai — rejected with backend='pollinations'."
         ),
         lora_scale: z.number().min(0).max(2).default(1.0).describe(
-          "Strength of the LoRA adapter. 0.5â€“1.0 is typical; higher = stronger effect."
+          "Strength of the LoRA adapter. 0.5–1.0 is typical; higher = stronger effect."
         ),
         quality: z.enum(["low", "medium", "high", "hd"]).optional().describe(
           "Image quality (backend='pollinations' only, ignored with backend='hf'). " +
@@ -974,9 +974,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         WHY THIS EXISTS: a single reference means "change this image". Several references
         mean "build one image out of all of them" — a person from image 1 wearing the
-        garment from image 2, in the style of image 3, lit like image 4. That is a
-        different task, not a variation of the single-image one, and it needs a model
-        that actually accepts several references.
+        garment from image 2, in the style of image 3. That is a different task, not a
+        variation of the single-image one, and it needs a model that accepts several
+        references.
 
         HOW TO CALL IT
         • 'images' REQUIRES at least 2 entries, 15 max, and order matters. The call is
@@ -1067,13 +1067,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "list_output_images",
       description: text`
-        List images in the plugin output directory â€” the shared workspace holding both
+        List images in the plugin output directory — the shared workspace holding both
         generated results (generate_image/image_edit) and input/reference images
         (image_edit resolves bare filenames against this directory first).
-        Paginated and compact â€” use it instead of reading a large directory at once.
+        Paginated and compact — use it instead of reading a large directory at once.
 
         Use when the user asks which images exist, wants the latest result, or needs to
-        locate an input/reference image for image_edit â€” a prior result or a file placed
+        locate an input/reference image for image_edit — a prior result or a file placed
         in this directory (newest first by default, so limit=1 returns the latest image).
         Entries return 'filename'; for image_edit, prefer the absolute path
         output_directory + filename. Walk large folders page by page via offset.
@@ -1095,7 +1095,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       },
       implementation: safe_impl("list_output_images", async ({ sort, limit, offset, filter }, ctx) => {
         const outputDir = getOutputDir();
-        ctx.status("Listing output imagesâ€¦");
+        ctx.status("Listing output images…");
         const result = await listOutputImages(outputDir, { sort, limit, offset, filter });
         return json({
           output_directory: outputDir,
@@ -1111,7 +1111,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       description: text`
         Browse text-to-image models per backend.
 
-        Sources (parameter 'source') â€” which catalog to list:
+        Sources (parameter 'source') — which catalog to list:
         - "curated" (default): expert-verified HuggingFace IDs for generate_image backend='hf',
           with descriptions and LoRA compatibility info.
         - "image-edit": every HuggingFace model whose pipeline_tag is image-to-image and
@@ -1119,9 +1119,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           curated first (FLUX.2-dev is the default). Do NOT use text-to-image base models
           from the other sources here; they fail with "not supported for task".
         - "provider": HuggingFace IDs served by one inference sub-provider (needs 'provider',
-          e.g. fal-ai, replicate) â€” for backend='hf'.
+          e.g. fal-ai, replicate) — for backend='hf'.
         - "trending" / "downloads": live HuggingFace catalog ranked by trendingScore or
-          downloads â€” for backend='hf'.
+          downloads — for backend='hf'.
         - "pollinations": Pollinations.ai models (requires pollinationsApiKey in config).
           ALIASES: only "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
           "seedream5" (= seedream-5.0-lite). Use FULL IDs for all other models.
@@ -1129,8 +1129,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         MULTI-IMAGE (image_edit): every entry carries image_edit (can it edit at all),
         max_reference_images (recommended count) and multi_image (short label).
         - source="pollinations": values come from the live /image/models catalog
-          (12h cache) and are ADVISORY â€” read multi_image, it names the known traps
-          (e.g. kontext = "single (1) â€” verwirft weitere Referenzen still").
+          (12h cache) and are ADVISORY — read multi_image, it names the known traps
+          (e.g. kontext = "single (1) — verwirft weitere Referenzen still").
         - source="image-edit": HuggingFace only ever gets ONE reference here.
         Verified multi-reference Pollinations models: klein (10), gpt-image-2 (16),
         seedream5 (14), nanobanana-pro (14).
@@ -1144,7 +1144,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         - image_edit: from the model's pipeline_tag. Absent = the model is outside the
           1000 most-liked per task, so HuggingFace simply does not say.
         Every model list is filtered down to what is actually callable: LoRAs and
-        quantizations (GGUF/GPTQ/AWQ/FP8/INT8/â€¦) are adapters, not models; models from
+        quantizations (GGUF/GPTQ/AWQ/FP8/INT8/…) are adapters, not models; models from
         before SDXL (July 2023) are dropped by repository date, so SD 1.x/1.5/2.x and
         their finetunes are gone while SDXL and SD 3.x stay; and a model no provider
         serves is removed, since backend='hf' would fail on it. If the catalog is
@@ -1161,7 +1161,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         tokens); filter narrows it by id/alias/title/publisher.
 
         A note field on a row means max_reference_images does NOT tell the whole story.
-        Most important: the whole FLUX.2 family (klein/pro/flex/max) is multi-image â€”
+        Most important: the whole FLUX.2 family (klein/pro/flex/max) is multi-image —
         klein (curated, 10) for cheap mass edits, pro for quality, flex for typography,
         max for consistency. BFL caps the API at 8 slots; the 10 from the catalog is
         the playground number. pro and max additionally share a 9MP input+output
@@ -1186,7 +1186,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           .describe(
             "HF inference sub-provider (required when source='provider'). " +
             "Examples: fal-ai, nscale, replicate, wavespeed. " +
-            "Not 'pollinations' â€” use source='pollinations' instead."
+            "Not 'pollinations' — use source='pollinations' instead."
           ),
         limit: z.number()
           .min(5)
@@ -1294,7 +1294,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         if (source === "pollinations" && !capabilityMap) {
           referenceNote =
             "max_reference_images/multi_image fehlen: /image/models nicht erreichbar. " +
-            "FÃ¼r 2+ Referenzen empirisch geprÃ¼ft: klein (10), gpt-image-2 (16), seedream5 (14), nanobanana-pro (14).";
+            "Für 2+ Referenzen empirisch geprüft: klein (10), gpt-image-2 (16), seedream5 (14), nanobanana-pro (14).";
         }
         const catalogExtras =
           source === "pollinations" && include_catalog && capabilityMap
@@ -1330,7 +1330,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           ...(source === "pollinations" ? {} : { hf_catalog_cache: hfCatalogInfo }),
           models: models.map((m) => {
             // is_default bezieht sich auf den Default des jeweiligen Katalogs:
-            // pollinations â†’ Pollinations-T2I-Default, image-edit â†’ HF-Edit-Default, sonst HF-T2I-Default.
+            // pollinations → Pollinations-T2I-Default, image-edit → HF-Edit-Default, sonst HF-T2I-Default.
             const row = {
               ...m,
               cost: costMap[m.id]?.cost ?? m.cost,
@@ -1346,7 +1346,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 ...row,
                 image_edit: true,
                 max_reference_images: 1,
-                multi_image: "single (1) â€” HF erlaubt nur eine Referenz",
+                multi_image: "single (1) — HF erlaubt nur eine Referenz",
               };
             }
             if (source === "pollinations" && capabilityMap) {
@@ -1383,10 +1383,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   "Canonical IDs preferred, aliases (flux, kontext, seedream5) also work. " +
                   "Each model's 'cost' comes from the same /image/models catalog (12h cache on disk), not a second request. " +
                   "For image_edit pick by 'multi_image'/'max_reference_images'; the catalog value is advisory. " +
-                  "Use full IDs â€” only flux/kontext/seedream5 are valid aliases. No LoRAs on this backend."
+                  "Use full IDs — only flux/kontext/seedream5 are valid aliases. No LoRAs on this backend."
                 : source === "image-edit"
-                  ? "Editing-native IDs for the image_edit tool (verified image-to-image mapping). image_edit_default_model applies here; current_default_model is the text-to-image default â€” do not use it for editing. " +
-                    "backend='hf' accepts exactly ONE reference image â€” for 2+ use source='pollinations'."
+                  ? "Editing-native IDs for the image_edit tool (verified image-to-image mapping). image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing. " +
+                    "backend='hf' accepts exactly ONE reference image — for 2+ use source='pollinations'."
                   : "HuggingFace IDs for generate_image backend='hf'. Pass model_id to generate_image to use a model.",
         });
       }),
@@ -1395,7 +1395,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "list_loras",
       description: text`
-        Search HuggingFace for LoRA adapters (HF backend only â€” Pollinations models have no LoRA support).
+        Search HuggingFace for LoRA adapters (HF backend only — Pollinations models have no LoRA support).
 
         IMPORTANT: Avoid using the 'search' keyword filter! It often returns zero results because HuggingFace search is very strict.
         Instead, use only 'base_model' to find all compatible LoRAs, then pick from the results.
@@ -1417,7 +1417,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         search: z.string()
           .default("")
           .describe(
-            "AVOID using this â€” HuggingFace search is strict and often returns no results. " +
+            "AVOID using this — HuggingFace search is strict and often returns no results. " +
               "Only use as a last resort with a broad keyword (e.g. 'anime'). " +
               "Prefer using only base_model."
           ),
@@ -1453,7 +1453,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           usage: cleanBaseModel
             ? `These LoRAs are compatible with ${cleanBaseModel}. Pass the 'id' field as lora_id in generate_image (backend='hf').`
             : "Pass the 'id' field as lora_id in generate_image (backend='hf'). Use base_model to filter for specific models.",
-          note: "LoRA generation uses fal-ai provider. lora_scale default is 1.0; try 0.6â€“0.9 for subtle effects.",
+          note: "LoRA generation uses fal-ai provider. lora_scale default is 1.0; try 0.6–0.9 for subtle effects.",
         });
       }),
     }),
@@ -1461,27 +1461,27 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "inclination_prompt_list",
       description: text`
-        GesamtÃ¼bersicht Ã¼ber das Neigungsprompt-System (READ-ONLY, verÃ¤ndert nichts) â€“ einheitlicher Prefix inclination_prompt_.
+        Gesamtübersicht über das Neigungsprompt-System (READ-ONLY, verändert nichts) – einheitlicher Prefix inclination_prompt_.
 
         Drei Abschnitte, oben steht zuerst, was WIRKLICH injiziert wird:
-        - active: state "leer"|"geladen" + profile_count/record_count + die aktiven EintrÃ¤ge
-          (Records als ref "book/id"). state "leer" heiÃŸt: es wird nichts injiziert.
+        - active: state "leer"|"geladen" + profile_count/record_count + die aktiven Einträge
+          (Records als ref "book/id"). state "leer" heißt: es wird nichts injiziert.
         - profiles: alle Stimmungsprompts. count/active_count; source+readonly stehen am
-          Abschnittskopf, wenn alle EintrÃ¤ge gleich sind, sonst pro Eintrag. Aktive EintrÃ¤ge zuerst.
-        - library: records_total, facets (Aspect-Ãœbersicht) und books mit record_count,
+          Abschnittskopf, wenn alle Einträge gleich sind, sonst pro Eintrag. Aktive Einträge zuerst.
+        - library: records_total, facets (Aspect-Übersicht) und books mit record_count,
           active_count und den Facetten des jeweiligen Buchs.
 
-        filter: Substring Ã¼ber Profile, BÃ¼cher und Records (id/aspect/keys/Text).
-        detail:"full" hÃ¤ngt alle Texte an (teuer); compact = nur Ãœbersicht (default).
-        "next" enthÃ¤lt fertige Tool-Aufrufe â€” Achtung: die Parameter heiÃŸen name/book, nicht id.
+        filter: Substring über Profile, Bücher und Records (id/aspect/keys/Text).
+        detail:"full" hängt alle Texte an (teuer); compact = nur Übersicht (default).
+        "next" enthält fertige Tool-Aufrufe — Achtung: die Parameter heißen name/book, nicht id.
 
         Das ist DAS Einstiegstool, wenn unklar ist, was vorhanden ist und was gerade aktiv ist.
-        Etwas Ã¤ndern/anlegen/aktivieren â†’ inclination_prompt_manage.
-        Einen Record im Detail nachschlagen â†’ inclination_prompt_library.
+        Etwas ändern/anlegen/aktivieren → inclination_prompt_manage.
+        Einen Record im Detail nachschlagen → inclination_prompt_library.
       `,
       parameters: {
-        filter: z.string().default("").describe("Optional: Substring-Filter Ã¼ber Profile, BÃ¼cher und Records (id/aspect/keys/Text). Leer = alles."),
-        detail: z.enum(["compact", "full"]).default("compact").describe("full = zusÃ¤tzlich alle Prompt-/Content-Texte (teuer); compact = nur Ãœbersicht (default)."),
+        filter: z.string().default("").describe("Optional: Substring-Filter über Profile, Bücher und Records (id/aspect/keys/Text). Leer = alles."),
+        detail: z.enum(["compact", "full"]).default("compact").describe("full = zusätzlich alle Prompt-/Content-Texte (teuer); compact = nur Übersicht (default)."),
       },
       implementation: safe_impl("inclination_prompt_list", async ({ filter = "", detail = "compact" }) => {
         const full = detail === "full";
@@ -1532,7 +1532,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             profile_count: activeProfileIds.length,
             record_count: activeRefs.length,
             ...(activeTotal === 0
-              ? { hint: "Nichts aktiv â€” es wird kein Stimmungsprompt/Record injiziert." }
+              ? { hint: "Nichts aktiv — es wird kein Stimmungsprompt/Record injiziert." }
               : {}),
             profiles: activeProfileIds.map((id) => ({
               id,
@@ -1584,16 +1584,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           ...(f ? { filter: f } : {}),
           next: {
             activate:
-              "inclination_prompt_manage({action:'activate', store:'profile', name:'<profil-id>'}) â€” " +
+              "inclination_prompt_manage({action:'activate', store:'profile', name:'<profil-id>'}) — " +
               "bei store:'book' = name:'<book-id>' (aktiviert ALLE Records), bei store:'record' = " +
               "book:'<book>' + name:'<record>'. Idempotent, kein Toggle; aus ref 'skillset/a01' wird " +
               "book:'skillset' + name:'a01'. action:'clear' leert beide Stacks.",
-            deactivate: "inclination_prompt_manage({action:'deactivate', â€¦}) mit denselben Angaben",
+            deactivate: "inclination_prompt_manage({action:'deactivate', …}) mit denselben Angaben",
             create:
-              "inclination_prompt_manage({action:'create', store:'profile'|'book'|'record', name, description, â€¦})",
+              "inclination_prompt_manage({action:'create', store:'profile'|'book'|'record', name, description, …})",
             read_text:
-              "inclination_prompt_library({query:'<id oder keyword>'}) fÃ¼r den Volltext eines Records, " +
-              "detail:'full' hier fÃ¼r alle Texte auf einmal",
+              "inclination_prompt_library({query:'<id oder keyword>'}) für den Volltext eines Records, " +
+              "detail:'full' hier für alle Texte auf einmal",
           },
         });
       }),
@@ -1602,42 +1602,42 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "inclination_prompt_manage",
       description: text`
-        Einziges Tool, das etwas am Neigungsprompt-System VERÃ„NDERT (Inhalte und aktiver Stack) â€“ einheitlicher Prefix inclination_prompt_.
+        Einziges Tool, das etwas am Neigungsprompt-System VERÄNDERT (Inhalte und aktiver Stack) – einheitlicher Prefix inclination_prompt_.
 
-        store wÃ¤hlt die DomÃ¤ne:
+        store wählt die Domäne:
         - profile (default): Stimmungsprompts, die injiziert werden (directives.json).
-        - book: Container der Bibliothek (library.json) â€” id + description; delete rÃ¤umt auch die Records.
-        - record: Einzelner Bibliotheks-Eintrag {book, aspect, keys, content} â€” on-demand Nachschlagewerk,
+        - book: Container der Bibliothek (library.json) — id + description; delete räumt auch die Records.
+        - record: Einzelner Bibliotheks-Eintrag {book, aspect, keys, content} — on-demand Nachschlagewerk,
           wird NICHT injiziert, solange er nicht per activate in den Stack wandert.
 
-        action (alle idempotent â€” kein verstecktes Umschalten wie frÃ¼her bei _set):
+        action (alle idempotent — kein verstecktes Umschalten wie früher bei _set):
         - create: profile {description, prompt} | book {description} | record {book, name, aspect, content, keys}
           (record-create legt ein fehlendes Buch automatisch an und meldet das).
         - update / delete / get: wie erwartet; curated (skillset, lorebook, Beispiel-Profile) bleiben read-only.
-        - activate / deactivate: Ziel hÃ¤ngt am store; store:"book" aktiviert/deaktiviert ALLE Records des Buchs.
+        - activate / deactivate: Ziel hängt am store; store:"book" aktiviert/deaktiviert ALLE Records des Buchs.
         - clear: leert BEIDE Stacks (profile-Stack + Record-Stack), store wird ignoriert.
         Jede Mutation meldet active_profiles + active_records (Stack-Sichtbarkeit).
 
-        Nur lesen: inclination_prompt_list (GesamtÃ¼bersicht) und inclination_prompt_library (Record-Volltext).
+        Nur lesen: inclination_prompt_list (Gesamtübersicht) und inclination_prompt_library (Record-Volltext).
       `,
       parameters: {
         store: z.enum(["profile", "book", "record"]).default("profile").describe(
-          "Ziel-DomÃ¤ne: profile = Stimmungsprompt (injiziert), book = Bibliotheks-Buch, record = Bibliotheks-Eintrag."
+          "Ziel-Domäne: profile = Stimmungsprompt (injiziert), book = Bibliotheks-Buch, record = Bibliotheks-Eintrag."
         ),
         action: z.enum(["create", "update", "delete", "get", "activate", "deactivate", "clear", "list"]).describe(
           "Operation. 'list' existiert nicht mehr (Fehler nennt inclination_prompt_list)."
         ),
         name: z.string().default("").describe(
-          "Id (a-z,0-9,-,_) von Profil, Buch oder Record. Bei store:'record' zusÃ¤tzlich book angeben."
+          "Id (a-z,0-9,-,_) von Profil, Buch oder Record. Bei store:'record' zusätzlich book angeben."
         ),
-        book: z.string().default("").describe("Buch-Id â€” Pflicht bei store:'record'."),
+        book: z.string().default("").describe("Buch-Id — Pflicht bei store:'record'."),
         aspect: z.string().default("").describe(
-          "Facette fÃ¼r records: session, role, positions, bondage, sensation, play, training, tones, aftercare, spaces, safety, realm (oder eigener Slug)."
+          "Facette für records: session, role, positions, bondage, sensation, play, training, tones, aftercare, spaces, safety, realm (oder eigener Slug)."
         ),
-        description: z.string().default("").describe("Kurzbeschreibung/Titel â€” profile.create/update, book.create/update."),
-        prompt: z.string().default("").describe("Neigungsprompt-Text (indirekt, nicht Bildinhalt) â€” profile.create/update."),
-        content: z.string().default("").describe("Record-Volltext â€” record.create/update."),
-        keys: z.string().default("").describe("Komma-getrennte SuchschlÃ¼ssel â€” record.create/update."),
+        description: z.string().default("").describe("Kurzbeschreibung/Titel — profile.create/update, book.create/update."),
+        prompt: z.string().default("").describe("Neigungsprompt-Text (indirekt, nicht Bildinhalt) — profile.create/update."),
+        content: z.string().default("").describe("Record-Volltext — record.create/update."),
+        keys: z.string().default("").describe("Komma-getrennte Suchschlüssel — record.create/update."),
       },
       implementation: safe_impl(
         "inclination_prompt_manage",
@@ -1663,12 +1663,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
           if (!action) {
             throw new Error(
-              'action ist Pflicht: create, update, delete, get, activate, deactivate oder clear (store wÃ¤hlt profile|book|record).'
+              'action ist Pflicht: create, update, delete, get, activate, deactivate oder clear (store wählt profile|book|record).'
             );
           }
           if (action === "list") {
             throw new Error(
-              'action:"list" wurde entfernt â€” inclination_prompt_list ist die read-only GesamtÃ¼bersicht (Profile + BÃ¼cher + aktive Stacks).'
+              'action:"list" wurde entfernt — inclination_prompt_list ist die read-only Gesamtübersicht (Profile + Bücher + aktive Stacks).'
             );
           }
           if (action === "clear") {
@@ -1678,7 +1678,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               success: true,
               action,
               ...stack(),
-              message: "Beide Stacks geleert â€” alle Profile und Bibliotheks-Records deaktiviert.",
+              message: "Beide Stacks geleert — alle Profile und Bibliotheks-Records deaktiviert.",
             });
           }
 
@@ -1686,8 +1686,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             if (!cleanName) throw new Error('name (Profil-Id) ist Pflicht bei store:"profile".');
             switch (action) {
               case "create": {
-                if (!description.trim()) throw new Error("description ist Pflicht fÃ¼r profile.create.");
-                if (!prompt.trim()) throw new Error("prompt ist Pflicht fÃ¼r profile.create.");
+                if (!description.trim()) throw new Error("description ist Pflicht für profile.create.");
+                if (!prompt.trim()) throw new Error("prompt ist Pflicht für profile.create.");
                 const created = createDirective(cleanName, description, prompt, "");
                 return json({
                   success: true,
@@ -1702,7 +1702,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 const hasDesc = description.trim().length > 0;
                 const hasPrompt = prompt.trim().length > 0;
                 if (!hasDesc && !hasPrompt)
-                  throw new Error("FÃ¼r profile.update mindestens description oder prompt mitgeben.");
+                  throw new Error("Für profile.update mindestens description oder prompt mitgeben.");
                 const updated = updateDirective(
                   cleanName,
                   hasDesc ? description : undefined,
@@ -1713,7 +1713,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               }
               case "delete": {
                 deleteDirective(cleanName, "");
-                return json({ success: true, store, action, deleted: cleanName, ...stack(), message: `Profil "${cleanName}" gelÃ¶scht.` });
+                return json({ success: true, store, action, deleted: cleanName, ...stack(), message: `Profil "${cleanName}" gelöscht.` });
               }
               case "get": {
                 const found = getDirectiveById(cleanName, "");
@@ -1730,7 +1730,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                     action,
                     already_active: true,
                     ...stack(),
-                    message: `Profil "${cleanName}" ist bereits aktiv â€” keine Ã„nderung.`,
+                    message: `Profil "${cleanName}" ist bereits aktiv — keine Änderung.`,
                   });
                 }
                 const activated = addActiveDirective(cleanName, "");
@@ -1740,7 +1740,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   action,
                   activated: { id: activated.id, description: activated.description },
                   ...stack(),
-                  message: `Profil "${activated.id}" aktiviert. Wird indirekt bei generate_image/image_edit berÃ¼cksichtigt.`,
+                  message: `Profil "${activated.id}" aktiviert. Wird indirekt bei generate_image/image_edit berücksichtigt.`,
                 });
               }
               case "deactivate": {
@@ -1753,7 +1753,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                     action,
                     already_inactive: true,
                     ...stack(),
-                    message: `Profil "${cleanName}" war nicht aktiv â€” keine Ã„nderung.`,
+                    message: `Profil "${cleanName}" war nicht aktiv — keine Änderung.`,
                   });
                 }
                 removeActiveDirective(cleanName);
@@ -1775,11 +1775,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   action,
                   book: created,
                   ...stack(),
-                  message: `Buch "${created.id}" erstellt. Records: inclination_prompt_manage({store:"record", action:"create", book:"${created.id}", â€¦}).`,
+                  message: `Buch "${created.id}" erstellt. Records: inclination_prompt_manage({store:"record", action:"create", book:"${created.id}", …}).`,
                 });
               }
               case "update": {
-                if (!description.trim()) throw new Error("description ist Pflicht fÃ¼r book.update.");
+                if (!description.trim()) throw new Error("description ist Pflicht für book.update.");
                 const updated = updateBook(cleanName, description);
                 return json({ success: true, store, action, book: updated, ...stack(), message: `Buch "${updated.id}" aktualisiert.` });
               }
@@ -1792,7 +1792,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   deleted: cleanName,
                   deleted_records: deletedRecords,
                   ...stack(),
-                  message: `Buch "${cleanName}" gelÃ¶scht${deletedRecords.length ? ` inkl. ${deletedRecords.length} Record(s)` : ""}.`,
+                  message: `Buch "${cleanName}" gelöscht${deletedRecords.length ? ` inkl. ${deletedRecords.length} Record(s)` : ""}.`,
                 });
               }
               case "get": {
@@ -1816,7 +1816,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 if (!found) throw bookNotFound(cleanName);
                 const own = getAllRecords().filter((r) => r.book === found.id);
                 if (own.length === 0) {
-                  return json({ success: true, store, action, activated_records: 0, ...stack(), message: `Buch "${found.id}" enthÃ¤lt keine Records.` });
+                  return json({ success: true, store, action, activated_records: 0, ...stack(), message: `Buch "${found.id}" enthält keine Records.` });
                 }
                 let added = 0;
                 let already = 0;
@@ -1839,8 +1839,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   ...stack(),
                   message:
                     added > 0
-                      ? `${added} Record(s) aus "${found.id}" aktiviert (${w} WÃ¶rter Injektion). Stilistisch verweben, nicht wÃ¶rtlich prÃ¤fixen.`
-                      : `Alle ${already} Record(s) von "${found.id}" waren bereits aktiv â€” keine Ã„nderung.`,
+                      ? `${added} Record(s) aus "${found.id}" aktiviert (${w} Wörter Injektion). Stilistisch verweben, nicht wörtlich präfixen.`
+                      : `Alle ${already} Record(s) von "${found.id}" waren bereits aktiv — keine Änderung.`,
                 });
               }
               case "deactivate": {
@@ -1855,7 +1855,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   ...stack(),
                   message: removed
                     ? `${removed} Record(s) aus "${found.id}" deaktiviert.`
-                    : `Keine aktiven Records in "${found.id}" â€” keine Ã„nderung.`,
+                    : `Keine aktiven Records in "${found.id}" — keine Änderung.`,
                 });
               }
               default:
@@ -1870,8 +1870,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           switch (action) {
             case "create": {
               if (!aspect.trim())
-                throw new Error(`aspect ist Pflicht fÃ¼r record.create. Bekannte Facetten: ${listAspects().join(", ")}.`);
-              if (!content.trim()) throw new Error("content ist Pflicht fÃ¼r record.create.");
+                throw new Error(`aspect ist Pflicht für record.create. Bekannte Facetten: ${listAspects().join(", ")}.`);
+              if (!content.trim()) throw new Error("content ist Pflicht für record.create.");
               const { record, bookCreated } = createRecord({
                 book: cleanBook,
                 id: cleanName,
@@ -1897,7 +1897,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               const hasKeys = keys.trim().length > 0;
               const hasContent = content.trim().length > 0;
               if (!hasAspect && !hasKeys && !hasContent)
-                throw new Error("FÃ¼r record.update mindestens aspect, keys oder content mitgeben.");
+                throw new Error("Für record.update mindestens aspect, keys oder content mitgeben.");
               const updated = updateRecord(cleanBook, cleanName, {
                 ...(hasAspect ? { aspect } : {}),
                 ...(hasKeys ? { keys: splitKeys(keys) } : {}),
@@ -1907,7 +1907,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             }
             case "delete": {
               deleteRecord(cleanBook, cleanName);
-              return json({ success: true, store, action, deleted: ref, ...stack(), message: `Record "${ref}" gelÃ¶scht.` });
+              return json({ success: true, store, action, deleted: ref, ...stack(), message: `Record "${ref}" gelöscht.` });
             }
             case "get": {
               const found = getRecordById(cleanBook, cleanName);
@@ -1923,7 +1923,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             case "activate": {
               const { record, alreadyActive } = addActiveRecord(cleanBook, cleanName);
               if (alreadyActive) {
-                return json({ success: true, store, action, already_active: true, ...stack(), message: `Record "${ref}" ist bereits aktiv â€” keine Ã„nderung.` });
+                return json({ success: true, store, action, already_active: true, ...stack(), message: `Record "${ref}" ist bereits aktiv — keine Änderung.` });
               }
               return json({
                 success: true,
@@ -1932,14 +1932,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 activated: { ref: refOf(record.book, record.id), book: record.book, id: record.id, aspect: record.aspect },
                 estimated_words: words(record.content),
                 ...stack(),
-                message: `Record "${ref}" aktiviert (${words(record.content)} WÃ¶rter). Wird indirekt bei generate_image/image_edit verwebt.`,
+                message: `Record "${ref}" aktiviert (${words(record.content)} Wörter). Wird indirekt bei generate_image/image_edit verwebt.`,
               });
             }
             case "deactivate": {
               const found = getRecordById(cleanBook, cleanName);
               if (!found) throw recordNotFound(ref);
               if (!removeActiveRecord(cleanBook, cleanName)) {
-                return json({ success: true, store, action, already_inactive: true, ...stack(), message: `Record "${ref}" war nicht aktiv â€” keine Ã„nderung.` });
+                return json({ success: true, store, action, already_inactive: true, ...stack(), message: `Record "${ref}" war nicht aktiv — keine Änderung.` });
               }
               return json({ success: true, store, action, deactivated: ref, ...stack(), message: `Record "${ref}" deaktiviert.` });
             }
@@ -1953,18 +1953,18 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "inclination_prompt_library",
       description: text`
-        Nachschlagewerk fÃ¼r Technik-/Stil-Records â€” BÃ¼cher "skillset" (A01â€“A33) und "lorebook" (Masken, Reiche, TÃ¶ne, Filter) plus eigene BÃ¼cher â€“ einheitlicher Prefix inclination_prompt_. READ-ONLY, verÃ¤ndert nichts.
+        Nachschlagewerk für Technik-/Stil-Records — Bücher "skillset" (A01–A33) und "lorebook" (Masken, Reiche, Töne, Filter) plus eigene Bücher – einheitlicher Prefix inclination_prompt_. READ-ONLY, verändert nichts.
 
-        - query "" â†’ kompakter Katalog (ref, id, book, aspect, keys) + facets + books.
-        - query = exakte id ('A08', 'realm-combos', 'tone-rage') oder Keyword ('impact', 'aftercare') â†’ voller Record.
-        - query = Wortteil â†’ Trefferliste (greift auf id, keys, aspect, content).
+        - query "" → kompakter Katalog (ref, id, book, aspect, keys) + facets + books.
+        - query = exakte id ('A08', 'realm-combos', 'tone-rage') oder Keyword ('impact', 'aftercare') → voller Record.
+        - query = Wortteil → Trefferliste (greift auf id, keys, aspect, content).
         - book / aspect filtern (z.B. book:"lorebook", aspect:"realm").
 
-        Der Record-Inhalt ist STAGING-GUIDANCE FÃœR DICH: indirekt in den nÃ¤chsten
-        generate_image/image_edit-Prompt weben, nicht wÃ¶rtlich als PrÃ¤fix kopieren.
+        Der Record-Inhalt ist STAGING-GUIDANCE FÜR DICH: indirekt in den nächsten
+        generate_image/image_edit-Prompt weben, nicht wörtlich als Präfix kopieren.
         On-demand, nicht injiziert. Dauerhafter Style = in den Stack heben:
-        inclination_prompt_manage({store:"record", action:"activate", â€¦}).
-        GesamtÃ¼bersicht (Profile, BÃ¼cher, aktive Stacks) â†’ inclination_prompt_list.
+        inclination_prompt_manage({store:"record", action:"activate", …}).
+        Gesamtübersicht (Profile, Bücher, aktive Stacks) → inclination_prompt_list.
       `,
       parameters: {
         query: z.string().default("").describe("Record-Id, Keyword oder Wortteil; '' = kompakter Katalog."),
@@ -2025,17 +2025,17 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             record: { ref: refOf(r.book, r.id), id: r.id, book: r.book, aspect: r.aspect, keys: r.keys, content: r.content, source: r.source },
             is_active: activeRefs.includes(refOf(r.book, r.id)),
             usage:
-              "Staging-Guidance: indirekt in den nÃ¤chsten generate_image/image_edit-Prompt einweben " +
-              "(nicht wÃ¶rtlich prÃ¤fixen). On-demand, nicht injiziert â€” dauerhaft aktiv Ã¼ber " +
+              "Staging-Guidance: indirekt in den nächsten generate_image/image_edit-Prompt einweben " +
+              "(nicht wörtlich präfixen). On-demand, nicht injiziert — dauerhaft aktiv über " +
               `inclination_prompt_manage({store:"record", action:"activate", book:"${r.book}", name:"${r.id}"}).`,
           });
         }
 
         if (res.records.length === 0) {
           throw new Error(
-            `Keine Treffer fÃ¼r "${query.trim()}"${cleanBook ? ` in Buch "${cleanBook}"` : ""}${cleanAspect ? ` (aspect "${cleanAspect}")` : ""}. ` +
-              `Mit query:"" fÃ¼r den Katalog. Facetten: ${facets.map((f) => `${f.aspect}(${f.count})`).join(", ") || listAspects().join(", ")}. ` +
-              `BÃ¼cher: ${bookList.map((b) => `${b.id}(${b.record_count})`).join(", ")}.`
+            `Keine Treffer für "${query.trim()}"${cleanBook ? ` in Buch "${cleanBook}"` : ""}${cleanAspect ? ` (aspect "${cleanAspect}")` : ""}. ` +
+              `Mit query:"" für den Katalog. Facetten: ${facets.map((f) => `${f.aspect}(${f.count})`).join(", ") || listAspects().join(", ")}. ` +
+              `Bücher: ${bookList.map((b) => `${b.id}(${b.record_count})`).join(", ")}.`
           );
         }
 
@@ -2047,8 +2047,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           matches: res.records.map(compact),
           facets,
           usage: sameId
-            ? `Die id existiert in mehreren BÃ¼chern â€” mit book einschrÃ¤nken (Treffer: ${res.records.map((r) => r.book).join(", ")}).`
-            : `Mehrere Treffer â€” wÃ¤hle eine exakte ref, z.B. inclination_prompt_library({query:"${res.records[0].id}"}).`,
+            ? `Die id existiert in mehreren Büchern — mit book einschränken (Treffer: ${res.records.map((r) => r.book).join(", ")}).`
+            : `Mehrere Treffer — wähle eine exakte ref, z.B. inclination_prompt_library({query:"${res.records[0].id}"}).`,
         });
       }),
     }),
@@ -2057,7 +2057,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
   if (!inclinationsEnabled) {
     // Config-Schalter aus: Neigungsprompt-Tools nicht registrieren
-    // (Injektion lÃ¤uft separat Ã¼ber promptPreprocessor).
+    // (Injektion läuft separat über promptPreprocessor).
     return tools.filter((t) => !t.name.startsWith("inclination_prompt_"));
   }
 

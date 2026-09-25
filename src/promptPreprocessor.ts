@@ -21,12 +21,15 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
      Note: kontext/seedream5 have STRICT filters — fashion-editorial often flagged. grok-imagine-image-2.0 does NOT filter fashion-editorial (safe=off).
      For permissive fashion-editorial takes, prefer grok-imagine-image-2.0 over kontext/seedream5.
 • User provides a reference image + change instruction            → image_edit (reference = KEEP, prompt = CHANGE)
-   - 'image': prefer the ABSOLUTE file_path from an earlier generate_image/image_edit result —
+   - 'image': the FIRST reference, a plain STRING — never an array. Prefer the ABSOLUTE
+     file_path from an earlier generate_image/image_edit result —
      bare/relative paths resolve against the plugin process CWD, not the chat directory
+   - 'images': OPTITIONAL further references, only for 2+ images and only with
+     backend="pollinations": image="/abs/subject.jpg", images=["/abs/style.png"]
    - backend="hf" (default): needs HF token; editing-native models only → list_models source="image-edit"
      (FLUX.2-dev default, Kontext-dev, Qwen-Image-Edit — base T2I models have no I2I mapping)
    - backend="pollinations": needs pollinationsApiKey; POST /v1/images/edits
-     MULTI-IMAGE: for 2+ references pass image=["/abs/subject.jpg", "/abs/style.png"]
+     MULTI-IMAGE: for 2+ references put the first in 'image' and the rest in 'images',
      and pick a model with a high max_reference_images; verified examples:
      black-forest-labs/flux.2-klein-4b (10), google/gemini-2.5-flash-image (3),
      bytedance/seedream-5.0-lite (14), openai/gpt-image-2 (16). Exceeding the declared

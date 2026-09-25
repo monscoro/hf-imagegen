@@ -64,6 +64,55 @@ function json(obj: unknown): string {
   return JSON.stringify(obj, null, 2);
 }
 
+/**
+ * Sammelt die Referenz-Reihenfolge fuer image_edit: 'image' (erste Referenz, immer
+ * String) gefolgt von 'images' (optionale weitere Referenzen).
+ *
+ * Behebt zudem den haeufigsten LLM-Fehler: ein Array wird als JSON-String in
+ * 'image' geschickt (image: "[\"C:\\\\a.jpg\", \"C:\\\\b.jpg\"]"), weil das Schema
+ * frueher eine anyOf-Union war. Solche Strings werden hier als Array erkannt und
+ * aufgeloest, statt als Dateiname mit dem Literal '["..."]' zu scheitern.
+ */
+function normalizeImageEditReferences(image: string, images?: string[]): string[] {
+  const clean = (value: string): string => value.trim();
+  let head: string[];
+
+  if (image.trim().startsWith("[")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(image);
+    } catch {
+      parsed = undefined;
+    }
+    if (Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string")) {
+      head = (parsed as string[]).map(clean);
+    } else {
+      throw new Error(
+        `The 'image' parameter must be a single path/URL string, but it looks like a ` +
+        `malformed array: ${image.slice(0, 120)}. Pass the first reference as 'image' and any ` +
+        `further references as 'images' (e.g. images=["/abs/b.jpg"]).`
+      );
+    }
+  } else {
+    head = [clean(image)];
+  }
+
+  const refs = [...head, ...(images ?? []).map(clean)];
+  if (refs.length === 0) {
+    throw new Error(
+      `No reference image was supplied ('image' resolved to an empty list). Pass a single ` +
+        `path/URL as 'image'.`
+    );
+  }
+  if (refs.some((value) => !value)) {
+    throw new Error("Every image entry must be a non-empty file path or public image URL.");
+  }
+  if (refs.length > 16) {
+    throw new Error(`At most 16 reference images are supported, but ${refs.length} were supplied.`);
+  }
+  return refs;
+}
+
 function safe_impl<T extends Record<string, unknown>>(
   name: string,
   fn: (params: T, ctx: ToolCallContext) => Promise<string>
@@ -479,14 +528,19 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         the instruction transforms material, light, mood or details. Use generate_image
         instead when there is no reference image yet.
 
-        'image' — one path/URL, or an ordered array for multi-reference edits:
-        • Prefer the ABSOLUTE file_path from an earlier generate_image/image_edit result.
-          Relative paths resolve against the plugin process CWD, not the chat directory;
-          a bare filename also works (output directory first), as does a public URL.
-        • Arrays with 2+ entries require backend='pollinations'. All references go into
-          ONE request, so the prompt can assign roles per image:
-          "use image 1 as the subject, image 2 only for the visual style".
-        • HF accepts exactly one image and rejects arrays.
+        REFERENCE IMAGES
+        • 'image' = the FIRST reference, always a plain string. Prefer the ABSOLUTE
+          file_path from an earlier generate_image/image_edit result; a bare filename
+          (output directory first) and public URLs also work, but relative paths resolve
+          against the plugin process CWD, not the chat directory. For a single-image edit
+          this is all you need — leave 'images' unset.
+        • 'images' = OPTIONAL further references, 1–15, in order. Set it ONLY for 2+
+          references and ONLY with backend='pollinations':
+          image='/abs/subject.jpg', images=['/abs/style.png'].
+          Never put an array in 'image' — that parameter is a string.
+        • All references go into ONE request, so the prompt can address them by
+          position: "use image 1 as the subject and image 2 only as the visual style".
+        • HF accepts exactly one reference and rejects additional ones.
 
         BACKENDS
         • backend='hf' (default, one image): needs HF token. Editing-native models only —
@@ -515,14 +569,18 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         quota.remaining counts the plugin's own daily limit, not HF credits.
       `,
       parameters: {
-        image: z.union([
-          z.string().trim().min(1),
-          z.array(z.string().trim().min(1)).min(1).max(16),
-        ]).describe(
-          "One reference image, or an ordered array of 1–16. Absolute file_path from an earlier " +
-          "result is PREFERRED; a bare filename, relative path or public http(s) URL also work. " +
-          "Order is preserved and the prompt can address images by position. 2+ entries require " +
-          "backend='pollinations'."
+        image: z.string().trim().min(1).describe(
+          "The FIRST reference image — always a plain string, never an array. Absolute file_path " +
+          "from an earlier result is PREFERRED; a bare filename, relative path or public http(s) " +
+          "URL also work."
+        ),
+        images: z.array(z.string().trim().min(1)).min(1).max(15).optional().describe(
+          "OPTIONAL further reference images, 1–15 entries, in order. Only set this for 2+ " +
+          "references, and only with backend='pollinations'. Example: image='/abs/subject.jpg', " +
+          "images=['/abs/style.png','/abs/pose.jpg']. All references — 'image' first, then " +
+          "'images' — go into ONE request, so the prompt can address them by position: " +
+          "'use image 1 as the subject and image 2 only as the style reference'. " +
+          "Omit 'images' for a normal single-image edit."
         ),
         prompt: z.string().min(1).describe(
           "CHANGE instruction: what to transform (subject, garment, material, light, mood). " +
@@ -537,8 +595,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "('black-forest-labs/FLUX.2-dev'); see list_models source='image-edit'. " +
           "backend='pollinations': full ID or alias, blank = 'x-ai/grok-imagine-image-quality' " +
           "(few filters, default). 'black-forest-labs/flux.1-kontext-pro' (alias kontext, free) " +
-          "is the precise choice for a single reference. For 3+ references use a multi-image " +
-          "model: klein (10), seedream5 (14), nanobanana (3), gpt-image-2 (16)."
+          "is the precise choice for a single reference (it drops further references). " +
+          "For 2+ references use a multi-image model: klein (10), seedream5 (14), " +
+          "nanobanana (3), gpt-image-2 (16)."
         ),
         provider: z.string().default("auto").describe(
           "HF inference sub-provider (auto, fal-ai, replicate, wavespeed). " +
@@ -568,12 +627,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "timestamp only. Pass it when the user asks to name/label the file."
         ),
       },
-      implementation: safe_impl("image_edit", async ({ image, prompt, backend, model_id, provider, negative_prompt, lora_id, lora_scale, quality, name }, ctx) => {
+      implementation: safe_impl("image_edit", async ({ image, images, prompt, backend, model_id, provider, negative_prompt, lora_id, lora_scale, quality, name }, ctx) => {
         const usePollinations = backend === "pollinations";
-        const imageInputs = (Array.isArray(image) ? image : [image]).map((value) => value.trim());
-        if (imageInputs.some((value) => !value)) {
-          throw new Error("Every image entry must be a non-empty file path or public image URL.");
-        }
+        const imageInputs = normalizeImageEditReferences(image, images);
         if (!usePollinations && imageInputs.length !== 1) {
           throw new Error(
             `backend='hf' supports exactly one reference image, but ${imageInputs.length} were supplied. ` +

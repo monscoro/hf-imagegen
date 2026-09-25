@@ -87,18 +87,19 @@ Returns `file_path`, `output_dir`, `backend`, `model_used`, sizes, a `quota` blo
 ### `image_edit` — Edit one or many reference images (hf or pollinations)
 
 ```
-image_edit(image, prompt, backend?, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?, quality?, name?)
+image_edit(image, images?, prompt, backend?, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?, quality?, name?)
 ```
 
-Reference image(s) = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` accepts either one string or an ordered array of 1–16 strings. Absolute local paths are preferred (the `file_path` returned by an earlier result); bare filenames, relative paths and public URLs also work.
+Reference image(s) = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` is the **first** reference and is always a plain string. Absolute local paths are preferred (the `file_path` returned by an earlier result); bare filenames, relative paths and public URLs also work. Leave `images` unset for a single-image edit.
 
-**Multi-image editing is supported by the `pollinations` backend:** pass 2+ references as an array and all are uploaded together in one `POST /v1/images/edits` request. The tool reads `max_reference_images` from the live model catalog and puts a note in the result when the count exceeds it — it does **not** block, because the catalog is only advisory (`x-ai/grok-imagine-image-quality` declares 1 but processes 2, `flux.1-kontext-pro` declares 1 and silently drops the second image). Models verified to combine several references: `black-forest-labs/flux.2-klein-4b` (10), `google/gemini-2.5-flash-image` (3), `bytedance/seedream-5.0-lite` (14), `openai/gpt-image-2` (16). HF remains single-reference only.
+**Multi-image editing is supported by the `pollinations` backend:** put the first reference in `image` and up to 15 more in `images` — all are uploaded together in one `POST /v1/images/edits` request, order preserved, so the prompt can address them by position. (An earlier version accepted an array in `image`; models that stringified that array into a single string caused "Reference image not found" errors, so `image` is string-only and a stringified array is still auto-recovered for compatibility.) The tool reads `max_reference_images` from the live model catalog and puts a note in the result when the count exceeds it — it does **not** block, because the catalog is only advisory (`x-ai/grok-imagine-image-quality` declares 1 but processes 2, `flux.1-kontext-pro` declares 1 and silently drops the second image). Models verified to combine several references: `black-forest-labs/flux.2-klein-4b` (10), `google/gemini-2.5-flash-image` (3), `bytedance/seedream-5.0-lite` (14), `openai/gpt-image-2` (16). HF remains single-reference only.
 
 | Parameter | Default | Description |
 |---|---|---|
-| `image` | _(required)_ | One image path/URL, or an ordered array of 1–16 paths/URLs. Arrays with 2+ entries require `backend="pollinations"`. |
+| `image` | _(required)_ | The first reference image as a string. An array here is rejected/auto-recovered — use `images` instead. |
+| `images` | unset | Optional further references (1–15, ordered) for 2+ image edits; requires `backend="pollinations"`. |
 | `backend` | `"hf"` | `"hf"` (needs HF token, exactly one image) or `"pollinations"` (needs pollinationsApiKey, single or multi-reference). |
-| `model_id` | _(backend default)_ | hf: `defaultEditModel` (`FLUX.2-dev`). pollinations: blank = `x-ai/grok-imagine-image-quality` (few filters, declares 1 reference but does process 2); for 3+ references pick a model with a higher `max_reference_images`, e.g. `flux.2-klein-4b` or `seedream5`. |
+| `model_id` | _(backend default)_ | hf: `defaultEditModel` (`FLUX.2-dev`). pollinations: blank = `x-ai/grok-imagine-image-quality` (few filters, declares 1 reference but does process 2); for 2+ references pick a model with a higher `max_reference_images`, e.g. `flux.2-klein-4b` or `seedream5`. |
 | `provider` / `negative_prompt` / `lora_id` | | HF only — ignored or rejected with pollinations. |
 | `quality` | unset | pollinations only; documented for gpt-image/grok-imagine-image-2.0. |
 | `name` | `""` | Optional filename slug for the result — same sanitize/append rules as `generate_image`. |
@@ -221,7 +222,7 @@ Active profiles are injected as system context every turn and act **indirectly**
 
 **Edit (KEEP/CHANGE):** reference (prior result's absolute `file_path`, bare filename, or URL) + change instruction → `image_edit`. Example: *"same pose, latex dress instead of silk, keep everything else monochrome."* Backend `hf` (FLUX.2-dev etc.) or `pollinations` (default `grok-imagine-image-quality` — non-restrictive; via `/v1/images/edits`).
 
-**Multi-reference edit:** `image_edit({backend:"pollinations", model_id:"black-forest-labs/flux.2-klein-4b", image:["/abs/subject.jpg", "/abs/style.png"], prompt:"Use image 1 as the subject and image 2 only as the visual style."})` sends both ordered references in one request. Result: `input_image` is the array, plus `input_image_count`, `input_sources` and `max_reference_images`; a too-high count relative to the catalog limit shows up as a note.
+**Multi-reference edit:** `image_edit({backend:"pollinations", model_id:"black-forest-labs/flux.2-klein-4b", image:"/abs/subject.jpg", images:["/abs/style.png"], prompt:"Use image 1 as the subject and image 2 only as the visual style."})` sends both ordered references in one request. Result: `input_image` is the array, plus `input_image_count`, `input_sources` and `max_reference_images`; a too-high count relative to the catalog limit shows up as a note.
 
 **Own style library:** *"Create these Neigungsprompts: cinematic-noir, dreamy-pastel"* → LLM builds entries → `inclination_prompt_manage({action:"activate"})` activates them.
 

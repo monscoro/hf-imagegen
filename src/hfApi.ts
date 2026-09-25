@@ -29,6 +29,40 @@ export function getCuratedModels(): ModelInfo[] {
   return CURATED_MODELS;
 }
 
+const QUANTIZATION_MARKERS = [
+  "gguf",
+  "gptq",
+  "awq",
+  "exl2",
+  "imatrix",
+  "quanto",
+  "hqq",
+  "mxfp4",
+  "w4a16",
+  "w8a8",
+  "fp8",
+  "int8",
+  "int4",
+  "4bit",
+  "8bit",
+  "q4_",
+  "q5_",
+  "q6_",
+  "q8_",
+  "nf4",
+  "bnb",
+];
+
+export function isQuantizationArtifact(modelId: string): boolean {
+  const repo = modelId.slice(modelId.indexOf("/") + 1).toLowerCase();
+  return QUANTIZATION_MARKERS.some((marker) => repo.includes(marker));
+}
+
+function dropQuantizations<T extends { id: string }>(models: T[], limit: number): T[] {
+  const kept = models.filter((m) => !isQuantizationArtifact(m.id));
+  return kept.length > limit ? kept.slice(0, limit) : kept;
+}
+
 export async function getProviderModels(
   provider: string,
   limit: number = 20,
@@ -37,7 +71,8 @@ export async function getProviderModels(
   const cached = getCachedProviderModels(provider, limit);
   if (cached) return cached;
 
-  const url = `${HF_API_BASE}/models?inference_provider=${provider}&pipeline_tag=text-to-image&sort=trending&limit=${limit}`;
+  const fetchLimit = Math.min(limit * 2, 100);
+  const url = `${HF_API_BASE}/models?inference_provider=${provider}&pipeline_tag=text-to-image&sort=trendingScore&limit=${fetchLimit}`;
 
   const headers: Record<string, string> = { Accept: "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -45,7 +80,7 @@ export async function getProviderModels(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = (await res.json()) as HFModel[];
+  const models = dropQuantizations((await res.json()) as HFModel[], limit);
 
   const result = models.map((m) => ({
     id: m.id,
@@ -71,7 +106,8 @@ export async function getTrendingModels(
   const cached = getCachedTrendingModels(limit);
   if (cached) return cached;
 
-  const url = `${HF_API_BASE}/models?pipeline_tag=text-to-image&sort=trending&limit=${limit}`;
+  const fetchLimit = Math.min(limit * 2, 100);
+  const url = `${HF_API_BASE}/models?pipeline_tag=text-to-image&sort=trendingScore&limit=${fetchLimit}`;
 
   const headers: Record<string, string> = { Accept: "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -79,7 +115,7 @@ export async function getTrendingModels(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = (await res.json()) as HFModel[];
+  const models = dropQuantizations((await res.json()) as HFModel[], limit);
 
   const result = models.map((m) => ({
     id: m.id,
@@ -105,7 +141,8 @@ export async function getDownloadedModels(
   const cached = getCachedDownloadedModels(limit);
   if (cached) return cached;
 
-  const url = `${HF_API_BASE}/models?pipeline_tag=text-to-image&sort=downloads&limit=${limit}`;
+  const fetchLimit = Math.min(limit * 2, 100);
+  const url = `${HF_API_BASE}/models?pipeline_tag=text-to-image&sort=downloads&limit=${fetchLimit}`;
 
   const headers: Record<string, string> = { Accept: "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -113,7 +150,7 @@ export async function getDownloadedModels(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = (await res.json()) as HFModel[];
+  const models = dropQuantizations((await res.json()) as HFModel[], limit);
 
   const result = models.map((m) => ({
     id: m.id,

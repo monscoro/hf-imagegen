@@ -48,7 +48,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 
 |  | `hf` (default) | `pollinations` |
 |---|---|---|
-| Provider | HuggingFace Inference Providers (auto/fal-ai/…) | Pollinations.ai |
+| Provider | HuggingFace Inference Providers (auto + 7 sub-providers, see `list_models`) | Pollinations.ai |
 | Token | HF token required | API key required (enter.pollinations.ai/keys) |
 | Content filter | Provider-side moderation | Strict filter off by default (`safe=off`); illegal content still moderated |
 | Negative prompt | ✅ supported | ❌ ignored (reported in response notes) |
@@ -109,20 +109,31 @@ Reference image(s) = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt g
 ### `list_models` — Browse models per backend
 
 ```
-list_models(source?, provider?, limit?, include_loras?)
+list_models(source?, provider?, limit?, include_loras?, include_catalog?, filter?)
 ```
 
 | Source | For | Notes |
 |---|---|---|
 | `curated` (default) | `generate_image` + `hf` | 11 expert-verified HF IDs, always available offline. |
-| `image-edit` | `image_edit` + `hf` | Editing-native IDs with verified I2I mapping (FLUX.2-dev, Kontext-dev, Qwen-Image-Edit). |
-| `provider` | `generate_image` + `hf` | Needs `provider` (fal-ai, nscale, …). Never `pollinations` — use `source="pollinations"`. |
-| `trending` / `downloads` | `generate_image` + `hf` | Live HF catalog. |
+| `image-edit` | `image_edit` + `hf` | Every HF model with `pipeline_tag=image-to-image` that a provider currently serves (~110), curated first. |
+| `provider` | `generate_image` + `hf` | Needs `provider` (fal-ai, replicate, wavespeed, …). Never `pollinations` — use `source="pollinations"`. |
+| `trending` / `downloads` | `generate_image` + `hf` | Live HF catalog, ranked by `trendingScore` or `downloads`. |
 | `pollinations` | `generate_image`/`image_edit` + `pollinations` | 7 curated models plus `catalog_extras` with the full live catalog (77 entries). Requires API key. Aliases: `flux`, `kontext`, `seedream5`. |
+
+`include_catalog` and `filter` apply to `source="pollinations"` (`catalog_extras`); `limit` applies to every source except `curated`.
 
 LoRA lookup (`include_loras`) and `list_loras` are HF-only.
 
-**Model catalog caching.** The Pollinations catalog (`/image/models`) is cached for 12 hours and persisted to `~/.cache/hf-image-gen/pollinations-catalog.json`, so it survives plugin reloads and LM Studio restarts. Pollinations prices come from that same file — the endpoint returns them per model, so no second request is made. If the endpoint is unreachable, the last known catalog is served rather than failing, and a failed fetch is never cached (one timeout cannot cost you the prices for 12 hours). `list_models` reports the state in `catalog_cache` (`file`, `persisted`, `fetched_at`, `expires_in_hours`, `last_fetch_failure`). Set `HF_IMAGE_GEN_CACHE_DIR` to relocate the cache. The cache holds only the public catalog — the API key is never written to it.
+**Two artifact filters.** All model lists drop LoRAs and quantizations (GGUF/GPTQ/AWQ/FP8/INT8/…) — they are adapters, not models, and fail as `model_id`. This matters more than it sounds: LoRAs were 53 % of the usable `image-to-image` models and 35 % of `text-to-image`, including the most-liked entry of all (`fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA`, 1549 likes). Only the repo name is checked, not the author. `list_loras` is deliberately not filtered.
+
+**HF rows carry measured data, not guesses.** `hf_providers` lists the inference providers currently serving the model (status `live`), `hf_latency_ms` is the measured latency of the fastest one, and `speed` is derived from that. A **missing** `hf_providers` means no provider serves the model, so `backend='hf'` would fail — it is only usable locally (`lmstudio`) or by pulling its weights. A missing `image_edit` means the model is outside the 1000 most-liked per task, so HuggingFace simply does not say; it is not a `false`. Two things HF does not publish stay static and are not derived from the catalog: `max_reference_images` (always 1 for the HF backend, a plugin constraint) and per-call cost (HF gates its provider price list behind a login, `/api/inference-providers` answers `401` anonymously).
+
+**Model catalog caching.** Two independent 12-hour caches, both under `~/.cache/hf-image-gen/` and both surviving plugin reloads and LM Studio restarts. Set `HF_IMAGE_GEN_CACHE_DIR` to relocate them; neither ever holds a token or API key.
+
+- **Pollinations** (`/image/models`) → `pollinations-catalog.json`. Pollinations prices come from that same file — the endpoint returns them per model, so no second request is made. Reported in `catalog_cache`.
+- **HuggingFace** (`/api/models?…&expand=inferenceProviderMapping`, one request per task) → `huggingface-catalog.json`, ~228 KB for 2000 models. This is the source of `hf_providers`, `hf_latency_ms` and `image_edit`. Reported in `hf_catalog_cache` for HF sources.
+
+Both serve the last known catalog if the endpoint is unreachable, and never cache a failed fetch — one timeout cannot cost you the prices or the mapping for 12 hours.
 
 ### `list_loras` — Search LoRA adapters (HF only)
 
@@ -273,7 +284,9 @@ Two limits the catalog number doesn't show, so they are carried in a `note` fiel
 
 **Default model = FLUX.1-dev, not FLUX.2-dev.** FLUX.2 (32B, SOTA) needs a license accepted and is absent from the free inference pool; FLUX.1-dev works license-free via Inference Providers. FLUX.2 remains documented as the quality upgrade path.
 
-**Base T2I models have no image-to-image mapping.** Verified per HF provider API: FLUX.1-dev, SDXL, Qwen-Image map to `text-to-image` only on every provider — retries are doomed, which a live reasoning trace confirmed. `image_edit` therefore defaults to editing-native `FLUX.2-dev` (I2I on fal-ai/replicate), with `FLUX.1-Kontext-dev` and `Qwen-Image-Edit` as alternatives; the error names all three. `list_models source="image-edit"` keeps the two worlds apart.
+**Base T2I models have no image-to-image mapping.** Verified per HF provider API: FLUX.1-dev, SDXL, Qwen-Image map to `text-to-image` only on every provider — retries are doomed, which a live reasoning trace confirmed. `image_edit` therefore defaults to editing-native `FLUX.2-dev` (I2I on fal-ai/replicate), with `FLUX.1-Kontext-dev` and `Qwen-Image-Edit` as alternatives; the error names all three. `list_models source="image-edit"` keeps the two worlds apart, and derives that list from the cached `pipeline_tag=image-to-image` catalog rather than three hand-kept IDs — so a new editing model shows up within 12 hours instead of never. The curated three stay pinned to the front and keep their hand-written descriptions.
+
+**`sort=trending` is not an API parameter.** The `/api/models` endpoint accepts `trendingScore`, `likes`, `downloads`, `createdAt`, `lastModified` — `trending` returns `400 {"error":"Invalid sort parameter: trending"}`. It is the parameter the HF *website* uses, which is what makes it look plausible. `list_models source="provider"` and `source="trending"` used it and therefore failed with `tool_error` on every single call; both are fixed to `trendingScore`. Also worth knowing: `direction=1` is rejected (descending only, and it is the default) and `limit` is silently capped at 1000 per page.
 
 **Pollinations as second backend.** Filter off by default; API key required since Sep 2026 (anonymous access removed). The live catalog carries 77 models; 7 are curated (see table above), the rest come from `list_models source="pollinations"` under `catalog_extras` with costs. No negative prompt, no LoRAs, community alphas as fallback chain.
 

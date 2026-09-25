@@ -10,7 +10,7 @@ Direkte Prompts (`"a cat, cinematic, neon"`) beschreiben **was** zu sehen ist. I
 
 - **Mittelbar:** Gleicher User-Wunsch `zeichne eine Werkstatt` wird mit `pose-action` anders als mit `narrative` — ohne dass die Directive `Werkstatt` nennt.
 - **Kombinierbar:** Mehrere Neigungen orthogonal (siehe 2.) ohne Keyword-Salat.
-- **Persistierbar:** Aktiviert via `inclination_prompt_set({name})`, in `promptPreprocessor` injiziert, via `[ro]/[rw]` in `customDirectives` (`src/config.ts:35`) schaltbar. Einheitlicher Prefix `inclination_prompt_` (`list`/`set`/`manage`).
+- **Persistierbar:** Aktiviert via `inclination_prompt_manage({action:"activate", name})` (idempotent, mehrere gleichzeitig), in `promptPreprocessor` injiziert, via `[ro]/[rw]` in `customDirectives` (`src/config.ts`) schaltbar. Prefix `inclination_prompt_` (`list` / `manage` / `library`).
 
 Quellenprinzip: *Struktur + Ziel* vor *Syntax* — `HuggingFace Diffusers: subject>style>context`, `OpenAI gpt-image-2 Guide 2026-04-21: background/scene → subject → key details → constraints + intended use`.
 
@@ -80,11 +80,12 @@ Nach `BDiopXV/AI-Visual-Prompt-Cookbook style.json`, `Shelly Palmer Workbook`:
 }
 ```
 
-Für uns: `description` = Variable `MOOD`, `prompt` = Template. `inclination_prompt_manage` nutzt genau diese Felder (vereinheitlicht auch `list` via `action:"list"`).
+Für uns: `description` = Variable `MOOD`, `prompt` = Template. `inclination_prompt_manage({store:"profile"})` nutzt genau diese Felder; die Gesamtübersicht (Profile + Bücher + aktive Stacks) liefert `inclination_prompt_list`.
 
 ### 3.4 Inclination-Anwendung im Plugin
 
-- **Aktivierung:** `inclination_prompt_list` → `inclination_prompt_set({name:"pose-action"})` → `promptPreprocessor.ts:32` injiziert `== ACTIVE IMAGE SYSTEM PROMPT ==` bei jedem Turn (nicht stures Präfix, Anweisung: *stilistisch verweben*). `inclination_prompt_manage({action:"list"})` ist Alias für `list`.
+- **Aktivierung:** `inclination_prompt_list` → `inclination_prompt_manage({action:"activate", name:"pose-action"})` → `promptPreprocessor.ts` injiziert `== ACTIVE IMAGE SYSTEM PROMPT ==` bei jedem Turn (nicht stures Präfix, Anweisung: *stilistisch verweben*). Aktionen sind idempotent (kein Umschalten bei Wiederholung).
+- **Bibliothek (Bücher/Records):** Nachschlagen via `inclination_prompt_library({query, book, aspect})` (read-only, nicht injiziert), Inhalte anlegen/aktivieren via `inclination_prompt_manage({store:"record", action:"create"|"activate", …})`.
 - **Schutz:** `[ro]` → `update` reject, `[rw]` → Shadow in `tmp/directives.json` erlaubt (`directiveStore.ts`).
 - **Qualität-Levers gezielt:** `photorealistic` direkt nennen aktiviert Photoreal-Modus (OpenAI Guide), technische Levers wie `film grain, subsurface scattering` nur wenn nötig.
 

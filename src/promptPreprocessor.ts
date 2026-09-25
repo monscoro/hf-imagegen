@@ -3,6 +3,7 @@ import {
   type PromptPreprocessorController,
 } from "@lmstudio/sdk";
 import { getActiveDirectives } from "./directiveStore";
+import { getActiveRecords } from "./libraryStore";
 import { pluginConfigSchematics } from "./config";
 
 const SYSTEM_RULES = `\
@@ -32,8 +33,9 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 • User asks which images exist / result / input for image_edit  → list_output_images (paginated; limit=1 + newest = latest)
 • User asks what models are available                        → list_models
 • User asks about LoRAs, styles, or custom adapters          → list_loras
-• User asks about moods/styles, Neigung/Stimmung, Systemprompt→ inclination_prompt_list / inclination_prompt_set / inclination_prompt_manage
-• User needs a technique/action record (impact, aftercare…)   → inclination_prompt_action (skillset library: id A01–A33 or keyword)
+• User will wissen, was es gibt / was gerade aktiv ist (Neigung, Stimmung, Style, Bücher) → inclination_prompt_list (Gesamtübersicht, read-only)
+• User will etwas anlegen, ändern, aktivieren oder deaktivieren                → inclination_prompt_manage (store: profile|book|record, action: create/update/delete/get/activate/deactivate/clear)
+• User braucht einen Technik-/Stil-Record (impact, aftercare, Masken, Reiche)  → inclination_prompt_library (query id/Keyword, book, aspect; '' = Katalog)
 
 == GENERATION TIPS ==
 - Descriptive prompts produce better results. Include: subject, style, lighting, mood, quality terms.
@@ -60,15 +62,18 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - Content filter: kontext/seedream5 have STRICT filters — fashion-editorial often flagged. grok-imagine-image-2.0 does NOT.
 
 == IMAGE SYSTEM PROMPT / STIMMUNG ==
-- Neigungsprompts (Stimmungsprompt / Beeinflussungsprompt, synonym; mehrere können gleichzeitig aktiv sein = Stacking) wirken INDIREKT:
-  leite daraus ab wie du generate_image prompts formulierst (Mood, Stil, Ausrichtung, theatralische Inszenierung). Nicht wortwörtlich präfixen, sondern stilistisch einweben.
-- Eigene Prompts: Userbeschreibungen in vollständige Neigungsprompts umwandeln via inclination_prompt_manage(action:create).
-  LLM generiert automatisch passende id, description, prompt. Profil-Inhalt lesen (ohne zu aktivieren): inclination_prompt_manage(action:get).
-- Aktivierung: inclination_prompt_set({name}) addet zum Stack; gleicher Name erneut entfernt nur diesen; 'none' = alle aus.
-  Ergebnis bestätigt nur Aktivierung (Ids+Descriptions) — Prompt-Text via _manage(action:get) / _list holen.
-  Liste: inclination_prompt_list.
-- Technik-/Aktions-Records (Dominatrix-Skillset-Bibliothek A01–A33): inclination_prompt_action({action}) liefert den
-  Datensatz on demand ('' = Katalog mit Ids+Keywords); indirekt in den nächsten Bildprompt einweben, nicht persistiert.
+- Neigungsprompts (Profile) und Bibliotheks-Records wirken INDIREKT:
+  leite daraus ab wie du generate_image prompts formulierst (Mood, Stil, Ausrichtung, theatralische Inszenierung). Nicht wortwörtlich präfixen, sondern stilistisch einweben. Mehrere können gleichzeitig aktiv sein = Stacking.
+- Übersicht (was existiert, was ist aktiv): inclination_prompt_list — Gesamtübersicht über Profile, Bücher und beide Stacks; detail:"full" liefert alle Texte.
+- Ändern/Anlegen/Aktivieren: inclination_prompt_manage, store entscheidet über die Domäne:
+  profile (injiziertes Stimmungsprompt) | book (Bibliotheks-Buch) | record (Bibliotheks-Eintrag mit aspect + keys).
+  create legt an (record-create erzeugt fehlende Bücher automatisch), activate/deactivate sind idempotent
+  (wiederholen ändert nichts — kein Umschalten), action:'clear' leert beide Stacks. curated ist read-only.
+- Profil-Inhalt ohne Aktivierung lesen: inclination_prompt_list({detail:"full"}) oder inclination_prompt_manage({store:"profile", action:"get", …}).
+- Bibliothek nachschlagen: inclination_prompt_library({query, book, aspect}) — query:'' = Katalog (ids+keys+facets),
+  exakte id/Keyword = Volltext. Records sind on-demand und nur wirksam, solange sie aktiv sind.
+- Eigene Inhalte: Userbeschreibungen via inclination_prompt_manage({store:"profile", action:"create", …}) zu Profilen,
+  via store:"record"/action:"create" (aspect pflicht) zu Büchern mit Fachbegriffen ausbauen.
 
 == AFTER GENERATION ==
 Always report the full file path where the image was saved and the model used.`;
@@ -105,15 +110,21 @@ function stripInclinationRules(rules: string): string {
 function buildActiveDirectiveBlock(configText: string): string {
   try {
     const actives = getActiveDirectives(configText);
-    if (actives.length === 0) return "";
-    const sections = actives
-      .map(
+    const activeRecords = getActiveRecords();
+    const total = actives.length + activeRecords.length;
+    if (total === 0) return "";
+    const sections = [
+      ...actives.map(
         (a) =>
           `Name: ${a.id} — ${a.description}\nStimmungsprompt: ${a.prompt}\nQuelle: ${a.source}${a.readonly ? " (read-only)" : ""}`
-      )
-      .join("\n---\n");
+      ),
+      ...activeRecords.map(
+        (r) =>
+          `Name: ${r.book}/${r.id} (aspect ${r.aspect}) — ${r.keys.slice(0, 4).join(", ")}\nStimmungsprompt: ${r.content}\nQuelle: library/${r.book}${r.readonly ? " (read-only)" : ""}`
+      ),
+    ].join("\n---\n");
     const stackingNote =
-      actives.length > 1 ? `(Stacking: ${actives.length} Profiles aktiv — verwebe alle.)\n` : "";
+      total > 1 ? `(Stacking: ${total} Einträge aktiv — verwebe alle.)\n` : "";
     return `\n\n== ACTIVE IMAGE SYSTEM PROMPT ==\n${stackingNote}${sections}\nAnweisung: Wende die aktiven Stimmungsprompts indirekt an wenn du generate_image prompts formulierst (Mood, Kunststil, Ausrichtung, Inszenierung). Verwebe sie stilistisch, nicht als stures Präfix.`;
   } catch {
     return "";
@@ -150,6 +161,7 @@ export async function promptPreprocessor(
   if (activeBlock) {
     return `${fullRules}\n\n${msgText}`;
   }
-  // Even without active directive, re-inject routing on follow-ups to avoid loss after turn 1
-  return `${SYSTEM_RULES}\n\n${msgText}`;
+  // Even without active directive, re-inject routing on follow-ups to avoid loss after turn 1.
+  // `rules` (nicht SYSTEM_RULES) nehmen: bei ausgeschaltetem Config-Schalter bleibt der Strip erhalten.
+  return `${rules}\n\n${msgText}`;
 }

@@ -61,7 +61,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 
 ---
 
-## Tools (9)
+## Tools (8)
 
 ### `generate_image` — Generate from text
 
@@ -134,9 +134,21 @@ list_output_images(sort?, limit?, offset?, filter?)
 
 Paginated, compact listing of the output directory — generated results **and** input/reference images (`image_edit` resolves bare filenames against it first; newest first, `limit=1` = latest image). Use instead of reading large folders at once; for `image_edit`, pass the absolute `output_directory` + `filename` (preferred over a bare filename).
 
-### `inclination_prompt_list` / `set` / `manage` / `action` — Style profiles (gated by Enable Inclination Prompts)
+### `inclination_prompt_list` / `manage` / `library` — Neigungsprompts & Bibliothek (gated by Enable Inclination Prompts)
 
-Persistent mood/style directives that indirectly guide how the LLM formulates image prompts (see below). `manage(action="create")` turns user descriptions into full profiles (LLM generates id/description/prompt — **the only way to add new ones**; `set` on an unknown name errors with a pointer back to `manage`); `set` adds a profile to the active stack (same name again removes just that one; empty/`none` clears all — **multiple profiles can be active at once**) and returns **activation confirmation only** (ids + descriptions — read full prompt text via `manage(action="get")`, not via `set`). `action` is the **Dominatrix-Skillset library lookup**: `action=''` lists the catalog (`A01`–`A33` + `switching-kenosis`/`faith-father`, ids + keywords), an exact id or keyword returns the full German technique record for the LLM to weave into the *next* image prompt (on-demand, not persisted — source: `kristina-lorebook-archive-layer.md` §D + TavernCard `character_book`). Gated by the `Enable Inclination Prompts` config switch (default on) — when off, these tools are not registered and no style profile is injected into the LLM context.
+Three tools, three intentions (hard cut: `inclination_prompt_set` and `inclination_prompt_action` no longer exist):
+
+| Tool | Intention | Parameters |
+|---|---|---|
+| `inclination_prompt_list` | **read** — Gesamtübersicht (Dashboard): Profile, Bücher, beide aktiven Stacks | `filter?`, `detail: "compact"` (default) \| `"full"` (alle Texte) |
+| `inclination_prompt_manage` | **write** — das einzige Mutations-Tool, beide Domänen | `store: "profile"` (default) \| `"book"` \| `"record"`, `action: create\|update\|delete\|get\|activate\|deactivate\|clear`, `name`, `book`, `aspect`, `description`, `prompt`, `content`, `keys` |
+| `inclination_prompt_library` | **lookup** — Records on-demand (read-only, nicht injiziert) | `query?`, `book?`, `aspect?` |
+
+**Two stores, two stacks.** `profile` = Stimmungsprompt in `directives.json`, injiziert solange aktiv. `book`/`record` = Bibliothek in `library.json`: kuratiert und read-only sind `skillset` (A01–A33, gefacettet über 12 Aspekte) und `lorebook` (`session-arc`, `mask-*` ×5, `realm-*` ×8, `tone-*` ×6, `kristina-filter`); eigene Bücher/Records entstehen per `_manage({store:"record", action:"create", …})` — ein fehlendes Buch wird automatisch angelegt, `aspect` ist Pflicht (curated-Facetten oder freier Slug). Aktive Profile (`directives.json.activeIds`) **und** aktive Record-Refs (`library.json.activeRecords`) injiziert `promptPreprocessor` in `== ACTIVE IMAGE SYSTEM PROMPT ==`.
+
+**Idempotente Aktionen, kein Toggle.** `activate`/`deactivate` melden „bereits aktiv / war nicht aktiv — keine Änderung" statt umzuschalten (das war der alte Fehler von `inclination_prompt_set`); jede Mutation gibt `active_profiles` + `active_records` zurück. `action:"clear"` leert beide Stacks, `store:"book"` aktiviert alle Records eines Buchs (mit Wort-Schätzung der Injektion). Curated-Einträge lehnen `update`/`delete` ab. `library` liefert bei `query:""` den Katalog (`ref`, `book`, `aspect`, `keys` + `facets` + `books`), bei exakter id/Keyword den Volltext — der ist Staging-Guidance und wird in den nächsten `generate_image`-Prompt verwoben, nicht wörtlich kopiert.
+
+Gated by the `Enable Inclination Prompts` config switch (default on) — when off, these tools are not registered and no style profile is injected into the LLM context.
 
 ---
 
@@ -144,7 +156,7 @@ Persistent mood/style directives that indirectly guide how the LLM formulates im
 
 Active profiles are injected as system context every turn and act **indirectly**: the LLM weaves mood, style, and staging into `generate_image`/`image_edit` prompts instead of prefixing them. **Stacking:** several profiles can be active at once (e.g. visual layer + `voice-martha` + `dominatrix-lorebook`) — all are injected, separated by `---`. The whole subsystem can be switched off via the `Enable Inclination Prompts` config field.
 
-**Sources:** `curated` (read-only examples in code) + `user` (LLM-created via `inclination_prompt_manage`, persisted in plugin storage `directives.json`).
+**Sources:** `curated` (read-only examples in code) + `user` (LLM-created via `inclination_prompt_manage({store:"profile"})`, persisted in `directives.json`) + `library` (Bücher/Records in `library.json`, kuratiert oder per `_manage({store:"record"})` angelegt).
 
 **Curated layers:**
 
@@ -155,9 +167,9 @@ Active profiles are injected as system context every turn and act **indirectly**
 | `power-spice-editorial` (~150 words) | Dynamics | Dominant/submissive as styling, exchange vector, editorial trance, power-read designers |
 | `voice-martha` (~137 words) | Voice | How results are *talked about*: millennial, sharp, no AI filler — combinable with the visual layers (stacking) |
 | `dominatrix-lorebook` (~136 words) | Craft/Character | Session arc (role → service → peak → ceremonial wind-down), Lorelei masks, Seven Realm Arts, tones (rage/cold/empathic/party), Kristina look, hard filters — source: `kristina-lorebook-archive-layer.md` + TavernCard |
-| `dominatrix-skillset` (~127 words) | Library lookup | **Bibliotheksfunktion:** full distillation with explicit `A01`–`A33` index (thematic groups) → fetch records via `inclination_prompt_action` (keyword/`''`=catalog); always-on core keeps role posture, impact ladder/safe zones, circulation checks, deprivation order, exit record |
+| `dominatrix-skillset` (~127 words) | Library lookup | **Bibliotheksfunktion:** full distillation with explicit `A01`–`A33` index (thematic groups) → fetch records via `inclination_prompt_library` (id/Keyword, `''`=Katalog, `book`/`aspect`-Filter); always-on core keeps role posture, impact ladder/safe zones, circulation checks, deprivation order, exit record |
 
-**Typical workflow:** user describes moods → LLM creates entries via `inclination_prompt_manage(action="create")` → activates via `inclination_prompt_set` → every generation/edit follows the style. Methodology and 20+ examples: `Prompt-Inclination-Techniques.md`.
+**Typical workflow:** user describes moods → LLM creates a profile via `inclination_prompt_manage({store:"profile", action:"create"})` → activates via `inclination_prompt_manage({action:"activate"})` → every generation/edit follows the style. Technik-/Stil-Records: `inclination_prompt_library({query:…})` nachschlagen, ggf. per `_manage({store:"record", action:"create"})` anlegen und aktivieren. Methodology and 20+ examples: `Prompt-Inclination-Techniques.md`.
 
 ---
 
@@ -206,7 +218,7 @@ Active profiles are injected as system context every turn and act **indirectly**
 
 **Edit (KEEP/CHANGE):** reference (prior result's absolute `file_path`, bare filename, or URL) + change instruction → `image_edit`. Example: *"same pose, latex dress instead of silk, keep everything else monochrome."* Backend `hf` (FLUX.2-dev etc.) or `pollinations` (default `grok-imagine-image-quality` — non-restrictive; via `/v1/images/edits`).
 
-**Own style library:** *"Create these Neigungsprompts: cinematic-noir, dreamy-pastel"* → LLM builds entries → `inclination_prompt_set` activates one.
+**Own style library:** *"Create these Neigungsprompts: cinematic-noir, dreamy-pastel"* → LLM builds entries → `inclination_prompt_manage({action:"activate"})` activates them.
 
 **Community-alpha fallback (Pollinations):** if a `community/*` model fails, retry with `klein` or `flux`.
 

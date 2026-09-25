@@ -17,7 +17,26 @@ import { getCuratedEditModels } from "./curatedModels";
 import { checkRateLimit, recordGeneration } from "./rateLimit";
 import { resolveImageInput } from "./imageInput";
 import { listOutputImages } from "./workspace";
-import { ACTION_RECORDS, lookupActionRecords } from "./actionRecords";
+import { lookupLibrary } from "./curatedLibrary";
+import {
+  getAllBooks,
+  getAllRecords,
+  getBookById,
+  getRecordById,
+  createBook,
+  updateBook,
+  deleteBook,
+  createRecord,
+  updateRecord,
+  deleteRecord,
+  getActiveRecordRefs,
+  addActiveRecord,
+  removeActiveRecord,
+  removeActiveRecordsOfBook,
+  clearActiveRecords,
+  listAspects,
+  refOf,
+} from "./libraryStore";
 import {
   getPollinationsModels,
   buildPollinationsPostBody,
@@ -31,7 +50,6 @@ import { getModelCacheInfo } from "./modelCache";
 import {
   getAllDirectives,
   getActiveIds,
-  getActiveDirectives,
   addActiveDirective,
   removeActiveDirective,
   clearActiveDirectives,
@@ -65,6 +83,65 @@ function safe_impl<T extends Record<string, unknown>>(
       }, null, 2);
     }
   };
+}
+
+function levenshtein(a: string, b: string): number {
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/** Ähnlichkeits-Vorschläge: Substring-Treffer zuerst, dann Edit-Distance (Tippfehler). */
+function suggestIds(candidates: string[], target: string): string[] {
+  const t = target.toLowerCase();
+  return candidates
+    .map((c) => {
+      const lc = c.toLowerCase();
+      return { c, sub: lc.includes(t) || (t.length >= 4 && t.includes(lc)), d: levenshtein(lc, t) };
+    })
+    .filter((x) => x.sub || x.d <= Math.max(2, Math.floor(t.length / 3)))
+    .sort((x, y) => (x.sub === y.sub ? x.d - y.d : x.sub ? -1 : 1))
+    .slice(0, 5)
+    .map((x) => x.c);
+}
+
+function profileNotFound(clean: string): Error {
+  const close = suggestIds(getAllDirectives("").map((d) => d.id), clean);
+  return new Error(
+    `Profil "${clean}" nicht gefunden.` +
+      (close.length ? ` Meintest du: ${close.join(", ")}?` : "") +
+      ` Neues anlegen: inclination_prompt_manage({store:"profile", action:"create", name:"${clean}", ` +
+      `description:"Kurzbeschreibung", prompt:"inclination: …"}). Verfügbar: inclination_prompt_list.`
+  );
+}
+
+function bookNotFound(clean: string): Error {
+  const all = getAllBooks();
+  const close = suggestIds(all.map((b) => b.id), clean);
+  return new Error(
+    `Buch "${clean}" nicht gefunden.` +
+      (close.length ? ` Meintest du: ${close.join(", ")}?` : "") +
+      ` Neues Buch: inclination_prompt_manage({store:"book", action:"create", name:"${clean}", description:"…"}). ` +
+      `Vorhandene Bücher: ${all.map((b) => b.id).join(", ")}.`
+  );
+}
+
+function recordNotFound(ref: string): Error {
+  const close = suggestIds(getAllRecords().map((r) => refOf(r.book, r.id)), ref);
+  return new Error(
+    `Record "${ref}" nicht gefunden.` +
+      (close.length ? ` Meintest du: ${close.join(", ")}?` : "") +
+      ` Neuer Record: inclination_prompt_manage({store:"record", action:"create", book:"…", name:"…", aspect:"…", content:"…"}). ` +
+      `Katalog: inclination_prompt_library({query:""}).`
+  );
 }
 
 function resolvePath(p: string): string {
@@ -975,117 +1052,108 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "inclination_prompt_list",
       description: text`
-        List all available Neigungsprompts / ImageGen Stimmungsprompts (profile set) – einheitlicher Prefix inclination_prompt_.
+        Gesamtübersicht über das Neigungsprompt-System (READ-ONLY, verändert nichts) – einheitlicher Prefix inclination_prompt_.
 
-        Returns curated examples (read-only, source=curated) + LLM-created profiles
-        (source=user, manageable via inclination_prompt_manage).
-        Each entry has id (short name), description (first line), prompt (indirect style/mood), source, readonly flag.
-        Curated are only examples (few, not exhaustive) – main library is user-created via inclination_prompt_manage.
+        Drei Abschnitte:
+        - active: gerade injizierte Profile und aktive Bibliotheks-Records (Stacks).
+        - profiles: Stimmungsprompts (curated + user) mit is_active-Flag.
+        - library: Bücher mit Record-Zahl/Facetten + Facetten-Verteilung.
+        detail:"full" liefert zusätzlich alle Prompt-/Content-Texte (teuer); compact nur Namen/Beschreibungen.
 
-        Use this to discover available moods before calling inclination_prompt_set.
-        Active profiles are highlighted (stacking: several can be active at once) and injected
-        into the LLM system context to guide generate_image prompt creation.
-        Hinweis: list ist auch via inclination_prompt_manage({action:"list"}) verfügbar (vereinheitlicht).
+        Das ist DAS Einstiegstool, wenn unklar ist, was vorhanden ist und was gerade aktiv ist.
+        Etwas ändern/anlegen/aktivieren → inclination_prompt_manage.
+        Einen Record im Detail nachschlagen → inclination_prompt_library.
       `,
       parameters: {
-        filter: z.string().default("").describe("Optional substring to filter by id or description. Leave blank for all."),
+        filter: z.string().default("").describe("Optional: Substring-Filter über Profile, Bücher und Records (id/aspect/keys/Text). Leer = alles."),
+        detail: z.enum(["compact", "full"]).default("compact").describe("full = zusätzlich alle Prompt-/Content-Texte (teuer); compact = nur Übersicht (default)."),
       },
-      implementation: safe_impl("inclination_prompt_list", async ({ filter }, _ctx) => {
-        const text_ = "";
-        const all = getAllDirectives(text_);
-        const activeIds = getActiveIds();
-        const activeDirectives = getActiveDirectives(text_);
+      implementation: safe_impl("inclination_prompt_list", async ({ filter = "", detail = "compact" }) => {
+        const full = detail === "full";
         const f = filter.trim().toLowerCase();
-        const filtered = f ? all.filter((d) => d.id.includes(f) || d.description.toLowerCase().includes(f)) : all;
-        return json({
-          active_ids: activeIds,
-          active_directives: activeDirectives,
-          count: filtered.length,
-          total_count: all.length,
-          directives: filtered.map((d) => ({
-            ...d,
-            is_active: activeIds.includes(d.id),
-          })),
-          note: "Use inclination_prompt_set({name}) to activate — multiple stack; same name again removes it; ''/'none' clears all. Curated=read-only examples, user=via inclination_prompt_manage.",
-          config_hint: "Eigene Prompts via inclination_prompt_manage(action:create). Aktivierung via inclination_prompt_set.",
-        });
-      }),
-    }),
+        const profiles = getAllDirectives("");
+        const activeProfileIds = getActiveIds();
+        const activeRefs = getActiveRecordRefs();
+        const books = getAllBooks();
+        const records = getAllRecords();
 
-    tool({
-      name: "inclination_prompt_set",
-      description: text`
-        Activate or clear Neigungsprompts (Stimmungsprompt / Beeinflussungsprompt, synonym) for indirect prompt guidance – einheitlicher Prefix inclination_prompt_.
+        const matchProfile = (d: (typeof profiles)[number]) =>
+          !f || d.id.includes(f) || d.description.toLowerCase().includes(f);
+        const matchRecord = (r: (typeof records)[number]) =>
+          !f ||
+          r.id.includes(f) ||
+          r.book.includes(f) ||
+          r.aspect.includes(f) ||
+          r.keys.some((k) => k.toLowerCase().includes(f)) ||
+          r.content.toLowerCase().includes(f);
 
-        Supports STACKING: multiple profiles can be active at once (e.g. a visual layer
-        plus voice-martha plus dominatrix-lorebook). All active profiles are injected as
-        system context and guide the Tool LLM to create stylistically aligned generate_image prompts.
+        const profileEntries = profiles.filter(matchProfile).map((d) => ({
+          id: d.id,
+          description: d.description,
+          source: d.source,
+          readonly: d.readonly,
+          is_active: activeProfileIds.includes(d.id),
+          ...(full ? { prompt: d.prompt } : {}),
+        }));
 
-        - Pass a name from inclination_prompt_list to add it to the active stack.
-        - Pass the SAME name again to remove just that profile from the stack.
-        - Pass empty string or "none"/"clear" to deactivate ALL profiles.
-        - Unknown name → error tells you exactly how to create it first via
-          inclination_prompt_manage({action:"create", ...}).
-        - Result confirms ACTIVATION ONLY (ids + descriptions). To READ a profile's full
-          prompt text without side effects use inclination_prompt_manage({action:"get"})
-          or inclination_prompt_list — do not call set just to inspect content.
-        Use inclination_prompt_list first to discover available profiles.
-      `,
-      parameters: {
-        name: z.string().describe(
-          "Profile id to toggle onto the active stack (e.g. 'pose-action'). " +
-          "Same name again = remove it. Use '' or 'none' to clear all. " +
-          "Unknown names: create first via inclination_prompt_manage(action:'create')."
-        ),
-      },
-      implementation: safe_impl("inclination_prompt_set", async ({ name }, _ctx) => {
-        const text_ = "";
-        const clean = name.trim().toLowerCase();
-        const slimActive = () =>
-          getActiveDirectives(text_).map(({ id, description }) => ({ id, description }));
-        if (!clean || clean === "none" || clean === "clear") {
-          clearActiveDirectives();
-          return json({
-            success: true,
-            active_ids: [],
-            active: [],
-            message: "Alle Neigungsprompts deaktiviert. generate_image nutzt wieder neutralen Stil.",
+        const bookEntries = books
+          .filter(
+            (b) =>
+              !f ||
+              b.id.includes(f) ||
+              b.description.toLowerCase().includes(f) ||
+              records.some((r) => r.book === b.id && matchRecord(r))
+          )
+          .map((b) => {
+            const own = records.filter((r) => r.book === b.id);
+            return {
+              id: b.id,
+              description: b.description,
+              source: b.source,
+              readonly: b.readonly,
+              record_count: own.length,
+              active_count: own.filter((r) => activeRefs.includes(refOf(r.book, r.id))).length,
+              aspects: [...new Set(own.map((r) => r.aspect))].sort(),
+            };
           });
-        }
-        const found = getDirectiveById(clean, text_);
-        if (!found) {
-          const close = getAllDirectives(text_)
-            .map((d) => d.id)
-            .filter((id) => id.includes(clean) || clean.includes(id))
-            .slice(0, 5);
-          throw new Error(
-            `Stimmungsprompt "${clean}" nicht gefunden.` +
-            (close.length ? ` Meintest du: ${close.join(", ")}?` : "") +
-            ` Neues Profil anlegen: inclination_prompt_manage({action:"create", name:"${clean}", ` +
-            `description:"Kurzbeschreibung", prompt:"inclination: …"}). ` +
-            `Verfügbare Namen: inclination_prompt_list.`
-          );
-        }
-        if (getActiveIds().includes(clean)) {
-          removeActiveDirective(clean);
-          const remaining = getActiveIds();
-          return json({
-            success: true,
-            active_ids: remaining,
-            active: slimActive(),
-            message: `Deaktiviert: ${clean}. Aktiv:${remaining.length ? " " + remaining.join(", ") : " keine"}.`,
-          });
-        }
-        const activated = addActiveDirective(clean, text_);
-        const activeIds = getActiveIds();
+
+        const facetCounts = new Map<string, number>();
+        for (const r of records) facetCounts.set(r.aspect, (facetCounts.get(r.aspect) ?? 0) + 1);
+        const facets = Array.from(facetCounts.entries())
+          .map(([aspect, count]) => ({ aspect, count }))
+          .sort((a, b) => a.aspect.localeCompare(b.aspect));
+
+        const matchedRecords = records.filter(matchRecord);
         return json({
-          success: true,
-          active_ids: activeIds,
-          activated: { id: activated.id, description: activated.description },
-          active: slimActive(),
-          message:
-            `Aktiviert (Stacking): ${activated.id} — ${activated.description}. ` +
-            `Aktive Profiles: ${activeIds.join(", ")}. Wird indirekt bei generate_image berücksichtigt.`,
+          active: {
+            profiles: activeProfileIds.map((id) => ({
+              id,
+              description: profiles.find((p) => p.id === id)?.description ?? "",
+            })),
+            records: activeRefs.map((ref) => {
+              const r = records.find((x) => refOf(x.book, x.id) === ref);
+              return { ref, book: r?.book ?? "", id: r?.id ?? "", aspect: r?.aspect ?? "" };
+            }),
+          },
+          profiles: { count: profileEntries.length, entries: profileEntries },
+          library: {
+            books: bookEntries,
+            records_total: records.length,
+            records_matched: matchedRecords.length,
+            facets,
+            ...(full
+              ? {
+                  records: matchedRecords.map((r) => ({
+                    ref: refOf(r.book, r.id),
+                    ...r,
+                    is_active: activeRefs.includes(refOf(r.book, r.id)),
+                  })),
+                }
+              : {}),
+          },
+          filter: f || "(none)",
+          note: "Aktivieren/Deaktivieren: inclination_prompt_manage({action:'activate'|'deactivate', store:'profile'|'record'|'book'}) — idempotent, kein Toggle; store:'book' = alle Records des Buchs; action:'clear' leert beide Stacks.",
+          config_hint: "Neue Inhalte: inclination_prompt_manage({store:'profile'|'book'|'record', action:'create'}). Record-Inhalte nachschlagen: inclination_prompt_library.",
         });
       }),
     }),
@@ -1093,132 +1161,453 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "inclination_prompt_manage",
       description: text`
-        Create, update, delete, get, or list Neigungsprompts (Stimmungsprompts / Beeinflussungsprompts, synonym) – einheitlicher Prefix inclination_prompt_, LLM-managed, persisted in the plugin storage (directives.json). Vereinheitlicht list+manage via action:"list".
+        Einziges Tool, das etwas am Neigungsprompt-System VERÄNDERT (Inhalte und aktiver Stack) – einheitlicher Prefix inclination_prompt_.
 
-        This is THE tool for content and lifecycle — its advantages over set/list:
-        - action:"get": read one profile's FULL prompt text without activating anything
-          (safe getter — inclination_prompt_set only toggles activation and returns
-          ids+descriptions, never the prompt text).
-        - action:"create": turn a user description into a complete profile in one call
-          (LLM picks id/description/prompt) — the only way to add NEW profiles; set on an
-          unknown name fails with a pointer back here.
-        - action:"update"/"delete": edit or remove user/[rw] profiles (curated stay read-only).
-        - action:"list": same as inclination_prompt_list (unified).
+        store wählt die Domäne:
+        - profile (default): Stimmungsprompts, die injiziert werden (directives.json).
+        - book: Container der Bibliothek (library.json) — id + description; delete räumt auch die Records.
+        - record: Einzelner Bibliotheks-Eintrag {book, aspect, keys, content} — on-demand Nachschlagewerk,
+          wird NICHT injiziert, solange er nicht per activate in den Stack wandert.
 
-        Typical workflow: User provides one or more prompt texts → action:"create" → activate via inclination_prompt_set (stacking allows several active at once).
+        action (alle idempotent — kein verstecktes Umschalten wie früher bei _set):
+        - create: profile {description, prompt} | book {description} | record {book, name, aspect, content, keys}
+          (record-create legt ein fehlendes Buch automatisch an und meldet das).
+        - update / delete / get: wie erwartet; curated (skillset, lorebook, Beispiel-Profile) bleiben read-only.
+        - activate / deactivate: Ziel hängt am store; store:"book" aktiviert/deaktiviert ALLE Records des Buchs.
+        - clear: leert BEIDE Stacks (profile-Stack + Record-Stack), store wird ignoriert.
+        Jede Mutation meldet active_profiles + active_records (Stack-Sichtbarkeit).
+
+        Nur lesen: inclination_prompt_list (Gesamtübersicht) und inclination_prompt_library (Record-Volltext).
       `,
       parameters: {
-        action: z.enum(["create", "update", "delete", "get", "list"]).describe("Action to perform. Use list to list all (unified with inclination_prompt_list)."),
-        name: z.string().default("").describe("Profile id (a-z,0-9,-,_). Required for create/update/delete/get, optional for list (ignored)."),
-        description: z.string().default("").describe("Kurzbeschreibung (Zeile 1). Required for create, optional for update."),
-        prompt: z.string().default("").describe("Neigungsprompt (indirekter Style/Mood, nicht direkter Bildinhalt). Required for create, optional for update."),
-        filter: z.string().default("").describe("Optional filter for list (substring of id/description). Only for action list."),
+        store: z.enum(["profile", "book", "record"]).default("profile").describe(
+          "Ziel-Domäne: profile = Stimmungsprompt (injiziert), book = Bibliotheks-Buch, record = Bibliotheks-Eintrag."
+        ),
+        action: z.enum(["create", "update", "delete", "get", "activate", "deactivate", "clear", "list"]).describe(
+          "Operation. 'list' existiert nicht mehr (Fehler nennt inclination_prompt_list)."
+        ),
+        name: z.string().default("").describe(
+          "Id (a-z,0-9,-,_) von Profil, Buch oder Record. Bei store:'record' zusätzlich book angeben."
+        ),
+        book: z.string().default("").describe("Buch-Id — Pflicht bei store:'record'."),
+        aspect: z.string().default("").describe(
+          "Facette für records: session, role, positions, bondage, sensation, play, training, tones, aftercare, spaces, safety, realm (oder eigener Slug)."
+        ),
+        description: z.string().default("").describe("Kurzbeschreibung/Titel — profile.create/update, book.create/update."),
+        prompt: z.string().default("").describe("Neigungsprompt-Text (indirekt, nicht Bildinhalt) — profile.create/update."),
+        content: z.string().default("").describe("Record-Volltext — record.create/update."),
+        keys: z.string().default("").describe("Komma-getrennte Suchschlüssel — record.create/update."),
       },
-      implementation: safe_impl("inclination_prompt_manage", async ({ action, name, description, prompt, filter }, _ctx) => {
-        const text_ = "";
-
-        if (action === "list") {
-          const all = getAllDirectives(text_);
-          const activeIds = getActiveIds();
-          const activeDirectives = getActiveDirectives(text_);
-          const f = (filter as string).trim().toLowerCase();
-          const filtered = f ? all.filter((d) => d.id.includes(f) || d.description.toLowerCase().includes(f)) : all;
-          return json({
-            active_ids: activeIds,
-            active_directives: activeDirectives,
-            count: filtered.length,
-            total_count: all.length,
-            directives: filtered.map((d) => ({
-              ...d,
-              is_active: activeIds.includes(d.id),
-            })),
-            note: "Use inclination_prompt_set({name}) to activate — multiple stack; same name again removes it. Vereinheitlicht: list via manage action list oder via inclination_prompt_list.",
+      implementation: safe_impl(
+        "inclination_prompt_manage",
+        async ({
+          store = "profile",
+          action = "",
+          name = "",
+          book = "",
+          aspect = "",
+          description = "",
+          prompt = "",
+          content = "",
+          keys = "",
+        }) => {
+          const stack = () => ({
+            active_profiles: getActiveIds(),
+            active_records: getActiveRecordRefs(),
           });
-        }
+          const cleanName = name.trim().toLowerCase();
+          const cleanBook = book.trim().toLowerCase();
+          const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
+          const splitKeys = (raw: string) => raw.split(",").map((k) => k.trim()).filter(Boolean);
 
-        const cleanName = (name as string).trim().toLowerCase();
-        if (!cleanName) throw new Error("name is required for create/update/delete/get.");
+          if (!action) {
+            throw new Error(
+              'action ist Pflicht: create, update, delete, get, activate, deactivate oder clear (store wählt profile|book|record).'
+            );
+          }
+          if (action === "list") {
+            throw new Error(
+              'action:"list" wurde entfernt — inclination_prompt_list ist die read-only Gesamtübersicht (Profile + Bücher + aktive Stacks).'
+            );
+          }
+          if (action === "clear") {
+            clearActiveDirectives();
+            clearActiveRecords();
+            return json({
+              success: true,
+              action,
+              ...stack(),
+              message: "Beide Stacks geleert — alle Profile und Bibliotheks-Records deaktiviert.",
+            });
+          }
 
-        switch (action) {
-          case "create": {
-            if (!description.trim()) throw new Error("description is required for create.");
-            if (!prompt.trim()) throw new Error("prompt is required for create.");
-            const created = createDirective(cleanName, description, prompt, text_);
-            return json({ success: true, action, directive: created, message: `Erstellt: ${created.id}. Aktiviere mit inclination_prompt_set({name:"${created.id}"}).` });
+          if (store === "profile") {
+            if (!cleanName) throw new Error('name (Profil-Id) ist Pflicht bei store:"profile".');
+            switch (action) {
+              case "create": {
+                if (!description.trim()) throw new Error("description ist Pflicht für profile.create.");
+                if (!prompt.trim()) throw new Error("prompt ist Pflicht für profile.create.");
+                const created = createDirective(cleanName, description, prompt, "");
+                return json({
+                  success: true,
+                  store,
+                  action,
+                  directive: created,
+                  ...stack(),
+                  message: `Profil "${created.id}" erstellt. Aktivieren: inclination_prompt_manage({store:"profile", action:"activate", name:"${created.id}"}).`,
+                });
+              }
+              case "update": {
+                const hasDesc = description.trim().length > 0;
+                const hasPrompt = prompt.trim().length > 0;
+                if (!hasDesc && !hasPrompt)
+                  throw new Error("Für profile.update mindestens description oder prompt mitgeben.");
+                const updated = updateDirective(
+                  cleanName,
+                  hasDesc ? description : undefined,
+                  hasPrompt ? prompt : undefined,
+                  ""
+                );
+                return json({ success: true, store, action, directive: updated, ...stack(), message: `Profil "${updated.id}" aktualisiert.` });
+              }
+              case "delete": {
+                deleteDirective(cleanName, "");
+                return json({ success: true, store, action, deleted: cleanName, ...stack(), message: `Profil "${cleanName}" gelöscht.` });
+              }
+              case "get": {
+                const found = getDirectiveById(cleanName, "");
+                if (!found) throw profileNotFound(cleanName);
+                return json({ success: true, store, action, directive: found, is_active: getActiveIds().includes(found.id) });
+              }
+              case "activate": {
+                const found = getDirectiveById(cleanName, "");
+                if (!found) throw profileNotFound(cleanName);
+                if (getActiveIds().includes(cleanName)) {
+                  return json({
+                    success: true,
+                    store,
+                    action,
+                    already_active: true,
+                    ...stack(),
+                    message: `Profil "${cleanName}" ist bereits aktiv — keine Änderung.`,
+                  });
+                }
+                const activated = addActiveDirective(cleanName, "");
+                return json({
+                  success: true,
+                  store,
+                  action,
+                  activated: { id: activated.id, description: activated.description },
+                  ...stack(),
+                  message: `Profil "${activated.id}" aktiviert. Wird indirekt bei generate_image/image_edit berücksichtigt.`,
+                });
+              }
+              case "deactivate": {
+                const found = getDirectiveById(cleanName, "");
+                if (!found) throw profileNotFound(cleanName);
+                if (!getActiveIds().includes(cleanName)) {
+                  return json({
+                    success: true,
+                    store,
+                    action,
+                    already_inactive: true,
+                    ...stack(),
+                    message: `Profil "${cleanName}" war nicht aktiv — keine Änderung.`,
+                  });
+                }
+                removeActiveDirective(cleanName);
+                return json({ success: true, store, action, deactivated: cleanName, ...stack(), message: `Profil "${cleanName}" deaktiviert.` });
+              }
+              default:
+                throw new Error(`Unbekannter action "${action}".`);
+            }
           }
-          case "update": {
-            const hasDesc = description.trim().length > 0;
-            const hasPrompt = prompt.trim().length > 0;
-            if (!hasDesc && !hasPrompt) throw new Error("For update, provide at least description or prompt.");
-            const updated = updateDirective(cleanName, hasDesc ? description : undefined, hasPrompt ? prompt : undefined, text_);
-            return json({ success: true, action, directive: updated, message: `Aktualisiert: ${updated.id}.` });
+
+          if (store === "book") {
+            if (!cleanName) throw new Error('name (Buch-Id) ist Pflicht bei store:"book".');
+            switch (action) {
+              case "create": {
+                const created = createBook(cleanName, description);
+                return json({
+                  success: true,
+                  store,
+                  action,
+                  book: created,
+                  ...stack(),
+                  message: `Buch "${created.id}" erstellt. Records: inclination_prompt_manage({store:"record", action:"create", book:"${created.id}", …}).`,
+                });
+              }
+              case "update": {
+                if (!description.trim()) throw new Error("description ist Pflicht für book.update.");
+                const updated = updateBook(cleanName, description);
+                return json({ success: true, store, action, book: updated, ...stack(), message: `Buch "${updated.id}" aktualisiert.` });
+              }
+              case "delete": {
+                const { deletedRecords } = deleteBook(cleanName);
+                return json({
+                  success: true,
+                  store,
+                  action,
+                  deleted: cleanName,
+                  deleted_records: deletedRecords,
+                  ...stack(),
+                  message: `Buch "${cleanName}" gelöscht${deletedRecords.length ? ` inkl. ${deletedRecords.length} Record(s)` : ""}.`,
+                });
+              }
+              case "get": {
+                const found = getBookById(cleanName);
+                if (!found) throw bookNotFound(cleanName);
+                const own = getAllRecords().filter((r) => r.book === found.id);
+                const refs = getActiveRecordRefs();
+                return json({
+                  success: true,
+                  store,
+                  action,
+                  book: found,
+                  record_count: own.length,
+                  active_count: own.filter((r) => refs.includes(refOf(r.book, r.id))).length,
+                  records: own.map((r) => ({ id: r.id, aspect: r.aspect, keys: r.keys, is_active: refs.includes(refOf(r.book, r.id)) })),
+                  note: "Volltexte: inclination_prompt_library({book:\"" + found.id + "\"}).",
+                });
+              }
+              case "activate": {
+                const found = getBookById(cleanName);
+                if (!found) throw bookNotFound(cleanName);
+                const own = getAllRecords().filter((r) => r.book === found.id);
+                if (own.length === 0) {
+                  return json({ success: true, store, action, activated_records: 0, ...stack(), message: `Buch "${found.id}" enthält keine Records.` });
+                }
+                let added = 0;
+                let already = 0;
+                let w = 0;
+                for (const r of own) {
+                  const res = addActiveRecord(r.book, r.id);
+                  if (res.alreadyActive) already++;
+                  else {
+                    added++;
+                    w += words(r.content);
+                  }
+                }
+                return json({
+                  success: true,
+                  store,
+                  action,
+                  activated_records: added,
+                  already_active: already,
+                  estimated_words: w,
+                  ...stack(),
+                  message:
+                    added > 0
+                      ? `${added} Record(s) aus "${found.id}" aktiviert (${w} Wörter Injektion). Stilistisch verweben, nicht wörtlich präfixen.`
+                      : `Alle ${already} Record(s) von "${found.id}" waren bereits aktiv — keine Änderung.`,
+                });
+              }
+              case "deactivate": {
+                const found = getBookById(cleanName);
+                if (!found) throw bookNotFound(cleanName);
+                const removed = removeActiveRecordsOfBook(found.id);
+                return json({
+                  success: true,
+                  store,
+                  action,
+                  deactivated_records: removed,
+                  ...stack(),
+                  message: removed
+                    ? `${removed} Record(s) aus "${found.id}" deaktiviert.`
+                    : `Keine aktiven Records in "${found.id}" — keine Änderung.`,
+                });
+              }
+              default:
+                throw new Error(`Unbekannter action "${action}".`);
+            }
           }
-          case "delete": {
-            deleteDirective(cleanName, text_);
-            return json({ success: true, action, deleted_id: cleanName, message: `Gelöscht: ${cleanName}.` });
+
+          // store === "record"
+          if (!cleanBook) throw new Error('book (Buch-Id) ist Pflicht bei store:"record".');
+          if (!cleanName) throw new Error('name (Record-Id) ist Pflicht bei store:"record".');
+          const ref = refOf(cleanBook, cleanName);
+          switch (action) {
+            case "create": {
+              if (!aspect.trim())
+                throw new Error(`aspect ist Pflicht für record.create. Bekannte Facetten: ${listAspects().join(", ")}.`);
+              if (!content.trim()) throw new Error("content ist Pflicht für record.create.");
+              const { record, bookCreated } = createRecord({
+                book: cleanBook,
+                id: cleanName,
+                aspect,
+                keys: splitKeys(keys),
+                content,
+              });
+              const newRef = refOf(record.book, record.id);
+              return json({
+                success: true,
+                store,
+                action,
+                record,
+                book_created: bookCreated,
+                ...stack(),
+                message:
+                  `Record "${newRef}" erstellt${bookCreated ? ` (Buch "${record.book}" neu angelegt)` : ""}. ` +
+                  `Aktivieren: inclination_prompt_manage({store:"record", action:"activate", book:"${record.book}", name:"${record.id}"}).`,
+              });
+            }
+            case "update": {
+              const hasAspect = aspect.trim().length > 0;
+              const hasKeys = keys.trim().length > 0;
+              const hasContent = content.trim().length > 0;
+              if (!hasAspect && !hasKeys && !hasContent)
+                throw new Error("Für record.update mindestens aspect, keys oder content mitgeben.");
+              const updated = updateRecord(cleanBook, cleanName, {
+                ...(hasAspect ? { aspect } : {}),
+                ...(hasKeys ? { keys: splitKeys(keys) } : {}),
+                ...(hasContent ? { content } : {}),
+              });
+              return json({ success: true, store, action, record: updated, ...stack(), message: `Record "${refOf(updated.book, updated.id)}" aktualisiert.` });
+            }
+            case "delete": {
+              deleteRecord(cleanBook, cleanName);
+              return json({ success: true, store, action, deleted: ref, ...stack(), message: `Record "${ref}" gelöscht.` });
+            }
+            case "get": {
+              const found = getRecordById(cleanBook, cleanName);
+              if (!found) throw recordNotFound(ref);
+              return json({
+                success: true,
+                store,
+                action,
+                record: { ref: refOf(found.book, found.id), ...found },
+                is_active: getActiveRecordRefs().includes(refOf(found.book, found.id)),
+              });
+            }
+            case "activate": {
+              const { record, alreadyActive } = addActiveRecord(cleanBook, cleanName);
+              if (alreadyActive) {
+                return json({ success: true, store, action, already_active: true, ...stack(), message: `Record "${ref}" ist bereits aktiv — keine Änderung.` });
+              }
+              return json({
+                success: true,
+                store,
+                action,
+                activated: { ref: refOf(record.book, record.id), book: record.book, id: record.id, aspect: record.aspect },
+                estimated_words: words(record.content),
+                ...stack(),
+                message: `Record "${ref}" aktiviert (${words(record.content)} Wörter). Wird indirekt bei generate_image/image_edit verwebt.`,
+              });
+            }
+            case "deactivate": {
+              const found = getRecordById(cleanBook, cleanName);
+              if (!found) throw recordNotFound(ref);
+              if (!removeActiveRecord(cleanBook, cleanName)) {
+                return json({ success: true, store, action, already_inactive: true, ...stack(), message: `Record "${ref}" war nicht aktiv — keine Änderung.` });
+              }
+              return json({ success: true, store, action, deactivated: ref, ...stack(), message: `Record "${ref}" deaktiviert.` });
+            }
+            default:
+              throw new Error(`Unbekannter action "${action}".`);
           }
-          case "get": {
-            const found = getDirectiveById(cleanName, text_);
-            if (!found) throw new Error(`Profil "${cleanName}" nicht gefunden.`);
-            return json({ success: true, action, directive: found, is_active: getActiveIds().includes(found.id) });
-          }
-          default:
-            throw new Error(`Unknown action ${action}`);
         }
-      }),
+      ),
     }),
 
     tool({
-      name: "inclination_prompt_action",
+      name: "inclination_prompt_library",
       description: text`
-        Look up an action/technique record from the Dominatrix skillset LIBRARY (A01–A33 + extras) – einheitlicher Prefix inclination_prompt_.
+        Nachschlagewerk für Technik-/Stil-Records — Bücher "skillset" (A01–A33) und "lorebook" (Masken, Reiche, Töne, Filter) plus eigene Bücher – einheitlicher Prefix inclination_prompt_. READ-ONLY, verändert nichts.
 
-        Records are keyword-indexed technique entries (session structure, positions, impact ladder, bondage safety, sensory, aftercare, realm style, tones, safety …).
-        Call with:
-        - '' (blank) → full catalog: ids + keywords only (compact).
-        - an exact id ('A01'–'A33', 'switching-kenosis', 'faith-father') → the full record content.
-        - a keyword ('impact', 'aftercare', 'collar' …) → exact key hit returns the full record;
-          partial hits return a narrowed candidate list (pick an id from it).
+        - query "" → kompakter Katalog (ref, id, book, aspect, keys) + facets + books.
+        - query = exakte id ('A08', 'realm-combos', 'tone-rage') oder Keyword ('impact', 'aftercare') → voller Record.
+        - query = Wortteil → Trefferliste (greift auf id, keys, aspect, content).
+        - book / aspect filtern (z.B. book:"lorebook", aspect:"realm").
 
-        Returned content is STAGING GUIDANCE FOR YOU: weave it indirectly into the next
-        generate_image/image_edit prompt — do not paste it verbatim as image-model text.
-        On-demand only: not persisted, not injected every turn. For persistent style layers
-        use inclination_prompt_set (stacking).
+        Der Record-Inhalt ist STAGING-GUIDANCE FÜR DICH: indirekt in den nächsten
+        generate_image/image_edit-Prompt weben, nicht wörtlich als Präfix kopieren.
+        On-demand, nicht injiziert. Dauerhafter Style = in den Stack heben:
+        inclination_prompt_manage({store:"record", action:"activate", …}).
+        Gesamtübersicht (Profile, Bücher, aktive Stacks) → inclination_prompt_list.
       `,
       parameters: {
-        action: z.string().default("").describe(
-          "Action id ('A01'–'A33', 'switching-kenosis', 'faith-father'), a keyword from the record keys, " +
-          "or '' to list the full catalog (ids + keywords)."
-        ),
+        query: z.string().default("").describe("Record-Id, Keyword oder Wortteil; '' = kompakter Katalog."),
+        book: z.string().default("").describe("Optional: nur dieses Buch (z.B. 'skillset', 'lorebook' oder eigene Buch-Id)."),
+        aspect: z.string().default("").describe("Optional: nur diese Facette (session, role, positions, bondage, sensation, play, training, tones, aftercare, spaces, safety, realm)."),
       },
-      implementation: safe_impl("inclination_prompt_action", async ({ action }, _ctx) => {
-        const q = action.trim();
-        if (!q) {
+      implementation: safe_impl("inclination_prompt_library", async ({ query = "", book = "", aspect = "" }) => {
+        const all = getAllRecords();
+        const books = getAllBooks();
+        const activeRefs = getActiveRecordRefs();
+        const cleanBook = book.trim().toLowerCase();
+        const cleanAspect = aspect.trim().toLowerCase();
+        const res = lookupLibrary(all, { query, book, aspect });
+
+        const compact = (r: (typeof all)[number]) => ({
+          ref: refOf(r.book, r.id),
+          id: r.id,
+          book: r.book,
+          aspect: r.aspect,
+          keys: r.keys,
+          is_active: activeRefs.includes(refOf(r.book, r.id)),
+        });
+
+        const scoped = all.filter(
+          (r) => (!cleanBook || r.book === cleanBook) && (!cleanAspect || r.aspect === cleanAspect)
+        );
+        const facetCounts = new Map<string, number>();
+        for (const r of scoped) facetCounts.set(r.aspect, (facetCounts.get(r.aspect) ?? 0) + 1);
+        const facets = Array.from(facetCounts.entries())
+          .map(([a, count]) => ({ aspect: a, count }))
+          .sort((x, y) => x.aspect.localeCompare(y.aspect));
+        const bookList = books.map((b) => ({
+          id: b.id,
+          description: b.description,
+          source: b.source,
+          readonly: b.readonly,
+          record_count: all.filter((r) => r.book === b.id).length,
+        }));
+
+        if (res.mode === "catalog") {
           return json({
-            count: ACTION_RECORDS.length,
-            catalog: ACTION_RECORDS.map((r) => ({ id: r.id, keys: r.keys })),
-            usage: "Call again with an exact id (e.g. 'A08') to get the full record content.",
+            mode: "catalog",
+            query: query.trim() || "(all)",
+            book: cleanBook || "(all)",
+            aspect: cleanAspect || "(all)",
+            count: res.records.length,
+            records: res.records.map(compact),
+            facets,
+            books: bookList,
+            usage: "Exakte id oder Keyword in query liefern den Volltext eines Records.",
           });
         }
-        const hits = lookupActionRecords(q);
-        if (hits.length === 0) {
+
+        if (res.mode === "record") {
+          const r = res.records[0];
+          return json({
+            mode: "record",
+            record: { ref: refOf(r.book, r.id), id: r.id, book: r.book, aspect: r.aspect, keys: r.keys, content: r.content, source: r.source },
+            is_active: activeRefs.includes(refOf(r.book, r.id)),
+            usage:
+              "Staging-Guidance: indirekt in den nächsten generate_image/image_edit-Prompt einweben " +
+              "(nicht wörtlich präfixen). On-demand, nicht injiziert — dauerhaft aktiv über " +
+              `inclination_prompt_manage({store:"record", action:"activate", book:"${r.book}", name:"${r.id}"}).`,
+          });
+        }
+
+        if (res.records.length === 0) {
           throw new Error(
-            `Kein Action-Record für "${q}". Mit '' aufrufen für den Katalog (Ids + Keywords).`
+            `Keine Treffer für "${query.trim()}"${cleanBook ? ` in Buch "${cleanBook}"` : ""}${cleanAspect ? ` (aspect "${cleanAspect}")` : ""}. ` +
+              `Mit query:"" für den Katalog. Facetten: ${facets.map((f) => `${f.aspect}(${f.count})`).join(", ") || listAspects().join(", ")}. ` +
+              `Bücher: ${bookList.map((b) => `${b.id}(${b.record_count})`).join(", ")}.`
           );
         }
-        if (hits.length === 1) {
-          return json({
-            record: hits[0],
-            usage:
-              "Staging-Guidance für dich: indirekt in den nächsten generate_image/image_edit-Prompt " +
-              "einweben (nicht wörtlich präfixen). On-demand, nicht persistiert — dauerhafter Style " +
-              "via inclination_prompt_set (Stacking).",
-          });
-        }
+
+        const sameId = res.records.every((r) => r.id === res.records[0].id);
         return json({
-          matches: hits.map((r) => ({ id: r.id, keys: r.keys })),
-          count: hits.length,
-          usage: `Mehrere Treffer — wähle eine exakte id, z.B. inclination_prompt_action({action:"${hits[0].id}"}).`,
+          mode: "matches",
+          query: query.trim(),
+          count: res.records.length,
+          matches: res.records.map(compact),
+          facets,
+          usage: sameId
+            ? `Die id existiert in mehreren Büchern — mit book einschränken (Treffer: ${res.records.map((r) => r.book).join(", ")}).`
+            : `Mehrere Treffer — wähle eine exakte ref, z.B. inclination_prompt_library({query:"${res.records[0].id}"}).`,
         });
       }),
     }),

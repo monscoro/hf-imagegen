@@ -53,7 +53,7 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: "Enable Inclination Prompts",
     subtitle:
       "Master switch for the Neigungsprompt/Stimmungsprompt subsystem " +
-      "(inclination_prompt_list, inclination_prompt_set, inclination_prompt_manage). " +
+      "(inclination_prompt_list, inclination_prompt_manage, inclination_prompt_library). " +
       "Off hides these tools and stops injecting active style profiles into the LLM context. " +
       "Previously active profiles stay stored and resume when re-enabled. Default: on.",
   }, true)

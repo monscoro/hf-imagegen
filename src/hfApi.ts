@@ -30,6 +30,7 @@ interface HFModel {
   };
   pipeline_tag?: string;
   safetensors?: { total?: number };
+  createdAt?: string;
 }
 
 export function getCuratedModels(): ModelInfo[] {
@@ -83,12 +84,66 @@ export function isLoRAArtifact(modelId: string): boolean {
   return modelId.slice(modelId.indexOf("/") + 1).toLowerCase().includes("lora");
 }
 
-/** Verwirft Quantisierungen und LoRAs — beides sind keine aufrufbaren Modelle. */
-function dropArtifacts<T extends { id: string }>(models: T[], limit: number): T[] {
-  const kept = models.filter(
-    (m) => !isQuantizationArtifact(m.id) && !isLoRAArtifact(m.id)
-  );
+/**
+ * Verwirft, was als `model_id` nicht aufrufbar ist. Vier Gruende, alle
+ * gemessen an den echten Katalogdaten:
+ *
+ * 1. Quantisierungen (GGUF/GPTQ/…) — 26 % der trending-Top-100.
+ * 2. LoRAs — 53 % der nutzbaren image-to-image-Modelle.
+ * 3. Pre-SDXL-Modelle — Schwelle Juli 2023, siehe isPreSdxlArtifact.
+ * 4. Modelle ohne liveen Provider — ohne einen scheitert backend='hf'.
+ *
+ * Zu Punkt 4 eine bewusste Ausnahme: ist der Katalog nicht geladen (kein
+ * Cache, Endpoint tot), wird NICHT nach Provider gefiltert. Sonst wuerde ein
+ * Katalogausfall genau dann alle Listen leeren, wenn ohnehin etwas kaputt ist.
+ * In dem Fall kommen die Modelle ohne Anreicherung zurueck, aber sichtbar.
+ *
+ * `filterByProvider=false` fuer source='provider': dort ist die Anfrage selbst
+ * schon nach Provider gefiltert (`?inference_provider=fal-ai`), das Ergebnis
+ * ist also der Beleg. Der Katalog deckt nur die 1000 meistgelikten Modelle je
+ * Task ab und wuerde sonst genau die Modelle wegfiltern, die der Server
+ * ausdruecklich als verfuegbar ausgewiesen hat.
+ */
+function keepUsableModels<T extends { id: string; createdAt?: string }>(
+  models: T[],
+  limit: number,
+  filterByProvider: boolean = true
+): T[] {
+  const catalogLoaded = hfCatalogIndex !== null;
+  const kept = models.filter((m) => {
+    if (isQuantizationArtifact(m.id)) return false;
+    if (isLoRAArtifact(m.id)) return false;
+    if (isPreSdxlArtifact(m.id, m.createdAt)) return false;
+    if (filterByProvider && catalogLoaded && getHfLiveProviders(m.id).length === 0) return false;
+    return true;
+  });
   return kept.length > limit ? kept.slice(0, limit) : kept;
+}
+
+/** SDXL-Basis ist Juli 2023; davor ist alles Vor-SDXL. */
+const SDXL_EPOCH_MS = Date.UTC(2023, 6, 1);
+
+/**
+ * Direkte Altlast-Repos. Eine Namens-Deny-Liste der Community-Finetunes
+ * (`dreamshaper-7`, `Realistic_Vision_V5.1`, …) waere unbrauchbar: die tragen
+ * weder "stable-diffusion" im Namen noch einen `base_model`-Tag — geprueft,
+ * beide Signale fehlen. Deshalb entscheidet das Datum, und die Liste hier
+ * faengt nur die offiziellen Repos sowie spaeter hochgeladene Altlasten ab.
+ *
+ * "stable-diffusion-3" und "-xl" matchen bewusst NICHT: SD 3.x und SDXL
+ * bleiben drin, sie sind juenger als die Schwelle und technisch relevant.
+ */
+const PRE_SDXL_NAME =
+  /stable-diffusion-(v1|v2|1|2)(\b|[-_.])|runwayml\/|compvis\/|\bsd-?(v1|1\.5|15|2)\b|\bv1-5\b/i;
+
+export function isPreSdxlArtifact(modelId: string, createdAt?: string): boolean {
+  const repo = modelId.slice(modelId.indexOf("/") + 1);
+  if (PRE_SDXL_NAME.test(repo)) return true;
+  if (typeof createdAt === "string") {
+    const t = Date.parse(createdAt);
+    if (Number.isFinite(t) && t < SDXL_EPOCH_MS) return true;
+  }
+  return false;
 }
 
 const HF_CATALOG_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -339,7 +394,7 @@ export async function getProviderModels(
   const cached = getCachedProviderModels(provider, limit);
   if (cached) return cached;
 
-  const fetchLimit = Math.min(limit * 2, 100);
+  const fetchLimit = Math.min(limit * 12, 500);
   const url = `${HF_API_BASE}/models?inference_provider=${provider}&pipeline_tag=text-to-image&sort=trendingScore&limit=${fetchLimit}`;
 
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -348,7 +403,7 @@ export async function getProviderModels(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = dropArtifacts((await res.json()) as HFModel[], limit);
+  const models = keepUsableModels((await res.json()) as HFModel[], limit, false);
 
   await ensureCatalogBestEffort();
   const result = models.map((m) =>
@@ -366,7 +421,7 @@ export async function getTrendingModels(
   const cached = getCachedTrendingModels(limit);
   if (cached) return cached;
 
-  const fetchLimit = Math.min(limit * 2, 100);
+  const fetchLimit = Math.min(limit * 12, 500);
   const url = `${HF_API_BASE}/models?pipeline_tag=text-to-image&sort=trendingScore&limit=${fetchLimit}`;
 
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -375,7 +430,7 @@ export async function getTrendingModels(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = dropArtifacts((await res.json()) as HFModel[], limit);
+  const models = keepUsableModels((await res.json()) as HFModel[], limit);
 
   await ensureCatalogBestEffort();
   const result = models.map((m) =>
@@ -393,7 +448,7 @@ export async function getDownloadedModels(
   const cached = getCachedDownloadedModels(limit);
   if (cached) return cached;
 
-  const fetchLimit = Math.min(limit * 2, 100);
+  const fetchLimit = Math.min(limit * 12, 500);
   const url = `${HF_API_BASE}/models?pipeline_tag=text-to-image&sort=downloads&limit=${fetchLimit}`;
 
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -402,7 +457,7 @@ export async function getDownloadedModels(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = dropArtifacts((await res.json()) as HFModel[], limit);
+  const models = keepUsableModels((await res.json()) as HFModel[], limit);
 
   await ensureCatalogBestEffort();
   const result = models.map((m) =>
@@ -438,7 +493,11 @@ export async function getHfImageEditModels(limit: number = 20): Promise<ModelInf
   if (!hfCatalogIndex) return curated.slice(0, limit);
 
   const withProvider = [...hfCatalogIndex.values()].filter(
-    (e) => e.task === "image-to-image" && e.providers.some((p) => p.status === "live")
+    (e) =>
+      e.task === "image-to-image" &&
+      e.providers.some((p) => p.status === "live") &&
+      // gleiche Altsschwelle wie in den Ranking-Listen
+      !isPreSdxlArtifact(e.id)
   );
   if (withProvider.length === 0) return curated.slice(0, limit);
 

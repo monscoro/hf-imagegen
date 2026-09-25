@@ -1003,14 +1003,19 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         HUGGINGFACE ROWS carry live catalog data, cached 12h on disk:
         - hf_providers: the inference providers currently serving it (status "live").
-          MISSING means no provider serves it, so backend='hf' would fail — such a
-          model is only usable if you run it locally (lmstudio) or pull its weights.
+          For source="provider" the field can be missing: the query itself is the
+          proof, the catalog only covers the 1000 most-liked models per task.
         - hf_latency_ms: measured request latency, the fastest live provider. This is
           where 'speed' comes from, so it is real data, not a guess.
         - image_edit: from the model's pipeline_tag. Absent = the model is outside the
           1000 most-liked per task, so HuggingFace simply does not say.
-        LoRAs and quantizations (GGUF/GPTQ/AWQ/FP8/…) are filtered out of all model
-        lists — they are adapters, not models, and fail as model_id. Use list_loras.
+        Every model list is filtered down to what is actually callable: LoRAs and
+        quantizations (GGUF/GPTQ/AWQ/FP8/INT8/…) are adapters, not models; models from
+        before SDXL (July 2023) are dropped by repository date, so SD 1.x/1.5/2.x and
+        their finetunes are gone while SDXL and SD 3.x stay; and a model no provider
+        serves is removed, since backend='hf' would fail on it. If the catalog is
+        unreachable, the provider filter is skipped rather than emptying every list.
+        Use list_loras to search adapters.
         Two things HuggingFace does NOT publish, so they stay static here and are not
         derived from the catalog: max_reference_images (always 1 for HF) and per-call
         cost (HuggingFace gates its provider price list behind a login).

@@ -124,9 +124,22 @@ list_models(source?, provider?, limit?, include_loras?, include_catalog?, filter
 
 LoRA lookup (`include_loras`) and `list_loras` are HF-only.
 
-**Two artifact filters.** All model lists drop LoRAs and quantizations (GGUF/GPTQ/AWQ/FP8/INT8/…) — they are adapters, not models, and fail as `model_id`. This matters more than it sounds: LoRAs were 53 % of the usable `image-to-image` models and 35 % of `text-to-image`, including the most-liked entry of all (`fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA`, 1549 likes). Only the repo name is checked, not the author. `list_loras` is deliberately not filtered.
+**Four filters, so every list is callable.** All model lists drop what fails as a `model_id`:
 
-**HF rows carry measured data, not guesses.** `hf_providers` lists the inference providers currently serving the model (status `live`), `hf_latency_ms` is the measured latency of the fastest one, and `speed` is derived from that. A **missing** `hf_providers` means no provider serves the model, so `backend='hf'` would fail — it is only usable locally (`lmstudio`) or by pulling its weights. A missing `image_edit` means the model is outside the 1000 most-liked per task, so HuggingFace simply does not say; it is not a `false`. Two things HF does not publish stay static and are not derived from the catalog: `max_reference_images` (always 1 for the HF backend, a plugin constraint) and per-call cost (HF gates its provider price list behind a login, `/api/inference-providers` answers `401` anonymously).
+| Filter | What it removes | Why |
+|---|---|---|
+| Quantizations | GGUF/GPTQ/AWQ/EXL2/FP8/INT8/… | 26 % of the trending top 100. Same weights, different format. |
+| LoRAs | anything with `lora` in the repo name | 53 % of usable `image-to-image` models — including the most-liked entry of all (`fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA`, 1549 likes). |
+| Pre-SDXL | repo `createdAt` before July 2023, plus the official `stable-diffusion-v1/2` repos | SD 1.x/1.5/2.x and their finetunes. SDXL and SD 3.x stay. |
+| No live provider | models no provider serves with status `live` | `backend='hf'` would fail on them. |
+
+Only the repo name is checked, never the author — otherwise someone called "lora-collective" would vanish. `list_loras` is deliberately not filtered.
+
+The pre-SDXL cutoff is **date-based, not name-based**, and that was a measurement: SD-1.5 finetunes like `dreamshaper-7` or `Realistic_Vision_V5.1` carry neither "stable-diffusion" in their name nor a `base_model` tag — both signals checked, both absent. A deny-list of community names would just be the hand-maintenance this plugin removed elsewhere. The one blind spot: a pre-SDXL checkpoint re-uploaded under a neutral name after July 2023 survives.
+
+Two deliberate exceptions. For `source="provider"` the provider filter is skipped, because the query `?inference_provider=fal-ai` is itself the proof and the catalog only covers the 1000 most-liked models per task. And if the catalog is unreachable, the provider filter is skipped too — a catalog outage must not empty every list exactly when something is already broken.
+
+**HF rows carry measured data, not guesses.** `hf_providers` lists the inference providers currently serving the model (status `live`), `hf_latency_ms` is the measured latency of the fastest one, and `speed` is derived from that. A missing `image_edit` means the model is outside the 1000 most-liked per task, so HuggingFace simply does not say; it is not a `false`. Two things HF does not publish stay static and are not derived from the catalog: `max_reference_images` (always 1 for the HF backend, a plugin constraint) and per-call cost (HF gates its provider price list behind a login, `/api/inference-providers` answers `401` anonymously).
 
 **Model catalog caching.** Two independent 12-hour caches, both under `~/.cache/hf-image-gen/` and both surviving plugin reloads and LM Studio restarts. Set `HF_IMAGE_GEN_CACHE_DIR` to relocate them; neither ever holds a token or API key.
 

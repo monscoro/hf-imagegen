@@ -1000,6 +1000,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         is usable as model_id. include_catalog:false skips the block (saves ~1.7k
         tokens); filter narrows it by id/alias/title/publisher.
 
+        A note field on a row means max_reference_images does NOT tell the whole story.
+        Most important: the whole FLUX.2 family (klein/pro/flex/max) is multi-image —
+        klein (curated, 10) for cheap mass edits, pro for quality, flex for typography,
+        max for consistency. BFL caps the API at 8 slots; the 10 from the catalog is
+        the playground number. pro and max additionally share a 9MP input+output
+        budget, so 8 references only fit at 1MP output.
+
         Rule of thumb: IDs from curated/provider/trending/downloads only work with
         generate_image backend='hf'; IDs from source='pollinations' only with
         backend='pollinations'; IDs from source='image-edit' only with image_edit.

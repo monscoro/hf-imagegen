@@ -209,6 +209,17 @@ Seven curated picks, each with its own role — cheapest per role rather than "e
 
 Everything else (e.g. `flux.2-pro`, `ideogram-v4-turbo` for text-in-image, `qwen-image-3`, `wan-2.7-image`, `z-image-turbo`) is **not** curated, but still reachable: `list_models source="pollinations"` returns the full live catalog under `catalog_extras` with `max_reference_images` and cost. The curated list stays short because the live one doesn't need manual upkeep.
 
+**The FLUX.2 family is multi-image throughout** — all four variants edit several references at once, so the family covers a lot of ground even though only `klein` is curated:
+
+| Model | Refs | ~Cost/image | Role |
+|---|---|---|---|
+| `flux.2-klein-4b` | 10 | 0.005 | cheap mass edits, free, curated |
+| `flux.2-pro` | 8 | 0.011 | BFL's default for quality, up to 4MP |
+| `flux.2-flex` | 10 | 0.0375 | typography and small-detail preservation |
+| `flux.2-max` | 8 | 0.03 | strongest edit consistency and prompt following |
+
+Two limits the catalog number doesn't show, so they are carried in a `note` field on the affected rows: Black Forest Labs caps the **API at 8 slots** (`input_image` … `input_image_8`) — the "up to 10" figure is the playground UI. And `[pro]`/`[max]` share a **9MP input+output budget**: 8 references only fit at 1MP output, at 2MP only 7. `flux.2-flex` and `flux.2-max` also show 0 requests on Pollinations, i.e. they are listed but unproven.
+
 ---
 
 ## Workflows

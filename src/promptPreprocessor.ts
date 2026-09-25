@@ -33,7 +33,10 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
      MULTI-IMAGE: for 2+ references put the first in 'image' and the rest in 'images',
      and pick a model with a high max_reference_images; verified examples:
       black-forest-labs/flux.2-klein-4b (10, ~0.005, free), openai/gpt-image-2 (16),
-      bytedance/seedream-5.0-lite (14), google/gemini-3-pro-image (14). Exceeding the declared
+      bytedance/seedream-5.0-lite (14), google/gemini-3-pro-image (14). The whole FLUX.2
+      family is multi-image: pro (quality, 8), flex (typography, 10), max (consistency, 8)
+      are in catalog_extras. BFL caps the API at 8 slots, and pro/max share a 9MP
+      input+output budget — 8 refs only at 1MP output. Exceeding the declared
       limit only warns (catalog is advisory) — but flux.1-kontext-pro really drops image 2.
       → list_models source="pollinations" lists per model image_edit / max_reference_images /
       multi_image straight from the live catalog; use it instead of guessing.

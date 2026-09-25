@@ -87,7 +87,10 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
     id: "black-forest-labs/flux.2-klein-4b",
     description:
       "FLUX.2 Klein 4B — mit Abstand günstigstes MULTI-Referenz-Modell: ~0.005 " +
-      "pollen/Bild, gratis, bis 10 Referenzen. Die Wahl für viele Bildvarianten.",
+      "pollen/Bild, gratis, bis 10 Referenzen. Teil der FLUX.2-Familie, in der ALLE " +
+      "Varianten Multi-Image können: pro (Qualität, 8), flex (Typografie, 10), " +
+      "max (Konsistenz, 8) — die Geschwister stehen in catalog_extras. " +
+      "Die Wahl für viele Bildvarianten.",
     style: "photorealistic, artistic",
     speed: "fast",
     access: "free",
@@ -377,6 +380,30 @@ const REFERENCE_EXPERIENCE: Record<string, string> = {
   "x-ai/grok-imagine-image-quality": "2 (Katalog sagt 1, verarbeitet aber 2)",
 };
 
+/**
+ * Family-/Budget-Hinweise fuer Live-Modelle, die NICHT in der kuratierten Liste
+ * stehen. Der Katalog nennt nur eine Zahl (max_reference_images), aber nicht die
+ * Rolle in der Modellfamilie und nicht die upstream Budgetregel — beides ist genau
+ * das, was ein LLM bei der Modellauswahl braucht.
+ *
+ * FLUX.2: alle vier Varianten (klein/pro/flex/max) sind multi-image-faehig.
+ * BFL limitet die API aber auf 8 Slots (input_image .. input_image_8); "bis 10"
+ * gilt nur in der Playground-UI. Bei pro/max kommt ein 9MP-Budget fuer Input+Output
+ * dazu: 8 Referenzen nur bei 1MP-Output, bei 2MP nur 7.
+ * Quelle: docs.bfl.ai/flux_2/flux2_image_editing + Prompting Guide.
+ */
+const CATALOG_NOTES: Record<string, string> = {
+  "black-forest-labs/flux.2-pro":
+    "FLUX.2-Familie (klein/pro/flex/max sind alle multi-image) — BFL-Empfehlung fuer " +
+    "Qualitaet, 4MP. Achtung: 9MP-Budget Input+Output, 8 Refs nur bei 1MP-Output (bei 2MP nur 7).",
+  "black-forest-labs/flux.2-flex":
+    "FLUX.2-Familie — Spezialist fuer Typografie und kleine Details (ersetzt die " +
+    "Text-im-Bild-Rolle von ideogram). 10 Refs laut Katalog, ueber BFL-API sind es 8.",
+  "black-forest-labs/flux.2-max":
+    "FLUX.2-Familie — staerkste Edit-Konsistenz und Prompt-Treue der Linie. " +
+    "9MP-Budget wie pro. Auf Pollinations bisher 0 Requests, ungetestet.",
+};
+
 export interface PollinationsReferenceSupport {
   imageEdit: boolean;
   maxReferenceImages: number;
@@ -390,6 +417,8 @@ export interface PollinationsCatalogEntry {
   max_reference_images: number;
   /** Nur gesetzt, wenn das Label etwas erklaert (image_edit nein oder empirischer Sonderfall). */
   multi_image?: string;
+  /** Nur gesetzt, wenn es etwas gibt, was max_reference_images nicht sagt. */
+  note?: string;
   health: string;
   paid_only: boolean;
 }
@@ -451,6 +480,7 @@ export function listPollinationsCatalogExtras(
     if (!caps.output_modalities?.includes("image")) continue;
     if (seen.has(caps.name.toLowerCase())) continue;
     const aliases = (caps.aliases ?? []).filter((a) => a !== caps.name);
+    const note = CATALOG_NOTES[caps.name.toLowerCase()];
     if (
       f &&
       !caps.name.toLowerCase().includes(f) &&
@@ -471,6 +501,7 @@ export function listPollinationsCatalogExtras(
       image_edit: support.imageEdit,
       max_reference_images: support.maxReferenceImages,
       ...(needsLabel ? { multi_image: support.multiImage } : {}),
+      ...(note ? { note } : {}),
       health: caps.health?.status ?? "unknown",
       paid_only: caps.paid_only === true,
     });

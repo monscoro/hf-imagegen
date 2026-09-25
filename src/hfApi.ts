@@ -23,13 +23,7 @@ interface HFModel {
   downloads?: number;
   likes?: number;
   tags?: string[];
-  cardData?: {
-    base_model?: string;
-    license?: string;
-    language?: string[];
-  };
   pipeline_tag?: string;
-  safetensors?: { total?: number };
   createdAt?: string;
 }
 
@@ -93,28 +87,33 @@ export function isLoRAArtifact(modelId: string): boolean {
  * 3. Pre-SDXL-Modelle — Schwelle Juli 2023, siehe isPreSdxlArtifact.
  * 4. Modelle ohne liveen Provider — ohne einen scheitert backend='hf'.
  *
- * Zu Punkt 4 eine bewusste Ausnahme: ist der Katalog nicht geladen (kein
- * Cache, Endpoint tot), wird NICHT nach Provider gefiltert. Sonst wuerde ein
- * Katalogausfall genau dann alle Listen leeren, wenn ohnehin etwas kaputt ist.
- * In dem Fall kommen die Modelle ohne Anreicherung zurueck, aber sichtbar.
+ * Zu Punkt 4 zwei Ausnahmen, beide mit derselben Begruendung — ein Katalog-
+ * ausfall darf nicht Models wegfiltern, die nachweislich verfuegbar sind:
+ *   - Ist der Katalog nicht geladen, wird gar nicht nach Provider gefiltert.
+ *     Sonst wuerde genau dann jede Liste leer, wenn ohnehin etwas kaputt ist.
+ *   - source='provider': die Anfrage ist selbst nach Provider gefiltert
+ *     (`?inference_provider=fal-ai`), das Ergebnis belegt also ein Mapping.
+ *     Kennt der Katalog das Modell, gilt sein Status (live noetig). Kennt er
+ *     es nicht (ausserhalb der 1000 meistgelikten je Task), bleibt es drin.
  *
- * `filterByProvider=false` fuer source='provider': dort ist die Anfrage selbst
- * schon nach Provider gefiltert (`?inference_provider=fal-ai`), das Ergebnis
- * ist also der Beleg. Der Katalog deckt nur die 1000 meistgelikten Modelle je
- * Task ab und wuerde sonst genau die Modelle wegfiltern, die der Server
- * ausdruecklich als verfuegbar ausgewiesen hat.
+ * In den uebrigen Quellen gilt: was der Katalog nicht kennt, kann nicht
+ * belegt werden und fliegt raus — dort gibt es keinen Query-Beweis.
  */
 function keepUsableModels<T extends { id: string; createdAt?: string }>(
   models: T[],
   limit: number,
-  filterByProvider: boolean = true
+  providerQueried: boolean = false
 ): T[] {
   const catalogLoaded = hfCatalogIndex !== null;
   const kept = models.filter((m) => {
     if (isQuantizationArtifact(m.id)) return false;
     if (isLoRAArtifact(m.id)) return false;
     if (isPreSdxlArtifact(m.id, m.createdAt)) return false;
-    if (filterByProvider && catalogLoaded && getHfLiveProviders(m.id).length === 0) return false;
+    if (catalogLoaded) {
+      const known = getHfCatalogEntry(m.id) !== null;
+      if (known && getHfLiveProviders(m.id).length === 0) return false;
+      if (!known && !providerQueried) return false;
+    }
     return true;
   });
   return kept.length > limit ? kept.slice(0, limit) : kept;
@@ -364,8 +363,18 @@ export async function ensureCatalogBestEffort(): Promise<void> {
  * Steht ein Modell nicht im Katalog (die API listet je Seite hoechstens 1000
  * nach Likes), bleibt image_edit leer statt auf false gesetzt werden. Das
  * unterscheidet "kann kein Edit" von "weiss es nicht".
+ *
+ * `parameters` und `license` werden hier bewusst NICHT gesetzt: die
+ * Listen-Antwort enthaelt weder `safetensors` noch `cardData`, der alte Code
+ * las beide Felder und lieferte dadurch dauerhaft undefined. Nur die kuratierte
+ * Liste traegt handgepflegte Werte, dort kommen sie aus curatedModels.ts.
  */
-function toModelInfo(m: HFModel, source: ModelSource, description: string): ModelInfo {
+function toModelInfo(
+  m: HFModel,
+  source: ModelSource,
+  description: string,
+  assumedProvider?: string
+): ModelInfo {
   const entry = getHfCatalogEntry(m.id);
   const live = getHfLiveProviders(m.id);
   const latency = getHfBestLiveLatency(m.id);
@@ -376,12 +385,12 @@ function toModelInfo(m: HFModel, source: ModelSource, description: string): Mode
     speed: hfSpeedFromLatency(latency) ?? "medium",
     access: "free",
     source,
-    parameters: m.safetensors?.total
-      ? `${Math.round(m.safetensors.total / 1e9)}B`
-      : undefined,
-    license: m.cardData?.license,
     image_edit: entry ? entry.task === "image-to-image" : undefined,
-    hf_providers: live.length > 0 ? live : undefined,
+    // Bei source='provider' belegt die Query selbst die Verfuegbarkeit. Der
+    // Katalog kennt das Modell dann vielleicht nicht (ausserhalb der Top-1000
+    // nach Likes) — statt das Feld zu leeren, wird der abgefragte Provider
+    // genannt. Ein erfundener Status waere es nicht, der Name ist die Quelle.
+    hf_providers: live.length > 0 ? live : assumedProvider ? [assumedProvider] : undefined,
     hf_latency_ms: latency > 0 ? latency : undefined,
   };
 }
@@ -407,7 +416,7 @@ export async function getProviderModels(
 
   await ensureCatalogBestEffort();
   const result = models.map((m) =>
-    toModelInfo(m, "provider", `${m.id} — Text-to-Image model via ${provider}`)
+    toModelInfo(m, "provider", `${m.id} — Text-to-Image model via ${provider}`, provider)
   );
 
   setCachedProviderModels(provider, limit, result);
@@ -571,7 +580,8 @@ export async function getLoRAsForModel(
   const models = (await res.json()) as HFModel[];
 
   function extractBaseModel(m: HFModel): string {
-    if (m.cardData?.base_model) return m.cardData.base_model;
+    // Nur der Tag traegt: die Listen-Antwort enthaelt kein `cardData`, ein
+    // `cardData.base_model`-Zweig waere hier dauerhaft undefined gewesen.
     const tag = (m.tags ?? []).find((t) => t.startsWith("base_model:"));
     return tag ? tag.replace("base_model:", "") : "unknown";
   }

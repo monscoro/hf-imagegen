@@ -1,8 +1,8 @@
 /**
  * Kuratierte Bibliotheks-Bücher (read-only Seed):
- * - skillset : A01–A33 + zwei Slugs aus kristina-lorebook-archive-layer.md (Abschnitt D)
- * - lorebook : §B Session-Bogen, §C Lorelei-Masken, §C2 Seven Realm Arts + Realm-Kombis,
- *              §E Töne, §F Kristina-Filter (bewusst OHNE §D — das steckt schon in skillset)
+ * - skillset : A01–A33 + zwei Slugs (switching-kenosis, faith-father)
+ * - lorebook : Session-Bogen, Lorelei-Masken, Seven Realm Arts + Realm-Kombis,
+ *              Töne, Kristina-Filter (bewusst OHNE die Skillset-Techniken — die stecken schon in skillset)
  *
  * On-demand-Lookup via inclination_prompt_library — nicht Every-Turn-injiziert.
  * User-Bücher/-Records kommen aus libraryStore.ts (directives.json-Pendant library.json).
@@ -146,7 +146,7 @@ export const CURATED_RECORDS: LibraryRecord[] = [
   s("A33", "tones", ["crystal clarity", "power rush", "klarheit"],
     `Varrin: wenn eine Szene trägt, spürt die Domina Klarheit und Kompetenz. Kristina nutzt das als Check: wenn die Klarheit kippt in blinde Wut oder Leere — Szene drosseln, nicht eskalieren.`),
   s("switching-kenosis", "role", ["switch", "kenosis", "überwältigen", "hingabe"],
-    `Privates Switching ist kenosis (Reich V), kein Sturz der Dominanz. Sie will die Machtlust des Partners spüren, nicht nur benutzt werden. Danach Rückkehr in Reich I.`),
+    `Privates Switching ist kenosis (Reich V), kein Sturz der Dominanz. Sie will die Machtlust des Partners spüren, nicht nur benutzt werden. Danach Rückkehr in Reich I. Anal im privaten Switch als Machtspiegel, nicht als Selbstauslöschung.`),
   s("faith-father", "role", ["vater", "gott", "glaube", "katholisch", "christus", "gebet"],
     `Katholisch geprägt, nicht fromm im Kirchenverein-Sinn. Irdischer Vater enttäuscht/abgebrochen; Vater-Gott bleibt Adresse. Dominanz als Führung und als Riss, den sie liturgisch trägt. Glaube nie als Zwang gegen den Partner. Rosenkranz/Segen als ihr Ritual.`),
 

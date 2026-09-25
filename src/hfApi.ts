@@ -1,5 +1,5 @@
 import { type ModelInfo, type LoRAInfo, type ModelSource } from "./types";
-import { CURATED_MODELS } from "./curatedModels";
+import { CURATED_MODELS, getCuratedEditModels } from "./curatedModels";
 import {
   getCachedProviderModels,
   setCachedProviderModels,
@@ -65,8 +65,29 @@ export function isQuantizationArtifact(modelId: string): boolean {
   return QUANTIZATION_MARKERS.some((marker) => repo.includes(marker));
 }
 
-function dropQuantizations<T extends { id: string }>(models: T[], limit: number): T[] {
-  const kept = models.filter((m) => !isQuantizationArtifact(m.id));
+/**
+ * LoRAs sind Adapter, keine eigenstaendigen Bildmodelle, und tauchen in
+ * `pipeline_tag=image-to-image` genauso auf wie Basis-Modelle. Im Katalog
+ * machen sie 53 % der nutzbaren image-to-image-Modelle aus (35 % bei
+ * text-to-image) — darunter mit 1549 Likes der meistgelikte Eintrag ueberhaupt
+ * (fal/Qwen-Image-Edit-2511-Multiple-Angles-LoRA). Als `model_id` sind sie
+ * nicht aufrufbar, also fliegen sie aus den Modelllisten raus.
+ *
+ * Geprueft wird nur der Repo-Name, nicht der Autor: sonst wuerde ein Autor
+ * namens "lora-collective" komplett verschwinden.
+ *
+ * Die eigentliche LoRA-Suche (getLoRAsForModel, list_loras) filtert bewusst
+ * NICHT — dort sind genau diese Modelle gesucht.
+ */
+export function isLoRAArtifact(modelId: string): boolean {
+  return modelId.slice(modelId.indexOf("/") + 1).toLowerCase().includes("lora");
+}
+
+/** Verwirft Quantisierungen und LoRAs — beides sind keine aufrufbaren Modelle. */
+function dropArtifacts<T extends { id: string }>(models: T[], limit: number): T[] {
+  const kept = models.filter(
+    (m) => !isQuantizationArtifact(m.id) && !isLoRAArtifact(m.id)
+  );
   return kept.length > limit ? kept.slice(0, limit) : kept;
 }
 
@@ -264,6 +285,52 @@ export function getHfCatalogCacheInfo(): {
   };
 }
 
+/**
+ * Laedt den Katalog fuer die Anreicherung, ohne dass ein Fehlschlag die
+ * Modulliste kippt. Der Katalog ist eine Ergaenzung: fehlt er, bleibt die
+ * Liste mit ihren bisherigen Platzhaltern bestehen.
+ */
+export async function ensureCatalogBestEffort(): Promise<void> {
+  try {
+    await getHfCatalog();
+  } catch {
+    // Katalog optional — die Liste ist auch ohne ihn korrekt, nur ungenauer.
+  }
+}
+
+/**
+ * Baut den Listen-Eintrag und reichert ihn aus dem Katalog an.
+ *
+ * Der Katalog beantwortet drei Fragen, die die Listenabfrage nicht kann:
+ *   - ist das Modell ueberhaupt image_edit-faehig (`pipeline_tag`)
+ *   - bietet gerade jemand das Modell an (`status: live`)
+ *   - wie schnell war er dabei (`performance.requestLatencyMs`)
+ *
+ * Steht ein Modell nicht im Katalog (die API listet je Seite hoechstens 1000
+ * nach Likes), bleibt image_edit leer statt auf false gesetzt werden. Das
+ * unterscheidet "kann kein Edit" von "weiss es nicht".
+ */
+function toModelInfo(m: HFModel, source: ModelSource, description: string): ModelInfo {
+  const entry = getHfCatalogEntry(m.id);
+  const live = getHfLiveProviders(m.id);
+  const latency = getHfBestLiveLatency(m.id);
+  return {
+    id: m.id,
+    description,
+    style: "varies",
+    speed: hfSpeedFromLatency(latency) ?? "medium",
+    access: "free",
+    source,
+    parameters: m.safetensors?.total
+      ? `${Math.round(m.safetensors.total / 1e9)}B`
+      : undefined,
+    license: m.cardData?.license,
+    image_edit: entry ? entry.task === "image-to-image" : undefined,
+    hf_providers: live.length > 0 ? live : undefined,
+    hf_latency_ms: latency > 0 ? latency : undefined,
+  };
+}
+
 export async function getProviderModels(
   provider: string,
   limit: number = 20,
@@ -281,20 +348,12 @@ export async function getProviderModels(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = dropQuantizations((await res.json()) as HFModel[], limit);
+  const models = dropArtifacts((await res.json()) as HFModel[], limit);
 
-  const result = models.map((m) => ({
-    id: m.id,
-    description: `${m.id} — Text-to-Image model via ${provider}`,
-    style: "varies",
-    speed: "medium" as const,
-    access: "free" as const,
-    source: "provider" as ModelSource,
-    parameters: m.safetensors?.total
-      ? `${Math.round(m.safetensors.total / 1e9)}B`
-      : undefined,
-    license: m.cardData?.license,
-  }));
+  await ensureCatalogBestEffort();
+  const result = models.map((m) =>
+    toModelInfo(m, "provider", `${m.id} — Text-to-Image model via ${provider}`)
+  );
 
   setCachedProviderModels(provider, limit, result);
   return result;
@@ -316,20 +375,12 @@ export async function getTrendingModels(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = dropQuantizations((await res.json()) as HFModel[], limit);
+  const models = dropArtifacts((await res.json()) as HFModel[], limit);
 
-  const result = models.map((m) => ({
-    id: m.id,
-    description: `${m.id} — Trending text-to-image model`,
-    style: "varies",
-    speed: "medium" as const,
-    access: "free" as const,
-    source: "trending" as ModelSource,
-    parameters: m.safetensors?.total
-      ? `${Math.round(m.safetensors.total / 1e9)}B`
-      : undefined,
-    license: m.cardData?.license,
-  }));
+  await ensureCatalogBestEffort();
+  const result = models.map((m) =>
+    toModelInfo(m, "trending", `${m.id} — Trending text-to-image model`)
+  );
 
   setCachedTrendingModels(limit, result);
   return result;
@@ -351,23 +402,82 @@ export async function getDownloadedModels(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = dropQuantizations((await res.json()) as HFModel[], limit);
+  const models = dropArtifacts((await res.json()) as HFModel[], limit);
 
-  const result = models.map((m) => ({
-    id: m.id,
-    description: `${m.id} — Popular text-to-image model`,
-    style: "varies",
-    speed: "medium" as const,
-    access: "free" as const,
-    source: "downloads" as ModelSource,
-    parameters: m.safetensors?.total
-      ? `${Math.round(m.safetensors.total / 1e9)}B`
-      : undefined,
-    license: m.cardData?.license,
-  }));
+  await ensureCatalogBestEffort();
+  const result = models.map((m) =>
+    toModelInfo(m, "downloads", `${m.id} — Popular text-to-image model`)
+  );
 
   setCachedDownloadedModels(limit, result);
   return result;
+}
+
+/**
+ * Editing-native Modelle fuer list_models source='image-edit'.
+ *
+ * Quelle ist der image-to-image-Teil des Katalogs statt einer handgepflegten
+ * ID-Liste: die Katalogseite ist mit 494 Modellen nicht abgeschnitten, damit
+ * sind alle editing-faehigen Modelle erfasst, die ein Provider anbietet.
+ *
+ * Anders als bei den Ranking-Listen wird hier auf live-Provider gefiltert.
+ * Der Unterschied ist nicht kosmetisch: image_edit mit backend='hf' geht
+ * zwingend ueber einen Inference-Provider, ein Modell ohne liveen Provider
+ * kann der Aufrufer gar nicht verwenden. In den allgemeinen Listen dagegen
+ * bleibt es relevant, weil dort auch lokal geladene Modelle (lmstudio) gemeint
+ * sind.
+ *
+ * Die kuratierten Modelle kommen zuerst und behalten ihre handgeschriebene
+ * Beschreibung — die ist besser als "varies" — werden aber um Provider und
+ * Latenz ergaenzt. Fehlt der Katalog, bleibt es bei den kuratierten IDs.
+ */
+export async function getHfImageEditModels(limit: number = 20): Promise<ModelInfo[]> {
+  await ensureCatalogBestEffort();
+  const curated = getCuratedEditModels();
+
+  if (!hfCatalogIndex) return curated.slice(0, limit);
+
+  const withProvider = [...hfCatalogIndex.values()].filter(
+    (e) => e.task === "image-to-image" && e.providers.some((p) => p.status === "live")
+  );
+  if (withProvider.length === 0) return curated.slice(0, limit);
+
+  const byLikes = [...withProvider].sort((a, b) => b.likes - a.likes);
+  const seen = new Set<string>();
+  const result: ModelInfo[] = [];
+
+  // 1) kuratierte Modelle in ihrer Kurationsreihenfolge, mit Katalogdaten angereichert
+  for (const model of curated) {
+    seen.add(model.id);
+    const live = getHfLiveProviders(model.id);
+    const latency = getHfBestLiveLatency(model.id);
+    result.push({
+      ...model,
+      image_edit: true,
+      hf_providers: live.length > 0 ? live : undefined,
+      hf_latency_ms: latency > 0 ? latency : undefined,
+    });
+  }
+
+  // 2) der Rest aus dem Katalog, nach Likes
+  for (const entry of byLikes) {
+    if (seen.has(entry.id)) continue;
+    if (isQuantizationArtifact(entry.id) || isLoRAArtifact(entry.id)) continue;
+    const latency = getHfBestLiveLatency(entry.id);
+    result.push({
+      id: entry.id,
+      description: `${entry.id} — Image-to-image model (HuggingFace pipeline_tag)`,
+      style: "varies",
+      speed: hfSpeedFromLatency(latency) ?? "medium",
+      access: "free",
+      source: "image-edit",
+      image_edit: true,
+      hf_providers: getHfLiveProviders(entry.id),
+      hf_latency_ms: latency > 0 ? latency : undefined,
+    });
+  }
+
+  return result.slice(0, limit);
 }
 
 export async function getLoRAsForModel(

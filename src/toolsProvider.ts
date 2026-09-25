@@ -12,6 +12,9 @@ import {
   getDownloadedModels,
   getLoRAsForModel,
   getDefaultLoRAs,
+  getHfImageEditModels,
+  getHfCatalogCacheInfo,
+  ensureCatalogBestEffort,
 } from "./hfApi";
 import { getCuratedEditModels } from "./curatedModels";
 import { checkRateLimit, recordGeneration } from "./rateLimit";
@@ -645,9 +648,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "seedream5 (14), nanobanana-pro (14)."
         ),
         provider: z.string().default("auto").describe(
-          "HF inference sub-provider (auto, fal-ai, replicate, wavespeed). " +
-          "Default auto resolves via the model's image-to-image mapping. HF backend only — " +
-          "ignored with backend='pollinations'."
+          "HF inference sub-provider. Default auto resolves via the model's own " +
+          "image-to-image mapping - always prefer it. Known providers, from the live " +
+          "catalog: fal-ai, replicate, wavespeed, together, nscale, zai-org, " +
+          "hf-inference. HF backend only — ignored with backend='pollinations'."
         ),
         negative_prompt: z.string().default("").describe(
           "What to exclude from the image (e.g. 'blurry, low quality, text, watermark'). " +
@@ -976,12 +980,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Sources (parameter 'source') — which catalog to list:
         - "curated" (default): expert-verified HuggingFace IDs for generate_image backend='hf',
           with descriptions and LoRA compatibility info.
-        - "image-edit": editing-native HuggingFace IDs with verified image-to-image mapping
-          (FLUX.2-dev, Kontext-dev, Qwen-Image-Edit) — for the image_edit tool. Do NOT use
-          text-to-image base models from the other sources here; they fail with "not supported for task".
+        - "image-edit": every HuggingFace model whose pipeline_tag is image-to-image and
+          that an inference provider currently serves (12h catalog cache, ~110 models),
+          curated first (FLUX.2-dev is the default). Do NOT use text-to-image base models
+          from the other sources here; they fail with "not supported for task".
         - "provider": HuggingFace IDs served by one inference sub-provider (needs 'provider',
-          e.g. fal-ai, nscale) — for backend='hf'.
-        - "trending" / "downloads": live HuggingFace catalog — for backend='hf'.
+          e.g. fal-ai, replicate) — for backend='hf'.
+        - "trending" / "downloads": live HuggingFace catalog ranked by trendingScore or
+          downloads — for backend='hf'.
         - "pollinations": Pollinations.ai models (requires pollinationsApiKey in config).
           ALIASES: only "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
           "seedream5" (= seedream-5.0-lite). Use FULL IDs for all other models.
@@ -994,6 +1000,20 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         - source="image-edit": HuggingFace only ever gets ONE reference here.
         Verified multi-reference Pollinations models: klein (10), gpt-image-2 (16),
         seedream5 (14), nanobanana-pro (14).
+
+        HUGGINGFACE ROWS carry live catalog data, cached 12h on disk:
+        - hf_providers: the inference providers currently serving it (status "live").
+          MISSING means no provider serves it, so backend='hf' would fail — such a
+          model is only usable if you run it locally (lmstudio) or pull its weights.
+        - hf_latency_ms: measured request latency, the fastest live provider. This is
+          where 'speed' comes from, so it is real data, not a guess.
+        - image_edit: from the model's pipeline_tag. Absent = the model is outside the
+          1000 most-liked per task, so HuggingFace simply does not say.
+        LoRAs and quantizations (GGUF/GPTQ/AWQ/FP8/…) are filtered out of all model
+        lists — they are adapters, not models, and fail as model_id. Use list_loras.
+        Two things HuggingFace does NOT publish, so they stay static here and are not
+        derived from the catalog: max_reference_images (always 1 for HF) and per-call
+        cost (HuggingFace gates its provider price list behind a login).
 
         source="pollinations" also returns catalog_extras: the live image models that
         are NOT in the curated list (no video models, no community mirrors), sorted by
@@ -1081,7 +1101,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             models = getPollinationsModels();
             break;
           case "image-edit":
-            models = getCuratedEditModels();
+            // dynamisch aus dem image-to-image-Katalog; faellt ohne Katalog
+            // auf die kuratierten IDs zurueck (siehe getHfImageEditModels)
+            models = await getHfImageEditModels(limit);
             break;
           default:
             models = getCuratedModels();
@@ -1110,6 +1132,19 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         const cacheInfo = await getCacheInfo();
         const modelCacheInfo = getModelCacheInfo();
         const catalogInfo = getPollinationsCatalogCacheInfo();
+        // HF-Katalog laden, damit hf_providers/hf_latency/image_edit gefuellt sind.
+        // Best effort: ohne Katalog liefern die Quellen weiterhin ihre Liste.
+        await ensureCatalogBestEffort();
+        const rawHfCatalogInfo = getHfCatalogCacheInfo();
+        const hfCatalogInfo = {
+          file: rawHfCatalogInfo.file,
+          persisted: rawHfCatalogInfo.persisted,
+          fetched_at: rawHfCatalogInfo.fetchedAt?.toISOString() ?? null,
+          expires_in_hours: Math.round(rawHfCatalogInfo.expiresInMs / 3600000),
+          last_fetch_failure: rawHfCatalogInfo.lastFetchFailureAt?.toISOString() ?? null,
+          models: rawHfCatalogInfo.models,
+          models_with_providers: rawHfCatalogInfo.modelsWithProviders,
+        };
 
         // Multi-Image-Faehigkeit ausweisen: Pollinations aus dem Live-Katalog
         // (/image/models, gleiche Quelle + gleicher 12h-Cache wie image_edit),
@@ -1152,6 +1187,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             trending: modelCacheInfo.trending,
             downloads: modelCacheInfo.downloads,
           },
+          // Nur fuer die HF-Quellen relevant, sonst stoert der Block nur.
+          ...(source === "pollinations" ? {} : { hf_catalog_cache: hfCatalogInfo }),
           models: models.map((m) => {
             // is_default bezieht sich auf den Default des jeweiligen Katalogs:
             // pollinations → Pollinations-T2I-Default, image-edit → HF-Edit-Default, sonst HF-T2I-Default.

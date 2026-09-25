@@ -32,6 +32,14 @@ export interface ModelInfo {
   max_reference_images?: number;
   /** Kurzlabel fuer list_models, damit Multi-Image-Faehigkeit ohne Nachrechnen sichtbar ist. */
   multi_image?: string;
+  /**
+   * HF-Provider mit Status live, aus dem Katalog-Cache. Nur gesetzt, wenn das
+   * Modell im Katalog steht — die API-Abfrage fuer die Liste deckt nicht alle
+   * Modelle ab, dann bleibt das Feld weg statt auf leere Liste zu zeigen.
+   */
+  hf_providers?: string[];
+  /** Von Hugging Face gemessene Anfrage-Latenz des schnellsten live-Providers in ms. */
+  hf_latency_ms?: number;
 }
 
 export interface ModelListResult {

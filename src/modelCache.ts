@@ -11,14 +11,12 @@ interface ModelCache {
   provider: Record<string, ModelCacheEntry>;
   trending: Record<number, ModelCacheEntry>;
   downloads: Record<number, ModelCacheEntry>;
-  pollinations: ModelCacheEntry | null;
 }
 
 let cache: ModelCache = {
   provider: {},
   trending: {},
   downloads: {},
-  pollinations: null,
 };
 
 function isCacheValid(entry: ModelCacheEntry | null): boolean {
@@ -67,23 +65,10 @@ export function setCachedDownloadedModels(limit: number, models: ModelInfo[]): v
   };
 }
 
-export function getCachedPollinationsModels(): ModelInfo[] | null {
-  if (!isCacheValid(cache.pollinations)) return null;
-  return cache.pollinations?.models ?? null;
-}
-
-export function setCachedPollinationsModels(models: ModelInfo[]): void {
-  cache.pollinations = {
-    fetchedAt: Date.now(),
-    models,
-  };
-}
-
 export function getModelCacheInfo(): {
   provider: Record<string, { fetchedAt: Date; expiresInMs: number }>;
   trending: Record<string, { fetchedAt: Date; expiresInMs: number }>;
   downloads: Record<string, { fetchedAt: Date; expiresInMs: number }>;
-  pollinations: { fetchedAt: Date; expiresInMs: number } | null;
 } {
   const getInfo = (entry: ModelCacheEntry | null) => {
     if (!entry) return null;
@@ -112,6 +97,5 @@ export function getModelCacheInfo(): {
     provider: providerInfo,
     trending: trendingInfo,
     downloads: downloadsInfo,
-    pollinations: getInfo(cache.pollinations),
   };
 }

@@ -48,6 +48,7 @@ import {
   detectImageMime,
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_DEFAULT_EDIT_MODEL,
+  getPollinationsCatalogCacheInfo,
   type PollinationsEditModelCapabilities,
 } from "./pollinations";
 import { getAllCosts, getCacheInfo } from "./costCache";
@@ -1011,7 +1012,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         generate_image backend='hf'; IDs from source='pollinations' only with
         backend='pollinations'; IDs from source='image-edit' only with image_edit.
         LoRA lookup (include_loras) and the list_loras tool are HF-only.
-        Model lists are cached for 12 hours to reduce API calls.
+        Model lists are cached for 12 hours to reduce API calls. The Pollinations
+        catalog cache is persisted to disk (~/.cache/hf-image-gen/pollinations-catalog.json),
+        so it survives plugin reloads; if /image/models is unreachable the last known
+        catalog is served instead of failing. catalog_cache in the result shows its
+        age, path and whether the last fetch failed.
       `,
       parameters: {
         source: z.enum(["curated", "provider", "trending", "downloads", "pollinations", "image-edit"])
@@ -1100,10 +1105,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           }
         }
 
-        // Merge dynamic costs from cache (Pollinations API + HF hardcoded)
+        // Merge dynamic costs (Pollinations aus dem Katalog-Cache + HF statisch)
         const costMap = await getAllCosts();
         const cacheInfo = await getCacheInfo();
         const modelCacheInfo = getModelCacheInfo();
+        const catalogInfo = getPollinationsCatalogCacheInfo();
 
         // Multi-Image-Faehigkeit ausweisen: Pollinations aus dem Live-Katalog
         // (/image/models, gleiche Quelle + gleicher 12h-Cache wie image_edit),
@@ -1132,16 +1138,19 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             ? { pollinations_default_model: POLLINATIONS_DEFAULT_MODEL }
             : {}),
           ...(source === "image-edit" ? { image_edit_default_model: editDefault } : {}),
-          cost_cache: {
-            fetched_at: cacheInfo.fetchedAt.toISOString(),
-            expires_in_hours: Math.round(cacheInfo.expiresInMs / 3600000),
+          catalog_cache: {
+            source: "https://gen.pollinations.ai/image/models",
+            file: catalogInfo.file,
+            persisted: catalogInfo.persisted,
+            fetched_at: catalogInfo.fetchedAt?.toISOString() ?? null,
+            expires_in_hours: Math.round(catalogInfo.expiresInMs / 3600000),
+            last_fetch_failure: catalogInfo.lastFetchFailureAt?.toISOString() ?? null,
             models_priced: cacheInfo.modelCount,
           },
           model_cache: {
             provider: modelCacheInfo.provider,
             trending: modelCacheInfo.trending,
             downloads: modelCacheInfo.downloads,
-            pollinations: modelCacheInfo.pollinations,
           },
           models: models.map((m) => {
             // is_default bezieht sich auf den Default des jeweiligen Katalogs:
@@ -1196,7 +1205,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               : source === "pollinations"
                 ? "Pollinations IDs for generate_image or image_edit with backend='pollinations' (requires pollinationsApiKey). " +
                   "Canonical IDs preferred, aliases (flux, kontext, seedream5) also work. " +
-                  "Each model's 'cost' field is fetched live from the Pollinations API (12h cache). " +
+                  "Each model's 'cost' comes from the same /image/models catalog (12h cache on disk), not a second request. " +
                   "For image_edit pick by 'multi_image'/'max_reference_images'; the catalog value is advisory. " +
                   "Use full IDs — only flux/kontext/seedream5 are valid aliases. No LoRAs on this backend."
                 : source === "image-edit"

@@ -1,51 +1,32 @@
-import { z } from "zod";
+import {
+  getPollinationsModelCapabilities,
+  getPollinationsCatalogCacheInfo,
+} from "./pollinations";
 
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+/**
+ * Preise fuer Modell-Listen.
+ *
+ * Wichtig: die Pollinations-Preise kommen NICHT aus einem eigenen Request.
+ * /image/models liefert pro Modell ein `pricing`-Feld mit — dieselbe Quelle,
+ * dieselbe 12h-TTL, derselbe Platten-Cache wie die Multi-Image-Faehigkeiten.
+ * Vorher stand hier ein zweiter Fetch auf /v1/models, der zwei Nachteile hatte:
+ * zwei Requests mit zwei Uhren (die einander widersprechen koennen) und — schlimmer
+ * — ensureCache() schrieb bei JEDEM Fehlschlag ein leeres Ergebnis mit frischem
+ * Zeitstempel ins 12h-Fenster. Ein einziger Timeout kostete damit bis zu 12 Stunden
+ * lang alle Pollinations-Preise.
+ *
+ * HuggingFace bleibt eine statische Tabelle: die HF-Preise sind nicht maschinenlesbar.
+ */
 
-interface CostEntry {
+export interface CostEntry {
   cost: string;
   rawTokens: number;
 }
-
-interface CostCache {
-  fetchedAt: number;
-  costs: Record<string, CostEntry>;
-}
-
-let cache: CostCache | null = null;
 
 function formatCost(tokens: number): string {
   if (tokens === 0) return "free";
   if (tokens < 0.001) return `~${tokens.toExponential(1)} pollen`;
   return `~${tokens.toFixed(4)} pollen`;
-}
-
-async function fetchPollinationsCosts(): Promise<Record<string, CostEntry>> {
-  const costs: Record<string, CostEntry> = {};
-  try {
-    const resp = await fetch("https://gen.pollinations.ai/v1/models", {
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!resp.ok) return costs;
-    const data = await resp.json() as { data: Array<{
-      id: string;
-      supported_endpoints?: string[];
-      pricing?: { currency?: string; completionImageTokens?: string };
-    }> };
-    for (const m of data.data) {
-      const endpoints = m.supported_endpoints ?? [];
-      const isImageModel =
-        endpoints.includes("/v1/images/generations") ||
-        endpoints.some((e) => e.startsWith("/image/"));
-      if (!isImageModel) continue;
-      const completionCost = parseFloat(m.pricing?.completionImageTokens ?? "0");
-      if (isNaN(completionCost)) continue;
-      costs[m.id] = { cost: formatCost(completionCost), rawTokens: completionCost };
-    }
-  } catch {
-    // fetch failed — return empty, cache will retry after TTL
-  }
-  return costs;
 }
 
 const HF_COSTS: Record<string, CostEntry> = {
@@ -62,33 +43,44 @@ const HF_COSTS: Record<string, CostEntry> = {
   "Qwen/Qwen-Image-Edit": { cost: "free", rawTokens: 0 },
 };
 
-async function ensureCache(): Promise<CostCache> {
-  if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
-    return cache;
+/** Preise aus dem (gecachten) Live-Katalog. Wirft nie: HF-only bleibt nutzbar. */
+async function pollinationsCosts(): Promise<Record<string, CostEntry>> {
+  const costs: Record<string, CostEntry> = {};
+  try {
+    const capabilities = await getPollinationsModelCapabilities();
+    for (const [key, model] of capabilities) {
+      // Aliase zeigen auf dasselbe Objekt — nur kanonische Namen bekommen einen Preis.
+      if (key !== model.name.toLowerCase()) continue;
+      const endpoints = model.supported_endpoints ?? [];
+      const isImageModel =
+        endpoints.includes("/v1/images/generations") ||
+        endpoints.some((e) => e.startsWith("/image/"));
+      if (!isImageModel) continue;
+      const raw = model.pricing?.completionImageTokens;
+      const cost = typeof raw === "number" ? raw : parseFloat(String(raw ?? ""));
+      if (isNaN(cost)) continue;
+      costs[model.name] = { cost: formatCost(cost), rawTokens: cost };
+    }
+  } catch {
+    // Katalog nicht erreichbar — HF-Preise reichen, Pollinations-Kosten bleiben leer.
   }
-  const pollinationsCosts = await fetchPollinationsCosts();
-  cache = {
-    fetchedAt: Date.now(),
-    costs: { ...HF_COSTS, ...pollinationsCosts },
-  };
-  return cache;
+  return costs;
 }
 
 export async function getCost(modelId: string): Promise<string | undefined> {
-  const c = await ensureCache();
-  return c.costs[modelId]?.cost;
+  const all = await getAllCosts();
+  return all[modelId]?.cost;
 }
 
 export async function getAllCosts(): Promise<Record<string, CostEntry>> {
-  const c = await ensureCache();
-  return { ...c.costs };
+  return { ...HF_COSTS, ...(await pollinationsCosts()) };
 }
 
 export async function getCacheInfo(): Promise<{ fetchedAt: Date; expiresInMs: number; modelCount: number }> {
-  const c = await ensureCache();
+  const info = getPollinationsCatalogCacheInfo();
   return {
-    fetchedAt: new Date(c.fetchedAt),
-    expiresInMs: Math.max(0, CACHE_TTL_MS - (Date.now() - c.fetchedAt)),
-    modelCount: Object.keys(c.costs).length,
+    fetchedAt: info.fetchedAt ?? new Date(0),
+    expiresInMs: info.expiresInMs,
+    modelCount: Object.keys(await getAllCosts()).length,
   };
 }

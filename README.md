@@ -118,9 +118,11 @@ list_models(source?, provider?, limit?, include_loras?)
 | `image-edit` | `image_edit` + `hf` | Editing-native IDs with verified I2I mapping (FLUX.2-dev, Kontext-dev, Qwen-Image-Edit). |
 | `provider` | `generate_image` + `hf` | Needs `provider` (fal-ai, nscale, …). Never `pollinations` — use `source="pollinations"`. |
 | `trending` / `downloads` | `generate_image` + `hf` | Live HF catalog. |
-| `pollinations` | `generate_image`/`image_edit` + `pollinations` | 16 models (4 free, 12 paid). Requires API key. Aliases: `flux`, `kontext`, `seedream5`. |
+| `pollinations` | `generate_image`/`image_edit` + `pollinations` | 7 curated models plus `catalog_extras` with the full live catalog (77 entries). Requires API key. Aliases: `flux`, `kontext`, `seedream5`. |
 
 LoRA lookup (`include_loras`) and `list_loras` are HF-only.
+
+**Model catalog caching.** The Pollinations catalog (`/image/models`) is cached for 12 hours and persisted to `~/.cache/hf-image-gen/pollinations-catalog.json`, so it survives plugin reloads and LM Studio restarts. Pollinations prices come from that same file — the endpoint returns them per model, so no second request is made. If the endpoint is unreachable, the last known catalog is served rather than failing, and a failed fetch is never cached (one timeout cannot cost you the prices for 12 hours). `list_models` reports the state in `catalog_cache` (`file`, `persisted`, `fetched_at`, `expires_in_hours`, `last_fetch_failure`). Set `HF_IMAGE_GEN_CACHE_DIR` to relocate the cache. The cache holds only the public catalog — the API key is never written to it.
 
 ### `list_loras` — Search LoRA adapters (HF only)
 

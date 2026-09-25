@@ -1,8 +1,10 @@
 import type { ModelInfo } from "./types";
 import {
-  getCachedPollinationsModels,
-  setCachedPollinationsModels,
-} from "./modelCache";
+  readCatalogCache,
+  writeCatalogCache,
+  getCatalogCacheFile,
+  type CatalogCacheEnvelope,
+} from "./pollinationsCache";
 
 /**
  * Pollinations.ai backend — zweites Backend neben HuggingFace.
@@ -136,10 +138,6 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
 ];
 
 export function getPollinationsModels(): ModelInfo[] {
-  const cached = getCachedPollinationsModels();
-  if (cached) return cached;
-
-  setCachedPollinationsModels(POLLINATIONS_KNOWN_MODELS);
   return POLLINATIONS_KNOWN_MODELS;
 }
 
@@ -301,10 +299,19 @@ export interface PollinationsEditModelCapabilities {
   title?: string;
   publisher?: string;
   paid_only?: boolean;
-  health?: { status?: string; success_rate?: number };
+  /** /image/models liefert die Preise mit — kein zweiter Endpoint noetig. */
+  pricing?: {
+    currency?: string;
+    completionImageTokens?: number | string;
+    promptImageTokens?: number | string;
+  };
+  health?: { status?: string; success_rate?: number; requests?: number };
 }
 
-const EDIT_CAPABILITIES_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours, same TTL as costCache
+const EDIT_CAPABILITIES_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+/** Nach einem Fehlschlag nicht sofort erneut versuchen, sonst wartet jeder Aufruf ins Timeout. */
+const FAILED_RETRY_BACKOFF_MS = 10 * 60 * 1000;
+const POLLINATIONS_CATALOG_URL = "https://gen.pollinations.ai/image/models";
 
 interface EditCapabilitiesCache {
   fetchedAt: number;
@@ -313,52 +320,142 @@ interface EditCapabilitiesCache {
 
 let editCapabilitiesCache: EditCapabilitiesCache | null = null;
 let editModelCapabilitiesPromise: Promise<Map<string, PollinationsEditModelCapabilities>> | null = null;
+let lastFetchFailureAt = 0;
+
+/** Baut die Alias-Map. Namen und Aliase zeigen auf dasselbe Objekt. */
+function buildCapabilityMap(
+  raw: unknown[]
+): Map<string, PollinationsEditModelCapabilities> {
+  const capabilities = new Map<string, PollinationsEditModelCapabilities>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as PollinationsEditModelCapabilities & { id?: string };
+    const name = typeof e.name === "string" ? e.name : e.id;
+    if (typeof name !== "string" || !name) continue;
+    const model: PollinationsEditModelCapabilities = { ...e, name };
+    capabilities.set(name.toLowerCase(), model);
+    for (const alias of Array.isArray(e.aliases) ? e.aliases : []) {
+      if (typeof alias === "string" && alias) {
+        capabilities.set(alias.toLowerCase(), model);
+      }
+    }
+  }
+  return capabilities;
+}
+
+async function fetchCatalog(): Promise<unknown[]> {
+  const response = await fetch(POLLINATIONS_CATALOG_URL, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Could not load Pollinations model capabilities: ${response.status} ${response.statusText}`
+    );
+  }
+  const raw = await response.json() as unknown;
+  if (!Array.isArray(raw)) {
+    throw new Error("Pollinations model capability response was not an array.");
+  }
+  return raw;
+}
+
+function capabilitiesFromCache(
+  cache: CatalogCacheEnvelope | null
+): Map<string, PollinationsEditModelCapabilities> | null {
+  if (!cache) return null;
+  const map = buildCapabilityMap(cache.models);
+  return map.size > 0 ? map : null;
+}
+
+function remember(
+  capabilities: Map<string, PollinationsEditModelCapabilities>,
+  fetchedAt: number
+): Map<string, PollinationsEditModelCapabilities> {
+  editCapabilitiesCache = { fetchedAt, capabilities };
+  return capabilities;
+}
+
+async function loadCapabilities(): Promise<
+  Map<string, PollinationsEditModelCapabilities>
+> {
+  const now = Date.now();
+  const disk = readCatalogCache();
+
+  // 1) Frischer Platten-Cache: gar kein Netzwerkzugriff.
+  if (disk && now - disk.fetchedAt < EDIT_CAPABILITIES_CACHE_TTL_MS) {
+    const map = capabilitiesFromCache(disk);
+    if (map) return remember(map, disk.fetchedAt);
+  }
+
+  // 2) Veraltet, aber vor kurzem erst gescheitert: veraltete Daten bedienen,
+  //    statt bei totem Endpoint jeden Aufruf erneut zu versuchen.
+  if (disk && now - lastFetchFailureAt < FAILED_RETRY_BACKOFF_MS) {
+    const map = capabilitiesFromCache(disk);
+    if (map) return remember(map, disk.fetchedAt);
+  }
+
+  // 3) Neu holen.
+  try {
+    const raw = await fetchCatalog();
+    const map = buildCapabilityMap(raw);
+    if (map.size === 0) {
+      throw new Error("Pollinations model catalog contained no usable model entries.");
+    }
+    const fetchedAt = Date.now();
+    writeCatalogCache(raw, fetchedAt);
+    lastFetchFailureAt = 0;
+    return remember(map, fetchedAt);
+  } catch (error) {
+    lastFetchFailureAt = Date.now();
+    // 4) Endpoint weg: lieber veraltete Katalogdaten liefern als gar keine.
+    //    Ohne Platten-Cache bleibt es bei der kuratierten Liste (Aufrufer-Fallback).
+    const map = capabilitiesFromCache(disk);
+    if (map) return remember(map, disk!.fetchedAt);
+    throw error;
+  }
+}
 
 export async function getPollinationsModelCapabilities(): Promise<
   Map<string, PollinationsEditModelCapabilities>
 > {
-  if (editCapabilitiesCache && Date.now() - editCapabilitiesCache.fetchedAt < EDIT_CAPABILITIES_CACHE_TTL_MS) {
+  if (
+    editCapabilitiesCache &&
+    Date.now() - editCapabilitiesCache.fetchedAt < EDIT_CAPABILITIES_CACHE_TTL_MS
+  ) {
     return editCapabilitiesCache.capabilities;
   }
+  // In-Flight-Dedup, damit parallele Aufrufe nur einen Request absetzen. Wichtig:
+  // die Promise wird in finally ALWAYS geloescht. Vorher stand hier nur ein
+  // catch — nach dem ersten Erfolg blieb eine aufgeloeste Promise liegen, der
+  // TTL-Zweig griff nie mehr und der Katalog wurde im Prozess NIE erneut geholt.
   if (!editModelCapabilitiesPromise) {
-    editModelCapabilitiesPromise = (async () => {
-      const response = await fetch("https://gen.pollinations.ai/image/models", {
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!response.ok) {
-        throw new Error(
-          `Could not load Pollinations model capabilities: ${response.status} ${response.statusText}`
-        );
-      }
-      const raw = await response.json() as Array<PollinationsEditModelCapabilities & { id?: string }>;
-      if (!Array.isArray(raw)) {
-        throw new Error("Pollinations model capability response was not an array.");
-      }
-      const capabilities = new Map<string, PollinationsEditModelCapabilities>();
-      for (const entry of raw) {
-        if (!entry || typeof entry !== "object") continue;
-        const name = typeof entry.name === "string" ? entry.name : entry.id;
-        if (typeof name !== "string" || !name) continue;
-        const model: PollinationsEditModelCapabilities = { ...entry, name };
-        capabilities.set(name.toLowerCase(), model);
-        for (const alias of Array.isArray(entry.aliases) ? entry.aliases : []) {
-          if (typeof alias === "string" && alias) {
-            capabilities.set(alias.toLowerCase(), model);
-          }
-        }
-      }
-      if (capabilities.size === 0) {
-        throw new Error("Pollinations model catalog contained no usable model entries.");
-      }
-      editCapabilitiesCache = { fetchedAt: Date.now(), capabilities };
-      return capabilities;
-    })().catch((error: unknown) => {
+    editModelCapabilitiesPromise = loadCapabilities().finally(() => {
       editModelCapabilitiesPromise = null;
-      throw error;
     });
   }
   return editModelCapabilitiesPromise;
+}
+
+/** Alter/Status des Katalog-Caches fuer list_models und Diagnose. */
+export function getPollinationsCatalogCacheInfo(): {
+  fetchedAt: Date | null;
+  expiresInMs: number;
+  file: string;
+  persisted: boolean;
+  lastFetchFailureAt: Date | null;
+} {
+  const disk = readCatalogCache();
+  const now = Date.now();
+  return {
+    fetchedAt: disk ? new Date(disk.fetchedAt) : null,
+    expiresInMs: disk
+      ? Math.max(0, EDIT_CAPABILITIES_CACHE_TTL_MS - (now - disk.fetchedAt))
+      : 0,
+    file: getCatalogCacheFile(),
+    persisted: disk !== null,
+    lastFetchFailureAt: lastFetchFailureAt > 0 ? new Date(lastFetchFailureAt) : null,
+  };
 }
 
 export interface PollinationsEditReferenceCheck {

@@ -44,6 +44,7 @@ import {
   inspectPollinationsEditReferences,
   describePollinationsReferenceSupport,
   getPollinationsModelCapabilities,
+  listPollinationsCatalogExtras,
   detectImageMime,
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_DEFAULT_EDIT_MODEL,
@@ -992,6 +993,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Verified multi-reference Pollinations models: klein (10), seedream5 (14),
         nanobanana (3), gpt-image-2 (16).
 
+        source="pollinations" also returns catalog_extras: the live image models that
+        are NOT in the curated list (no video models, no community mirrors), sorted by
+        max_reference_images so the multi-image candidates come first. Every id there
+        is usable as model_id. include_catalog:false skips the block (saves ~1.7k
+        tokens); filter narrows it by id/alias/title/publisher.
+
         Rule of thumb: IDs from curated/provider/trending/downloads only work with
         generate_image backend='hf'; IDs from source='pollinations' only with
         backend='pollinations'; IDs from source='image-edit' only with image_edit.
@@ -1017,8 +1024,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         include_loras: z.boolean()
           .default(false)
           .describe("Include compatible LoRAs per model (HF sources only, skipped for source='pollinations'; slower, needs API calls)."),
+        include_catalog: z.boolean()
+          .default(true)
+          .describe("source='pollinations' only: also list the live /image/models entries that are not in the curated list (sorted by max_reference_images). Set false to save tokens."),
+        filter: z.string()
+          .default("")
+          .describe("source='pollinations' only: substring filter for the catalog_extras block (id, alias, title, publisher). Empty = all."),
       },
-      implementation: safe_impl("list_models", async ({ source, provider, limit, include_loras }, ctx) => {
+      implementation: safe_impl("list_models", async ({ source, provider, limit, include_loras, include_catalog, filter }, ctx) => {
         const token = getToken();
         const currentDefault = getModel();
         const editDefault = getEditModel();
@@ -1095,6 +1108,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             "max_reference_images/multi_image fehlen: /image/models nicht erreichbar. " +
             "Für 2+ Referenzen empirisch geprüft: klein (10), seedream5 (14), nanobanana (3), gpt-image-2 (16).";
         }
+        const catalogExtras =
+          source === "pollinations" && include_catalog && capabilityMap
+            ? listPollinationsCatalogExtras(
+                capabilityMap,
+                models.map((m) => m.id),
+                filter
+              )
+            : null;
 
         return json({
           source,
@@ -1147,6 +1168,19 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             return row;
           }),
           ...(referenceNote ? { reference_note: referenceNote } : {}),
+          ...(catalogExtras
+            ? {
+                catalog_extras: {
+                  count: catalogExtras.length,
+                  note:
+                    "Live-Modelle aus /image/models, die NICHT in der kuratierten Liste oben stehen " +
+                    "(nur category=image, keine Community-Spiegel). Sortiert nach max_reference_images, " +
+                    "also die Multi-Image-Kandidaten zuerst. Jede id ist direkt als model_id nutzbar " +
+                    "(Aliase stehen in 'aliases'). include_catalog:false blendet den Block aus.",
+                  models: catalogExtras,
+                },
+              }
+            : {}),
           note: loraTruncated
             ? `LoRA lookup capped to first ${LORA_CAP} models to avoid API flood. Use list_loras with base_model for others.`
             : source === "curated"

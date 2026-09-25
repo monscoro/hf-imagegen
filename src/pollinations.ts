@@ -372,8 +372,17 @@ export interface PollinationsEditModelCapabilities {
   name: string;
   aliases?: string[];
   input_modalities?: string[];
+  output_modalities?: string[];
   supported_endpoints?: string[];
   max_reference_images?: number;
+  /** "image" | "video" | … — /image/models liefert auch Video-Modelle. */
+  category?: string;
+  /** true = community-/Drittanbieter-Spiegel, nicht offiziell von Pollinations. */
+  community?: boolean;
+  title?: string;
+  publisher?: string;
+  paid_only?: boolean;
+  health?: { status?: string; success_rate?: number };
 }
 
 const EDIT_CAPABILITIES_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours, same TTL as costCache
@@ -458,6 +467,16 @@ export interface PollinationsReferenceSupport {
   multiImage: string;
 }
 
+export interface PollinationsCatalogEntry {
+  id: string;
+  aliases: string[];
+  image_edit: boolean;
+  max_reference_images: number;
+  /** Nur gesetzt, wenn das Label etwas erklaert (image_edit nein oder empirischer Sonderfall). */
+  multi_image?: string;
+  health: string;
+  paid_only: boolean;
+}
 /**
  * Referenz-Faehigkeit eines Pollinations-Modells fuer Listen-Ausgaben.
  * Folgt derselben Prueflogik wie inspectPollinationsEditReferences
@@ -486,6 +505,67 @@ export function describePollinationsReferenceSupport(
       ? `multi — bis ${maxReferenceImages} Referenzen`
       : "single (1) — nur eine Referenz");
   return { imageEdit, maxReferenceImages, multiImage };
+}
+
+/**
+ * Live-Modelle aus /image/models, die NICHT in der kuratierten Liste stehen.
+ *
+ * /image/models liefert ~77 Eintraege, davon Bild- UND Video-Modelle sowie
+ * community-Spiegel Dritter. Ohne Filter wuerde die Ausgabe dominated von
+ * Video-Modellen und Mirrors — beides fuer generate_image/image_edit irrelevant.
+ * Sortiert nach max_reference_images absteigend, damit Multi-Image-Kandidaten oben
+ * stehen; das ist der Grund, warum dieser Block ueberhaupt existiert. Die Zeilen
+ * bleiben absichtlich kurz (kein title/publisher, multi_image nur als Erlaeuterung),
+ * sonst frisst der Block mehr Tokens als die kuratierte Liste.
+ */
+export function listPollinationsCatalogExtras(
+  capabilities: Map<string, PollinationsEditModelCapabilities>,
+  curatedIds: readonly string[],
+  filter = ""
+): PollinationsCatalogEntry[] {
+  const curated = new Set(curatedIds.map((id) => id.trim().toLowerCase()));
+  const f = filter.trim().toLowerCase();
+  const seen = new Set<string>();
+  const rows: PollinationsCatalogEntry[] = [];
+
+  for (const caps of capabilities.values()) {
+    if (curated.has(caps.name.toLowerCase())) continue;
+    if ((caps.category ?? "image") !== "image") continue;
+    if (caps.community === true) continue;
+    if (!caps.output_modalities?.includes("image")) continue;
+    if (seen.has(caps.name.toLowerCase())) continue;
+    const aliases = (caps.aliases ?? []).filter((a) => a !== caps.name);
+    if (
+      f &&
+      !caps.name.toLowerCase().includes(f) &&
+      !aliases.some((a) => a.toLowerCase().includes(f)) &&
+      !(caps.title ?? "").toLowerCase().includes(f) &&
+      !(caps.publisher ?? "").toLowerCase().includes(f)
+    ) {
+      continue;
+    }
+    seen.add(caps.name.toLowerCase());
+    const support = describePollinationsReferenceSupport(caps.name, capabilities);
+    // multi_image nur, wenn es etwas Erklaerendes sagt: max_reference_images >= 2 ist
+    // fuer sich genommen klar, ein Sonderfall oder fehlendes image_edit nicht.
+    const needsLabel = !support.imageEdit || caps.name.toLowerCase() in REFERENCE_EXPERIENCE;
+    rows.push({
+      id: caps.name,
+      aliases,
+      image_edit: support.imageEdit,
+      max_reference_images: support.maxReferenceImages,
+      ...(needsLabel ? { multi_image: support.multiImage } : {}),
+      health: caps.health?.status ?? "unknown",
+      paid_only: caps.paid_only === true,
+    });
+  }
+
+  return rows.sort(
+    (a, b) =>
+      b.max_reference_images - a.max_reference_images ||
+      Number(b.image_edit) - Number(a.image_edit) ||
+      a.id.localeCompare(b.id)
+  );
 }
 
 /**

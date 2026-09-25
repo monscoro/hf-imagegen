@@ -34,6 +34,8 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
      black-forest-labs/flux.2-klein-4b (10), google/gemini-2.5-flash-image (3),
      bytedance/seedream-5.0-lite (14), openai/gpt-image-2 (16). Exceeding the declared
      limit only warns (catalog is advisory) — but flux.1-kontext-pro really drops image 2.
+     → list_models source="pollinations" lists per model image_edit / max_reference_images /
+     multi_image straight from the live catalog; use it instead of guessing.
       Blank model = x-ai/grok-imagine-image-quality (non-restrictive — few filters,
       healthy, alias aurora, declares 1 but processes 2). Cheaper: x-ai/grok-imagine-image.
       BEST for a single reference: flux.1-kontext-pro (alias kontext, free) — editing-native,

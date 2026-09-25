@@ -368,7 +368,7 @@ export interface PollinationsEditOptions {
  * damit ein Umbenennen des Feldes nicht jeden Multi-Image-Call mit "model not found"
  * abbrechen lässt.
  */
-interface PollinationsEditModelCapabilities {
+export interface PollinationsEditModelCapabilities {
   name: string;
   aliases?: string[];
   input_modalities?: string[];
@@ -386,7 +386,9 @@ interface EditCapabilitiesCache {
 let editCapabilitiesCache: EditCapabilitiesCache | null = null;
 let editModelCapabilitiesPromise: Promise<Map<string, PollinationsEditModelCapabilities>> | null = null;
 
-async function getPollinationsEditModelCapabilities(): Promise<Map<string, PollinationsEditModelCapabilities>> {
+export async function getPollinationsModelCapabilities(): Promise<
+  Map<string, PollinationsEditModelCapabilities>
+> {
   if (editCapabilitiesCache && Date.now() - editCapabilitiesCache.fetchedAt < EDIT_CAPABILITIES_CACHE_TTL_MS) {
     return editCapabilitiesCache.capabilities;
   }
@@ -441,6 +443,52 @@ export interface PollinationsEditReferenceCheck {
 }
 
 /**
+ * Empirisch geprüfte Abweichungen vom Katalog — der Katalog ist nur ein Hinweis.
+ * Hier steht, was tatsächlich passiert, damit list_models die Falle vorab benennt
+ * statt sie erst nach einem bezahlten Call zu zeigen.
+ */
+const REFERENCE_EXPERIENCE: Record<string, string> = {
+  "black-forest-labs/flux.1-kontext-pro": "single (1) — verwirft weitere Referenzen still",
+  "x-ai/grok-imagine-image-quality": "2 (Katalog sagt 1, verarbeitet aber 2)",
+};
+
+export interface PollinationsReferenceSupport {
+  imageEdit: boolean;
+  maxReferenceImages: number;
+  multiImage: string;
+}
+
+/**
+ * Referenz-Faehigkeit eines Pollinations-Modells fuer Listen-Ausgaben.
+ * Folgt derselben Prueflogik wie inspectPollinationsEditReferences
+ * (input_modalities + supported_endpoints + max_reference_images), ergaenzt um die
+ * empirischen Sonderfaelle aus REFERENCE_EXPERIENCE.
+ */
+export function describePollinationsReferenceSupport(
+  modelId: string,
+  capabilities: Map<string, PollinationsEditModelCapabilities>
+): PollinationsReferenceSupport {
+  const caps = capabilities.get(modelId.trim().toLowerCase());
+  if (!caps) {
+    return { imageEdit: false, maxReferenceImages: 0, multiImage: "nicht im Katalog" };
+  }
+  const imageEdit =
+    !!caps.input_modalities?.includes("image") &&
+    !!caps.supported_endpoints?.includes("/v1/images/edits");
+  const maxReferenceImages = caps.max_reference_images ?? 1;
+  if (!imageEdit) {
+    return { imageEdit: false, maxReferenceImages, multiImage: "kein image_edit" };
+  }
+  const empirical = REFERENCE_EXPERIENCE[modelId.trim().toLowerCase()];
+  const multiImage =
+    empirical ??
+    (maxReferenceImages >= 2
+      ? `multi — bis ${maxReferenceImages} Referenzen`
+      : "single (1) — nur eine Referenz");
+  return { imageEdit, maxReferenceImages, multiImage };
+}
+
+/**
  * Prüft Modell + Referenzanzahl gegen den Live-Katalog (/image/models).
  *
  * Bewusst NICHT blockierend, wenn imageCount > max_reference_images: der Katalog
@@ -454,7 +502,7 @@ export async function inspectPollinationsEditReferences(
   model: string,
   imageCount: number
 ): Promise<PollinationsEditReferenceCheck> {
-  const capabilities = await getPollinationsEditModelCapabilities();
+  const capabilities = await getPollinationsModelCapabilities();
   const modelCapabilities = capabilities.get(model.trim().toLowerCase());
   if (!modelCapabilities) {
     throw new Error(

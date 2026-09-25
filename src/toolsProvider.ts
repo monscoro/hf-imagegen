@@ -42,9 +42,12 @@ import {
   buildPollinationsPostBody,
   buildPollinationsEditForm,
   inspectPollinationsEditReferences,
+  describePollinationsReferenceSupport,
+  getPollinationsModelCapabilities,
   detectImageMime,
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_DEFAULT_EDIT_MODEL,
+  type PollinationsEditModelCapabilities,
 } from "./pollinations";
 import { getAllCosts, getCacheInfo } from "./costCache";
 import { getModelCacheInfo } from "./modelCache";
@@ -62,6 +65,21 @@ import {
 
 function json(obj: unknown): string {
   return JSON.stringify(obj, null, 2);
+}
+
+/**
+ * Katalog-Faehigkeiten fuer Listen-Ausgaben. Fehlschlaege werden geschluckt: eine
+ * nicht erreichbare Capability-Quelle darf list_models nicht unbenutzbar machen,
+ * dann fehlen die Multi-Image-Felder und der Aufrufer sieht den Fallback-Hinweis.
+ */
+async function loadPollinationsCapabilities(): Promise<
+  Map<string, PollinationsEditModelCapabilities> | null
+> {
+  try {
+    return await getPollinationsModelCapabilities();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -965,6 +983,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           ALIASES: only "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
           "seedream5" (= seedream-5.0-lite). Use FULL IDs for all other models.
 
+        MULTI-IMAGE (image_edit): every entry carries image_edit (can it edit at all),
+        max_reference_images (recommended count) and multi_image (short label).
+        - source="pollinations": values come from the live /image/models catalog
+          (12h cache) and are ADVISORY — read multi_image, it names the known traps
+          (e.g. kontext = "single (1) — verwirft weitere Referenzen still").
+        - source="image-edit": HuggingFace only ever gets ONE reference here.
+        Verified multi-reference Pollinations models: klein (10), seedream5 (14),
+        nanobanana (3), gpt-image-2 (16).
+
         Rule of thumb: IDs from curated/provider/trending/downloads only work with
         generate_image backend='hf'; IDs from source='pollinations' only with
         backend='pollinations'; IDs from source='image-edit' only with image_edit.
@@ -1057,6 +1084,18 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         const cacheInfo = await getCacheInfo();
         const modelCacheInfo = getModelCacheInfo();
 
+        // Multi-Image-Faehigkeit ausweisen: Pollinations aus dem Live-Katalog
+        // (/image/models, gleiche Quelle + gleicher 12h-Cache wie image_edit),
+        // HF-Edit-Modelle sind per Plugin-Bauweise auf genau eine Referenz begrenzt.
+        let referenceNote: string | undefined;
+        const capabilityMap =
+          source === "pollinations" ? await loadPollinationsCapabilities() : null;
+        if (source === "pollinations" && !capabilityMap) {
+          referenceNote =
+            "max_reference_images/multi_image fehlen: /image/models nicht erreichbar. " +
+            "Für 2+ Referenzen empirisch geprüft: klein (10), seedream5 (14), nanobanana (3), gpt-image-2 (16).";
+        }
+
         return json({
           source,
           current_default_model: currentDefault,
@@ -1075,18 +1114,39 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             downloads: modelCacheInfo.downloads,
             pollinations: modelCacheInfo.pollinations,
           },
-          models: models.map((m) => ({
-            ...m,
-            cost: costMap[m.id]?.cost ?? m.cost,
+          models: models.map((m) => {
             // is_default bezieht sich auf den Default des jeweiligen Katalogs:
             // pollinations → Pollinations-T2I-Default, image-edit → HF-Edit-Default, sonst HF-T2I-Default.
-            is_default:
-              source === "pollinations"
-                ? m.id === POLLINATIONS_DEFAULT_MODEL
-                : source === "image-edit"
-                  ? m.id === editDefault
-                  : m.id === currentDefault,
-          })),
+            const row = {
+              ...m,
+              cost: costMap[m.id]?.cost ?? m.cost,
+              is_default:
+                source === "pollinations"
+                  ? m.id === POLLINATIONS_DEFAULT_MODEL
+                  : source === "image-edit"
+                    ? m.id === editDefault
+                    : m.id === currentDefault,
+            };
+            if (source === "image-edit") {
+              return {
+                ...row,
+                image_edit: true,
+                max_reference_images: 1,
+                multi_image: "single (1) — HF erlaubt nur eine Referenz",
+              };
+            }
+            if (source === "pollinations" && capabilityMap) {
+              const support = describePollinationsReferenceSupport(m.id, capabilityMap);
+              return {
+                ...row,
+                image_edit: support.imageEdit,
+                max_reference_images: support.maxReferenceImages,
+                multi_image: support.multiImage,
+              };
+            }
+            return row;
+          }),
+          ...(referenceNote ? { reference_note: referenceNote } : {}),
           note: loraTruncated
             ? `LoRA lookup capped to first ${LORA_CAP} models to avoid API flood. Use list_loras with base_model for others.`
             : source === "curated"
@@ -1095,9 +1155,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 ? "Pollinations IDs for generate_image or image_edit with backend='pollinations' (requires pollinationsApiKey). " +
                   "Canonical IDs preferred, aliases (flux, kontext, seedream5) also work. " +
                   "Each model's 'cost' field is fetched live from the Pollinations API (12h cache). " +
+                  "For image_edit pick by 'multi_image'/'max_reference_images'; the catalog value is advisory. " +
                   "Use full IDs — only flux/kontext/seedream5 are valid aliases. No LoRAs on this backend."
                 : source === "image-edit"
-                  ? "Editing-native IDs for the image_edit tool (verified image-to-image mapping). image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing."
+                  ? "Editing-native IDs for the image_edit tool (verified image-to-image mapping). image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing. " +
+                    "backend='hf' accepts exactly ONE reference image — for 2+ use source='pollinations'."
                   : "HuggingFace IDs for generate_image backend='hf'. Pass model_id to generate_image to use a model.",
         });
       }),

@@ -26,6 +26,12 @@ export interface ModelInfo {
   license?: string;
   compatible_loras?: LoRAInfo[];
   compatible_loras_count?: number;
+  /** Kann das Modell ueberhaupt /v1/images/edits? (Pollinations aus /image/models, HF aus dem Curated-Set) */
+  image_edit?: boolean;
+  /** Empfohlene Referenzanzahl fuer image_edit. HF = immer 1, Pollinations = Katalogwert (nur Hinweis). */
+  max_reference_images?: number;
+  /** Kurzlabel fuer list_models, damit Multi-Image-Faehigkeit ohne Nachrechnen sichtbar ist. */
+  multi_image?: string;
 }
 
 export interface ModelListResult {

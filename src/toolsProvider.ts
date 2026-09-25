@@ -474,77 +474,55 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "image_edit",
       description: text`
-        Edit one or more existing images from a text instruction. Backends: hf or pollinations.
+        Edit one or more existing images with a change instruction.
+        Reference image(s) = KEEP, prompt = CHANGE: pose, composition and identity stay,
+        the instruction transforms material, light, mood or details. Use generate_image
+        instead when there is no reference image yet.
 
-        MULTI-IMAGE / MULTI-REFERENCE (POLLINATIONS): for 2+ starting images, set
-        backend='pollinations' and pass an ordered array in 'image', for example
-        image=['/absolute/subject.jpg', 'https://example.com/style.png']. All references
-        are sent together in one POST /v1/images/edits request, so the prompt can combine
-        roles such as "use image 1 as the subject and image 2 only as the visual style".
-        The selected model's max_reference_images is checked live against Pollinations
-        /image/models (limits currently range from 1 to 16). Exceeding it is a WARNING in
-        the result notes, not a hard error: the catalog is advisory (grok-imagine-image-quality
-        declares 1 but does process 2, flux.1-kontext-pro declares 1 and silently drops the
-        second image).         'black-forest-labs/flux.2-klein-4b' (10), 'google/gemini-2.5-flash-image' (3),
-        'bytedance/seedream-5.0-lite' (14) or 'openai/gpt-image-2' (16).
-        HF supports exactly one reference image and rejects arrays of 2+ images.
+        'image' — one path/URL, or an ordered array for multi-reference edits:
+        • Prefer the ABSOLUTE file_path from an earlier generate_image/image_edit result.
+          Relative paths resolve against the plugin process CWD, not the chat directory;
+          a bare filename also works (output directory first), as does a public URL.
+        • Arrays with 2+ entries require backend='pollinations'. All references go into
+          ONE request, so the prompt can assign roles per image:
+          "use image 1 as the subject, image 2 only for the visual style".
+        • HF accepts exactly one image and rejects arrays.
 
-        Use when the user provides reference image(s) plus a change instruction
-        (e.g. a generated portrait + "same pose, latex dress instead of silk").
-        Reference image(s) = KEEP, prompt = CHANGE — mirrors the Neigungsprompt gates:
-        pose/composition stay, the instruction transforms material, light, or details.
+        BACKENDS
+        • backend='hf' (default, one image): needs HF token. Editing-native models only —
+          base T2I models have no I2I mapping and fail. Pick with list_models
+          source='image-edit' (FLUX.2-dev is the default). lora_id/negative_prompt/
+          provider are HF-only (ignored or rejected on pollinations).
+        • backend='pollinations': needs pollinationsApiKey. Blank model_id =
+          "x-ai/grok-imagine-image-quality" (few filters, also the safe pick for intimate
+          fashion-editorial). For a single reference "black-forest-labs/flux.1-kontext-pro"
+          (alias kontext, free) is more precise, but its content filter is strict — it flags
+          intimate editorial edits and still charges credits. Browse with
+          list_models source='pollinations'.
 
-        Backends (parameter 'backend'):
-        - "hf" (default for a single image): HuggingFace Inference Providers, needs HF API token.
-          Editing-native models ONLY — base T2I models (FLUX.1-dev, SDXL, Qwen-Image)
-          have NO image-to-image provider mapping and fail. Working models:
-          - "black-forest-labs/FLUX.2-dev" (default): instruction editing, fal-ai/replicate
-          - "black-forest-labs/FLUX.1-Kontext-dev": instruction editing, fal-ai/replicate/wavespeed
-          - "Qwen/Qwen-Image-Edit": precise edits, fal-ai/replicate/wavespeed
-          Browse with list_models source='image-edit'.
-        - "pollinations": Pollinations.ai POST /v1/images/edits, needs pollinationsApiKey.
-          Supports both single-image edits and ordered multi-reference edits on compatible
-          models. Blank model_id defaults to "x-ai/grok-imagine-image-quality" (alias "aurora"),
-          which is non-restrictive and works with 2 references despite declaring 1. Other
-          edit-capable IDs include x-ai/grok-imagine-image (one), x-ai/grok-imagine-image-2.0
-          (three), flux.2-*, gpt-image-2*, seedream-5* and Gemini image models with
-          model-specific limits.
-          RECOMMENDED for a single reference: "black-forest-labs/flux.1-kontext-pro" (alias
-          "kontext", free) — editing-native, keeps pose/composition/identity reliably and
-          follows complex change instructions precisely. Its content filter is strict, so
-          intimate fashion-editorial edits get flagged (and still cost credits); use
-          grok-imagine-image-quality for those.
-          Browse with list_models source='pollinations'.
+        MULTI-REFERENCE MODEL LIMITS
+        Verified to combine several references: klein (10), seedream5 (14), nanobanana (3),
+        gpt-image-2 (16) — or their full IDs. flux.1-kontext-pro really drops image 2.
+        A mismatch only produces a warning in notes, never a hard error, because the
+        catalog limit is advisory (grok-imagine-image-quality declares 1 yet processes 2).
 
-        The 'image' parameter accepts one string or an ordered string array. A string prefers
-        an absolute local file path — use the file_path returned by any earlier
-        generate_image/image_edit result as-is; relative paths resolve against the plugin
-        process working directory (NOT the chat working dir), which is why bare or relative
-        paths can miss. A bare filename is also accepted (output directory first, then process
-        CWD), as is a public image URL. Every array entry follows the same rules and order.
-        To generate from scratch, use generate_image instead.
-        An active Neigungsprompt guides how the change is formulated, same as generate_image.
-        Optional lora_id/negative_prompt/provider: HF backend only (rejected or ignored
-        with pollinations).
+        An active Neigungsprompt guides how the change is worded, same as generate_image.
 
-        FILES: the edited image is saved under the plugin output directory (config
-        'Output Directory', returned as output_dir); optional 'name' appends a readable
-        filename slug (sanitized) after the timestamp — set it when the user asks to
-        name/label the result. Use the returned absolute file_path when
-        handing the image to other tools (incl. further image_edit calls) — do NOT strip it
-        to a bare filename. Find results via
-        list_output_images. quota.remaining counts the plugin's own daily limit, not HF credits.
+        FILES: saved under the plugin output directory (config 'Output Directory').
+        Optional 'name' appends a sanitized filename slug after the timestamp. Hand the
+        result to other tools as the returned absolute file_path — do NOT strip it to a
+        bare filename. Find results via list_output_images.
+        quota.remaining counts the plugin's own daily limit, not HF credits.
       `,
       parameters: {
         image: z.union([
-          z.string().min(1),
-          z.array(z.string().min(1)).min(1).max(16),
+          z.string().trim().min(1),
+          z.array(z.string().trim().min(1)).min(1).max(16),
         ]).describe(
-          "One reference image as a string, or an ordered array of 1–16 reference images/URLs. " +
-          "Absolute local file paths are PREFERRED (use file_path from earlier tool results). " +
-          "Each entry may also be a bare filename, relative path, or public http(s) URL. " +
-          "Arrays with 2+ entries require backend='pollinations'; if the model declares a lower " +
-          "max_reference_images the request still runs and a warning is returned in notes."
+          "One reference image, or an ordered array of 1–16. Absolute file_path from an earlier " +
+          "result is PREFERRED; a bare filename, relative path or public http(s) URL also work. " +
+          "Order is preserved and the prompt can address images by position. 2+ entries require " +
+          "backend='pollinations'."
         ),
         prompt: z.string().min(1).describe(
           "CHANGE instruction: what to transform (subject, garment, material, light, mood). " +
@@ -556,13 +534,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         ),
         model_id: z.string().default("").describe(
           "Model override. backend='hf': editing-native HF ID, blank = defaultEditModel " +
-          "('black-forest-labs/FLUX.2-dev'); alternatives 'black-forest-labs/FLUX.1-Kontext-dev', " +
-          "'Qwen/Qwen-Image-Edit' (list_models source='image-edit'). " +
-          "backend='pollinations': full ID or alias. For 3+ references pick a model with a high " +
-          "max_reference_images such as 'black-forest-labs/flux.2-klein-4b' (10), " +
-          "'bytedance/seedream-5.0-lite' (14), 'google/gemini-2.5-flash-image' (3) or " +
-          "'openai/gpt-image-2' (16). Blank = 'x-ai/grok-imagine-image-quality' (few filters, " +
-          "declares 1 reference but does process 2)."
+          "('black-forest-labs/FLUX.2-dev'); see list_models source='image-edit'. " +
+          "backend='pollinations': full ID or alias, blank = 'x-ai/grok-imagine-image-quality' " +
+          "(few filters, default). 'black-forest-labs/flux.1-kontext-pro' (alias kontext, free) " +
+          "is the precise choice for a single reference. For 3+ references use a multi-image " +
+          "model: klein (10), seedream5 (14), nanobanana (3), gpt-image-2 (16)."
         ),
         provider: z.string().default("auto").describe(
           "HF inference sub-provider (auto, fal-ai, replicate, wavespeed). " +

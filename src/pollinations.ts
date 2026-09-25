@@ -359,6 +359,15 @@ export interface PollinationsEditOptions {
   quality?: "low" | "medium" | "high" | "hd";
 }
 
+/**
+ * Fähigkeiten aus GET /image/models. Der Endpoint hat laut APIDOCS (v0.3.0) KEINE
+ * Feld-Tabelle; `name` + `aliases` + `input_modalities` + `supported_endpoints` +
+ * `max_reference_images` sind nur empirisch belegt. `max_reference_images` ist in den
+ * Docs ausschließlich als Prosa-Verweis für den GET-`image`-Parameter genannt, und
+ * `/v1/models` dokumentiert `id` statt `name` — daher `id` als Fallback akzeptieren,
+ * damit ein Umbenennen des Feldes nicht jeden Multi-Image-Call mit "model not found"
+ * abbrechen lässt.
+ */
 interface PollinationsEditModelCapabilities {
   name: string;
   aliases?: string[];
@@ -392,17 +401,25 @@ async function getPollinationsEditModelCapabilities(): Promise<Map<string, Polli
           `Could not load Pollinations model capabilities: ${response.status} ${response.statusText}`
         );
       }
-      const payload = await response.json() as PollinationsEditModelCapabilities[];
-      if (!Array.isArray(payload)) {
+      const raw = await response.json() as Array<PollinationsEditModelCapabilities & { id?: string }>;
+      if (!Array.isArray(raw)) {
         throw new Error("Pollinations model capability response was not an array.");
       }
       const capabilities = new Map<string, PollinationsEditModelCapabilities>();
-      for (const model of payload) {
-        if (!model || typeof model.name !== "string") continue;
-        capabilities.set(model.name.toLowerCase(), model);
-        for (const alias of model.aliases ?? []) {
-          capabilities.set(alias.toLowerCase(), model);
+      for (const entry of raw) {
+        if (!entry || typeof entry !== "object") continue;
+        const name = typeof entry.name === "string" ? entry.name : entry.id;
+        if (typeof name !== "string" || !name) continue;
+        const model: PollinationsEditModelCapabilities = { ...entry, name };
+        capabilities.set(name.toLowerCase(), model);
+        for (const alias of Array.isArray(entry.aliases) ? entry.aliases : []) {
+          if (typeof alias === "string" && alias) {
+            capabilities.set(alias.toLowerCase(), model);
+          }
         }
+      }
+      if (capabilities.size === 0) {
+        throw new Error("Pollinations model catalog contained no usable model entries.");
       }
       editCapabilitiesCache = { fetchedAt: Date.now(), capabilities };
       return capabilities;
@@ -466,7 +483,9 @@ export async function inspectPollinationsEditReferences(
       ? `Model '${modelCapabilities.name}' declares max_reference_images: ${maxReferenceImages}, but ` +
         `${imageCount} were sent. Extra references may be ignored by the model (e.g. ` +
         `flux.1-kontext-pro drops the second image); the catalog value is only advisory. ` +
-        `A model verified to accept ${imageCount} references is '${suggestion}'.`
+        `A model verified to accept ${imageCount} references is '${suggestion}'. ` +
+        `If the API rejects the request instead, the documented error code is ` +
+        `'image_too_large' (HTTP 400), which also covers the per-request image count cap.`
       : null,
   };
 }

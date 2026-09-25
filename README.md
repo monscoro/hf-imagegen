@@ -92,7 +92,7 @@ image_edit(image, images?, prompt, backend?, model_id?, provider?, negative_prom
 
 Reference image(s) = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` is the **first** reference and is always a plain string. Absolute local paths are preferred (the `file_path` returned by an earlier result); bare filenames, relative paths and public URLs also work. Leave `images` unset for a single-image edit.
 
-**Multi-image editing is supported by the `pollinations` backend:** put the first reference in `image` and up to 15 more in `images` — all are uploaded together in one `POST /v1/images/edits` request, order preserved, so the prompt can address them by position. (An earlier version accepted an array in `image`; models that stringified that array into a single string caused "Reference image not found" errors, so `image` is string-only and a stringified array is still auto-recovered for compatibility.) The tool reads `max_reference_images` from the live model catalog and puts a note in the result when the count exceeds it — it does **not** block, because the catalog is only advisory (`x-ai/grok-imagine-image-quality` declares 1 but processes 2, `flux.1-kontext-pro` declares 1 and silently drops the second image). Models verified to combine several references: `black-forest-labs/flux.2-klein-4b` (10), `google/gemini-2.5-flash-image` (3), `bytedance/seedream-5.0-lite` (14), `openai/gpt-image-2` (16). HF remains single-reference only.
+**Multi-image editing is supported by the `pollinations` backend:** put the first reference in `image` and up to 15 more in `images` — all are uploaded together in one `POST /v1/images/edits` request, order preserved, so the prompt can address them by position. (An earlier version accepted an array in `image`; models that stringified that array into a single string caused "Reference image not found" errors, so `image` is string-only and a stringified array is still auto-recovered for compatibility.) The tool reads `max_reference_images` from the live model catalog and puts a note in the result when the count exceeds it — it does **not** block, because the catalog is only advisory (`x-ai/grok-imagine-image-quality` declares 1 but processes 2, `flux.1-kontext-pro` declares 1 and silently drops the second image). Models verified to combine several references: `black-forest-labs/flux.2-klein-4b` (10), `openai/gpt-image-2` (16), `bytedance/seedream-5.0-lite` (14), `google/gemini-3-pro-image` (14). HF remains single-reference only.
 
 | Parameter | Default | Description |
 |---|---|---|
@@ -195,24 +195,19 @@ Active profiles are injected as system context every turn and act **indirectly**
 
 **Pollinations models** (via `list_models source="pollinations"`, requires API key):
 
-| Model | Alias | Access | Notes |
-|---|---|---|---|
-| `flux.1-schnell` | `flux` | free | Default model, fast |
-| `flux.1-kontext-pro` | `kontext` | free | Recommended `image_edit` model: editing-native, keeps pose/composition/identity, precise on complex change instructions (1 reference). **strict filter** — flags intimate fashion-editorial |
-| `flux.2-klein-4b` | — | free | Fast, small, for quick tests |
-| `z-image-turbo` | — | free | API default model |
-| `flux.2-pro` | — | paid | Highest quality FLUX-2 |
-| `flux.2-flex` | — | paid | Fast FLUX-2 variant |
-| `grok-imagine-image-2.0` | — | paid | Very high quality, supports quality param |
-| `grok-imagine-image-quality` | `aurora` | paid | Grok Pro, **pollinations edit default** (`/v1/images/edits`), few filters |
-| `grok-imagine-image` | — | paid | Fast xAI model, edit-capable, few filters |
-| `ideogram-v4-turbo` | — | paid | Best for text-in-image, logos |
-| `wan-2.7-image` | — | paid | Good for detailed scenes |
-| `qwen-image-3` | — | paid | Strong prompt adherence |
-| `gemini-3.1-flash-image` | — | paid | Fast Gemini |
-| `seedream-5.0-lite` | `seedream5` | paid | Very high quality, strict filter |
-| `seedream-5.0-pro` | — | paid | Highest ByteDance quality |
-| `gemini-3-pro-image` | — | paid | 4K, slow, highest quality |
+Seven curated picks, each with its own role — cheapest per role rather than "everything":
+
+| Model | Alias | Access | ~Cost/image | Role |
+|---|---|---|---|---|
+| `flux.1-schnell` | `flux` | free | 0.002 | T2I default, most used of all models |
+| `flux.1-kontext-pro` | `kontext` | free | 0.03 | most precise `image_edit`, 1 ref, **strict filter** |
+| `grok-imagine-image-quality` | `aurora` | paid | 0.053 | edit default, few filters, `quality` param |
+| `flux.2-klein-4b` | — | free | 0.005 | cheapest multi-reference, 10 refs |
+| `gpt-image-2` | — | free | token-based | most capable, 16 refs, best prompt adherence |
+| `seedream-5.0-lite` | `seedream5` | paid | 0.035 | high-res from 1920², 14 refs, **strict filter** |
+| `gemini-3-pro-image` | `nanobanana-pro` | paid | token-based | up to 4K, 14 refs, fine detail |
+
+Everything else (e.g. `flux.2-pro`, `ideogram-v4-turbo` for text-in-image, `qwen-image-3`, `wan-2.7-image`, `z-image-turbo`) is **not** curated, but still reachable: `list_models source="pollinations"` returns the full live catalog under `catalog_extras` with `max_reference_images` and cost. The curated list stays short because the live one doesn't need manual upkeep.
 
 ---
 
@@ -267,7 +262,7 @@ Active profiles are injected as system context every turn and act **indirectly**
 
 **Base T2I models have no image-to-image mapping.** Verified per HF provider API: FLUX.1-dev, SDXL, Qwen-Image map to `text-to-image` only on every provider — retries are doomed, which a live reasoning trace confirmed. `image_edit` therefore defaults to editing-native `FLUX.2-dev` (I2I on fal-ai/replicate), with `FLUX.1-Kontext-dev` and `Qwen-Image-Edit` as alternatives; the error names all three. `list_models source="image-edit"` keeps the two worlds apart.
 
-**Pollinations as second backend.** Filter off by default; API key required since Sep 2026 (anonymous access removed). 15 models available: 4 free (flux.1-schnell, kontext, klein-4b, z-image-turbo), 11 paid (cost pollen). Use `list_models source="pollinations"` for current model list with costs. No negative prompt, no LoRAs, community alphas as fallback chain.
+**Pollinations as second backend.** Filter off by default; API key required since Sep 2026 (anonymous access removed). The live catalog carries 77 models; 7 are curated (see table above), the rest come from `list_models source="pollinations"` under `catalog_extras` with costs. No negative prompt, no LoRAs, community alphas as fallback chain.
 
 **LoRAs via fal-ai.** `generate_image` routes LoRA calls to `fal-ai`; I2I LoRA passthrough exists and is honestly marked "under verification". Curated prompts stay under ~150 words to bound token cost on every-turn injection.
 

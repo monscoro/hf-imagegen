@@ -15,13 +15,21 @@ import {
  * - seed: nur als Query-Param von GET /image/{prompt} dokumentiert, NICHT im POST-Body.
  * - Der alte Host image.pollinations.ai ist deprecated und wird nicht mehr genutzt.
  *
- * Qualitäts-Hinweise für komplexe, detailreiche Prompts:
- * - `x-ai/grok-imagine-image-2.0` (quality: medium): Empfohlen für hochwertige Fashion-Editorials, keine strengen Content-Filter
- * - `black-forest-labs/flux.1-schnell`: Solide Basis, 1024px
- * - `black-forest-labs/flux.1-kontext-pro`: Azure-FLUX, starkes image_edit-Modell für
- *   komplexe Edit-Anweisungen und präzise KEEP/CHANGE-Umsetzung (gratis, 1 Referenz; STRENGE Filter)
- * - `bytedance/seedream-5.0-lite`: ByteDance, sehr hoch, min 1920x1920 (paid_only, STRENGE Filter)
- * - `google/gemini-3-pro-image`: Gemini 3 Pro, bis 4K, höchste Qualität
+ * Die kuratierte Liste unten ist bewusst kurz (7 Modelle). Jeder Eintrag hat eine
+ * EIGENE Rolle — T2I-Standard, präzises 1-Bild-Edit, ungefiltertes Edit, günstiges
+ * Multi-Referenz, maximale Multi-Image-Fähigkeit, Hochauflösend, 4K-Detail. Alles
+ * Weitere im Live-Katalog: list_models source='pollinations' liefert die restlichen
+ * Bildmodelle unter catalog_extras (inkl. max_reference_images), also ohne Pflege-
+ * aufwand durch uns und ohne die Liste hier aufzublähen.
+ *
+ * Rollen der kuratierten Auswahl (Preise = pollen pro Bild, live geprüft):
+ * - `black-forest-labs/flux.1-schnell`: T2I-Standard, ~0.002, gratis, Default
+ * - `black-forest-labs/flux.1-kontext-pro`: präziseste Edits, 1 Referenz, gratis, STRENGE Filter
+ * - `x-ai/grok-imagine-image-quality`: Default-Edit, wenige Filter, quality-Parameter
+ * - `black-forest-labs/flux.2-klein-4b`: günstigstes Multi-Referenz, ~0.005, 10 Refs, gratis
+ * - `openai/gpt-image-2`: 16 Referenzen, beste Prompt-Treue, token-basiert
+ * - `bytedance/seedream-5.0-lite`: ab 1920x1920, 14 Refs, paid_only, STRENGE Filter
+ * - `google/gemini-3-pro-image`: bis 4K, 14 Refs, token-basiert
  */
 export const POLLINATIONS_DEFAULT_MODEL = "black-forest-labs/flux.1-schnell";
 
@@ -29,8 +37,8 @@ export const POLLINATIONS_DEFAULT_MODEL = "black-forest-labs/flux.1-schnell";
  * Default-Edit-Modell für backend='pollinations' (POST /v1/images/edits).
  * bewusst NICHT restriktiv: kontext/seedream haben strenge Filter, die
  * Fashion-Editorial flaggen und Credits verbrennen (fehlgeschlagene Edits kosten).
- * grok-imagine-image-quality: healthy, edit-fähig, wenige Filter.
- * Günstige Alternative: x-ai/grok-imagine-image.
+ * grok-imagine-image-quality: healthy, edit-fähig, wenige Filter, quality-Parameter.
+ * Günstige Alternative für viele Referenzen: flux.2-klein-4b (~0.005, 10 Refs, gratis).
  * Präzise Alternative für komplexe Edit-Anweisungen: flux.1-kontext-pro.
  */
 export const POLLINATIONS_DEFAULT_EDIT_MODEL = "x-ai/grok-imagine-image-quality";
@@ -41,179 +49,86 @@ export const POLLINATIONS_KNOWN_MODELS: ModelInfo[] = [
   {
     id: "black-forest-labs/flux.1-schnell",
     description:
-      "FLUX.1 Schnell — Standard T2I. Solide Qualität, 1024px. " +
-      "Guter Allrounder für die meisten Prompts.",
+      "FLUX.1 Schnell — T2I-Standard, ~0.002 pollen/Bild, gratis, mit Abstand am " +
+      "häufigsten genutzten Modell. Kein Bild-Input (kein image_edit). Alias: flux.",
     style: "photorealistic, artistic",
     speed: "fast",
     access: "free",
     source: "pollinations",
+    cost: "~0.002 pollen",
   },
   {
     id: "black-forest-labs/flux.1-kontext-pro",
     description:
-      "FLUX.1 Kontext Pro — Azure-FLUX, editing-nativ (POST /v1/images/edits). " +
-      "Starkes image_edit-Modell: hält Pose/Komposition/Identität zuverlässig und folgt " +
-      "komplexen Edit-Anweisungen präzise; gratis. Ein Referenzbild. " +
-      "Hinweis: strenge Content-Filter — Fashion-Editorial mit intakten Details kann als " +
-      "Sexual_Prompt geflaggt werden (gefilterte Edits kosten trotzdem). Für ungefilterte " +
-      "Fashion-Edits: x-ai/grok-imagine-image-quality.",
+      "FLUX.1 Kontext Pro — präzises image_edit mit EINER Referenz, gratis: hält " +
+      "Pose, Komposition und Identität zuverlässig und folgt komplexen Edit-" +
+      "Anweisungen am genauesten. ACHTUNG: strenge Content-Filter, Fashion-Editorial " +
+      "mit intakten Details wird als Sexual_Prompt geflaggt — gefilterte Edits kosten " +
+      "trotdem. Verwirft weitere Referenzen still. Alias: kontext.",
     style: "photorealistic, artistic, editing",
     speed: "medium",
     access: "free",
     source: "pollinations",
-  },
-  {
-    id: "black-forest-labs/flux.2-klein-4b",
-    description:
-      "FLUX.2 Klein 4B — Schnell, aber 4B Parameter. " +
-      "Zu klein für komplexe Szenen, nur für schnelle Takes.",
-    style: "photorealistic, artistic",
-    speed: "fast",
-    access: "free",
-    source: "pollinations",
-  },
-  {
-    id: "black-forest-labs/flux.2-pro",
-    description:
-      "FLUX.2 Pro — Neues FLUX-2 Flaggschiff. " +
-      "Höchste Qualität, flexibel für 1k–2k. Empfohlen für Production.",
-    style: "photorealistic, cinematic",
-    speed: "medium",
-    access: "pro",
-    source: "pollinations",
     cost: "~0.03 pollen",
-  },
-  {
-    id: "black-forest-labs/flux.2-flex",
-    description:
-      "FLUX.2 Flex — FLUX-2 variabel. " +
-      "Gute Qualität, schnellere Inferenz als Pro.",
-    style: "photorealistic, artistic",
-    speed: "fast",
-    access: "pro",
-    source: "pollinations",
-    cost: "~0.03 pollen",
-  },
-  {
-    id: "bytedance/seedream-5.0-lite",
-    description:
-      "Seedream 5.0 Lite — ByteDance, sehr hohe Qualität. " +
-      "Min. 1920x1920 px. " +
-      "ACHTUNG: Sehr strenge Content-Filter.",
-    style: "photorealistic, high-res",
-    speed: "slow",
-    access: "pro",
-    source: "pollinations",
-    cost: "~0.05 pollen",
-  },
-  {
-    id: "bytedance/seedream-5.0-pro",
-    description:
-      "Seedream 5.0 Pro — ByteDance, höchste Qualität, min 1920x1920.",
-    style: "photorealistic, high-res",
-    speed: "slow",
-    access: "pro",
-    source: "pollinations",
-    cost: "~0.08 pollen",
-  },
-  {
-    id: "google/gemini-3-pro-image",
-    description:
-      "Gemini 3 Pro Image — Bis 4K Auflösung, höchste Qualität. " +
-      "Langsam, aber exzellent für feine Details.",
-    style: "photorealistic, cinematic",
-    speed: "slow",
-    access: "pro",
-    source: "pollinations",
-    cost: "~0.07 pollen",
-  },
-  {
-    id: "google/gemini-3.1-flash-image",
-    description:
-      "Gemini 3.1 Flash Image — Schnell, gute Qualität. " +
-      "Ideal für schnelle Iterationen.",
-    style: "photorealistic, artistic",
-    speed: "fast",
-    access: "pro",
-    source: "pollinations",
-    cost: "~0.07 pollen",
   },
   {
     id: "x-ai/grok-imagine-image-quality",
     description:
-      "Grok Imagine Pro (quality) — xAI, editing-fähig (POST /v1/images/edits). " +
-      "Default für image_edit backend='pollinations': wenige Content-Filter " +
-      "(kein Flagging bei Fashion-Editorial), healthy. Alias: aurora. quality-Parameter supported.",
+      "Grok Imagine (quality) — Default für image_edit: wenige Content-Filter " +
+      "(kein Flagging bei Fashion-Editorial), quality-Parameter wird unterstützt. " +
+      "Katalog sagt 1 Referenz, verarbeitet aber 2. Alias: aurora.",
     style: "photorealistic, cinematic, image-editing",
     speed: "medium",
     access: "pro",
     source: "pollinations",
-    cost: "~0.05 pollen",
+    cost: "~0.053 pollen",
   },
   {
-    id: "x-ai/grok-imagine-image-2.0",
+    id: "black-forest-labs/flux.2-klein-4b",
     description:
-      "Grok Imagine 2.0 — xAI, sehr hohe Qualität. " +
-      "Empfohlen für hochwertige Fashion-Editorials (keine strengen Content-Filter). " +
-      "Unterstützt quality-Parameter (low/medium/high/hd).",
-    style: "photorealistic, cinematic",
-    speed: "medium",
-    access: "pro",
-    source: "pollinations",
-    cost: "~0.07 pollen",
-  },
-  {
-    id: "x-ai/grok-imagine-image",
-    description:
-      "Grok Imagine — xAI, erste Generation, editing-fähig (POST /v1/images/edits). " +
-      "Günstigste Grok-Edit-Option, schnellere Inferenz, keine strengen Filter.",
-    style: "photorealistic, artistic, image-editing",
-    speed: "fast",
-    access: "pro",
-    source: "pollinations",
-    cost: "~0.02 pollen",
-  },
-  {
-    id: "ideogram-ai/ideogram-v4-turbo",
-    description:
-      "Ideogram V4 Turbo — Exzellent für Text-in-Bild. " +
-      "Schnell, gute Qualität für Grafiken und Logos.",
-    style: "illustration, graphic, text-in-image",
-    speed: "fast",
-    access: "pro",
-    source: "pollinations",
-    cost: "~0.03 pollen",
-  },
-  {
-    id: "alibaba/wan-2.7-image",
-    description:
-      "Wan 2.7 Image — Alibaba, multimodal. " +
-      "Gute Qualität für detailreiche Szenen.",
-    style: "photorealistic, artistic",
-    speed: "medium",
-    access: "pro",
-    source: "pollinations",
-    cost: "~0.03 pollen",
-  },
-  {
-    id: "qwen/qwen-image-3",
-    description:
-      "Qwen Image 3 — Alibaba/Qwen, stark für detailreiche Szenen. " +
-      "Gute Prompt-Treue.",
-    style: "photorealistic, detailed",
-    speed: "medium",
-    access: "pro",
-    source: "pollinations",
-    cost: "~0.04 pollen",
-  },
-  {
-    id: "tongyi-mai/z-image-turbo",
-    description:
-      "Z-Image Turbo — Default-Modell der neuen API, schnell und zuverlässig.",
+      "FLUX.2 Klein 4B — mit Abstand günstigstes MULTI-Referenz-Modell: ~0.005 " +
+      "pollen/Bild, gratis, bis 10 Referenzen. Die Wahl für viele Bildvarianten.",
     style: "photorealistic, artistic",
     speed: "fast",
     access: "free",
     source: "pollinations",
+    cost: "~0.005 pollen",
+  },
+  {
+    id: "openai/gpt-image-2",
+    description:
+      "GPT Image 2 — höchste Multi-Image-Fähigkeit (bis 16 Referenzen) und beste " +
+      "Prompt-Treue, token-basiert abgerechnet. Auch ohne Pro-Account nutzbar. " +
+      "Für Edits mit vielen Referenzen oder kniffligen Anweisungen.",
+    style: "photorealistic, detailed",
+    speed: "medium",
+    access: "free",
+    source: "pollinations",
+    cost: "token-basiert",
+  },
+  {
+    id: "bytedance/seedream-5.0-lite",
+    description:
+      "Seedream 5.0 Lite — Hochauflösend ab 1920x1920, bis 14 Referenzen. " +
+      "ACHTUNG: sehr strenge Content-Filters, für ungefilterte Fashion-Edits " +
+      "grok-imagine-image-quality nehmen. Alias: seedream5.",
+    style: "photorealistic, high-res",
+    speed: "slow",
+    access: "pro",
+    source: "pollinations",
+    cost: "~0.035 pollen",
+  },
+  {
+    id: "google/gemini-3-pro-image",
+    description:
+      "Nano Banana Pro (Gemini 3 Pro Image) — Studioqualität bis 4K, bis 14 " +
+      "Referenzen, token-basiert. Stark bei feinen Details und kniffligen prompts. " +
+      "Alias: nanobanana-pro.",
+    style: "photorealistic, cinematic",
+    speed: "slow",
+    access: "pro",
+    source: "pollinations",
+    cost: "token-basiert",
   },
 ];
 
@@ -240,7 +155,8 @@ export interface PollinationsGenerateOptions {
  * Modelle mit dokumentiertem quality-Support (APIDOCS).
  * quality wird nur für diese Modelle im POST-Body gesendet, sonst still ignoriert.
  * Unterstützt: gptimage, gptimage-large, gpt-image-2*, grok-imagine-image-2.0
- * Hinweis: grok-imagine-image-2.0 ist das empfohlene High-Quality-Modell auf pollinations für Fashion-Editorial.
+ * Hinweis: quality: medium lohnt sich bei grok-imagine-image-quality (Default-Edit)
+ * und gpt-image-2 — beides kuratiert und beide ohne strenge Content-Filter.
  */
 const QUALITY_SUPPORTED_HINTS = [
   "gpt-image",
@@ -601,8 +517,10 @@ export async function inspectPollinationsEditReferences(
   const maxReferenceImages = modelCapabilities.max_reference_images ?? 1;
   const exceedsDeclaredLimit = imageCount > maxReferenceImages;
   const suggestion = imageCount <= 3
-    ? "google/gemini-2.5-flash-image (up to 3)"
-    : "black-forest-labs/flux.2-klein-4b (up to 10)";
+    ? "openai/gpt-image-2 (up to 16)"
+    : imageCount <= 10
+      ? "black-forest-labs/flux.2-klein-4b (up to 10, ~0.005 pollen)"
+      : "openai/gpt-image-2 (up to 16)";
   return {
     model: modelCapabilities.name,
     maxReferenceImages,

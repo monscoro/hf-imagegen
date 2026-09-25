@@ -598,8 +598,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           list_models source='pollinations'.
 
         MULTI-REFERENCE MODEL LIMITS
-        Verified to combine several references: klein (10), seedream5 (14), nanobanana (3),
-        gpt-image-2 (16) — or their full IDs. flux.1-kontext-pro really drops image 2.
+        Verified to combine several references: klein (10), gpt-image-2 (16),
+        seedream5 (14), nanobanana-pro (14) — or their full IDs. flux.1-kontext-pro
+        really drops image 2.
         A mismatch only produces a warning in notes, never a hard error, because the
         catalog limit is advisory (grok-imagine-image-quality declares 1 yet processes 2).
 
@@ -639,8 +640,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "backend='pollinations': full ID or alias, blank = 'x-ai/grok-imagine-image-quality' " +
           "(few filters, default). 'black-forest-labs/flux.1-kontext-pro' (alias kontext, free) " +
           "is the precise choice for a single reference (it drops further references). " +
-          "For 2+ references use a multi-image model: klein (10), seedream5 (14), " +
-          "nanobanana (3), gpt-image-2 (16)."
+          "For 2+ references use a multi-image model: klein (10), gpt-image-2 (16), " +
+          "seedream5 (14), nanobanana-pro (14)."
         ),
         provider: z.string().default("auto").describe(
           "HF inference sub-provider (auto, fal-ai, replicate, wavespeed). " +
@@ -990,8 +991,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           (12h cache) and are ADVISORY — read multi_image, it names the known traps
           (e.g. kontext = "single (1) — verwirft weitere Referenzen still").
         - source="image-edit": HuggingFace only ever gets ONE reference here.
-        Verified multi-reference Pollinations models: klein (10), seedream5 (14),
-        nanobanana (3), gpt-image-2 (16).
+        Verified multi-reference Pollinations models: klein (10), gpt-image-2 (16),
+        seedream5 (14), nanobanana-pro (14).
 
         source="pollinations" also returns catalog_extras: the live image models that
         are NOT in the curated list (no video models, no community mirrors), sorted by
@@ -1106,7 +1107,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         if (source === "pollinations" && !capabilityMap) {
           referenceNote =
             "max_reference_images/multi_image fehlen: /image/models nicht erreichbar. " +
-            "Für 2+ Referenzen empirisch geprüft: klein (10), seedream5 (14), nanobanana (3), gpt-image-2 (16).";
+            "Für 2+ Referenzen empirisch geprüft: klein (10), gpt-image-2 (16), seedream5 (14), nanobanana-pro (14).";
         }
         const catalogExtras =
           source === "pollinations" && include_catalog && capabilityMap

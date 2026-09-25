@@ -16,10 +16,11 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
    - backend="hf" (default): needs HF token, BEST QUALITY, LoRA support
      Recommended for: complex prompts, production use, fashion-editorial, detailed scenes
    - backend="pollinations": needs pollinationsApiKey in config (required since Sep 2026)
-     High-quality options available (e.g. x-ai/grok-imagine-image-2.0 with quality: medium).
-     Use list_models source='pollinations' to see available models, costs, and aliases.
-     Note: kontext/seedream5 have STRICT filters — fashion-editorial often flagged. grok-imagine-image-2.0 does NOT filter fashion-editorial (safe=off).
-     For permissive fashion-editorial takes, prefer grok-imagine-image-2.0 over kontext/seedream5.
+      Curated default picks: flux.1-schnell (cheapest T2I, free), grok-imagine-image-quality
+      (best permissive quality, quality: medium), openai/gpt-image-2 (most capable, 16 refs).
+      Use list_models source='pollinations' for the full live catalog, costs, and aliases.
+      Note: kontext/seedream5 have STRICT filters — fashion-editorial often flagged. grok-imagine-image-quality does NOT filter fashion-editorial (safe=off).
+      For permissive fashion-editorial takes, prefer grok-imagine-image-quality over kontext/seedream5.
 • User provides a reference image + change instruction            → image_edit (reference = KEEP, prompt = CHANGE)
    - 'image': the FIRST reference, a plain STRING — never an array. Prefer the ABSOLUTE
      file_path from an earlier generate_image/image_edit result —
@@ -31,13 +32,13 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
    - backend="pollinations": needs pollinationsApiKey; POST /v1/images/edits
      MULTI-IMAGE: for 2+ references put the first in 'image' and the rest in 'images',
      and pick a model with a high max_reference_images; verified examples:
-     black-forest-labs/flux.2-klein-4b (10), google/gemini-2.5-flash-image (3),
-     bytedance/seedream-5.0-lite (14), openai/gpt-image-2 (16). Exceeding the declared
-     limit only warns (catalog is advisory) — but flux.1-kontext-pro really drops image 2.
-     → list_models source="pollinations" lists per model image_edit / max_reference_images /
-     multi_image straight from the live catalog; use it instead of guessing.
-      Blank model = x-ai/grok-imagine-image-quality (non-restrictive — few filters,
-      healthy, alias aurora, declares 1 but processes 2). Cheaper: x-ai/grok-imagine-image.
+      black-forest-labs/flux.2-klein-4b (10, ~0.005, free), openai/gpt-image-2 (16),
+      bytedance/seedream-5.0-lite (14), google/gemini-3-pro-image (14). Exceeding the declared
+      limit only warns (catalog is advisory) — but flux.1-kontext-pro really drops image 2.
+      → list_models source="pollinations" lists per model image_edit / max_reference_images /
+      multi_image straight from the live catalog; use it instead of guessing.
+       Blank model = x-ai/grok-imagine-image-quality (non-restrictive — few filters,
+       healthy, alias aurora, declares 1 but processes 2). Cheaper for many refs: flux.2-klein-4b.
       BEST for a single reference: flux.1-kontext-pro (alias kontext, free) — editing-native,
       hält Pose/Komposition/Identität zuverlässig und folgt komplexen Edit-Anweisungen präzise;
       dafür sind die Content-Filter streng (intimate Fashion-Editorial wird geflaggt und
@@ -58,8 +59,8 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - Use negative_prompt to exclude unwanted elements: "blurry, low quality, text, watermark, distorted"
 - HF backend: FLUX.1-dev (good quality, free), FLUX.1-schnell (fastest free), FLUX.2-dev (best, license needed), SDXL (stable).
 - FIRST CHOICE for complex prompts: use backend="hf" with FLUX.1-dev — best quality.
-- Pollinations supports high-quality models too: x-ai/grok-imagine-image-2.0 with quality: medium, google/gemini-3-pro-image (4K).
-  For permissive fashion-editorial without strict content filters, prefer grok-imagine-image-2.0.
+- Pollinations supports high-quality models too: x-ai/grok-imagine-image-quality with quality: medium, google/gemini-3-pro-image (4K).
+  For permissive fashion-editorial without strict content filters, prefer grok-imagine-image-quality.
 - image_edit works on both backends: hf (FLUX.2-dev etc.) and pollinations — for one reference
   recommend kontext (precise, keeps pose/composition), for 2+ references a multi-image model.
 - First call to an inactive model may take 20-60s on HF free tier — this is normal.
@@ -71,10 +72,12 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - Uses gen.pollinations.ai API with Bearer auth (POST) or ?key= (GET).
 - ALIASES: only "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
   "seedream5" (= seedream-5.0-lite). Use FULL IDs for all other models.
-- Use list_models source='pollinations' for full model list with costs.
-- seed: model-specific (flux.1-schnell, z-image-turbo, flux.2-klein-4b). POST ignores seed.
-- quality: only for gptimage/grok-imagine-image-2.0 family. Use quality: medium for grok-imagine-image-2.0 (highest quality on pollinations).
-- Content filter: kontext/seedream5 have STRICT filters — fashion-editorial often flagged. grok-imagine-image-2.0 does NOT.
+- Use list_models source='pollinations' for full model list with costs. The curated 7 are
+  flux.1-schnell, flux.1-kontext-pro, grok-imagine-image-quality, flux.2-klein-4b,
+  gpt-image-2, seedream-5.0-lite, gemini-3-pro-image; everything else comes via catalog_extras.
+- seed: model-specific (flux.1-schnell, flux.2-klein-4b). POST ignores seed.
+- quality: only for gptimage/grok-imagine-image-2.0 family. Use quality: medium for grok-imagine-image-quality or gpt-image-2.
+- Content filter: kontext/seedream5 have STRICT filters — fashion-editorial often flagged. grok-imagine-image-quality does NOT.
 
 == IMAGE SYSTEM PROMPT / STIMMUNG ==
 - Neigungsprompts (Profile) und Bibliotheks-Records wirken INDIREKT:

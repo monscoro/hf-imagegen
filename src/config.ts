@@ -57,4 +57,12 @@ export const pluginConfigSchematics = createConfigSchematics()
       "Off hides these tools and stops injecting active style profiles into the LLM context. " +
       "Previously active profiles stay stored and resume when re-enabled. Default: on.",
   }, true)
+  .field("enableVideo", "boolean", {
+    displayName: "Enable Video Tools",
+    subtitle:
+      "Master switch for video generation (generate_video tool + routing). " +
+      "Off hides generate_video from the LLM (list_models source='video' keeps working " +
+      "for browsing). Video renders bill per second — turn off to avoid accidental " +
+      "credit spend. Default: on.",
+  }, true)
   .build();

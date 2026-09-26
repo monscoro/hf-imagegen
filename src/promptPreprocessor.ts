@@ -164,14 +164,26 @@ export async function promptPreprocessor(
   const history = await ctl.pullHistory();
   // Config-Schalter für das Neigungsprompt-Subsystem (default an).
   let inclinationsEnabled = true;
+  // Config-Schalter für Video (default an): ohne generate_video kein Routing.
+  let videoEnabled = true;
   try {
-    inclinationsEnabled =
-      ctl.getPluginConfig(pluginConfigSchematics).get("enableInclinationPrompts") !== false;
+    const cfg = ctl.getPluginConfig(pluginConfigSchematics);
+    inclinationsEnabled = cfg.get("enableInclinationPrompts") !== false;
+    videoEnabled = cfg.get("enableVideo") !== false;
   } catch {
     // Config nicht lesbar → bisheriges Verhalten (an) beibehalten.
   }
   const activeBlock = inclinationsEnabled ? buildActiveDirectiveBlock("") : "";
-  const rules = inclinationsEnabled ? SYSTEM_RULES : stripInclinationRules(SYSTEM_RULES);
+  let rules = inclinationsEnabled ? SYSTEM_RULES : stripInclinationRules(SYSTEM_RULES);
+  if (!videoEnabled) {
+    // Video-Routing raus (Tool ist dann nicht registriert) — eine Zeile,
+    // kein Sektions-Strip noetig.
+    rules = rules
+      .split("\n")
+      .filter((line) => !line.includes("generate_video"))
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n");
+  }
   const fullRules = `${rules}${activeBlock}`;
 
   if (history.length === 0) {

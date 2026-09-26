@@ -398,6 +398,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   });
   // Config-Schalter für das Neigungsprompt-Subsystem (default an).
   const inclinationsEnabled = cfg.get("enableInclinationPrompts") !== false;
+  // Config-Schalter für Video (default an): generate_video kostet pro Sekunde.
+  const videoEnabled = cfg.get("enableVideo") !== false;
 
   let isGenerating = false;
   let lastPollinationsCall = 0;
@@ -2680,10 +2682,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
   ];
 
-  if (!inclinationsEnabled) {
-    // Config-Schalter aus: Neigungsprompt-Tools nicht registrieren
-    // (Injektion läuft separat über promptPreprocessor).
-    return tools.filter((t) => !t.name.startsWith("inclination_prompt_"));
+  if (!inclinationsEnabled || !videoEnabled) {
+    // Config-Schalter aus: Neigungsprompt-Tools bzw. generate_video nicht
+    // registrieren (Injektion läuft separat über promptPreprocessor).
+    // list_models source='video' bleibt zum Stöbern (kostenlos, kein Render).
+    return tools.filter(
+      (t) =>
+        (inclinationsEnabled || !t.name.startsWith("inclination_prompt_")) &&
+        (videoEnabled || t.name !== "generate_video")
+    );
   }
 
   return tools;

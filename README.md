@@ -41,6 +41,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 | Generation Cooldown (ms) | `5000` | Minimum gap between generations (both backends). |
 | Daily Generation Limit | `75` | Max images per day, resets at **local** midnight. This is the plugin's own guard — it does **not** track HF credits. |
 | Enable Inclination Prompts | `true` | Master switch for the Neigungsprompt subsystem. Off hides `inclination_prompt_*` tools and stops style-profile injection (stored active profiles resume when re-enabled). |
+| Enable Video | `true` | Master switch for video generation. Off hides `generate_video` from the LLM and strips its routing (`list_models source="video"` keeps working for browsing). Video renders bill per second — turn off to avoid accidental credit spend. |
 
 ---
 

@@ -9,6 +9,8 @@ import {
   setCachedDownloadedModels,
   getCachedVideoModels,
   setCachedVideoModels,
+  getCachedLoRAs,
+  setCachedLoRAs,
 } from "./modelCache";
 import {
   readHfCatalogCache,
@@ -653,6 +655,12 @@ export async function getLoRAsForModel(
   limit: number = 15,
   token?: string
 ): Promise<LoRAInfo[]> {
+  // Prozess-Cache (Phase 2.B, 12h wie list_models): LoRA-Suchen sind
+  // user-spezifisch und klein — kein Platten-Cache, Key mit allen Parametern.
+  const cacheKey = `${baseModel.toLowerCase().trim()}|${search.toLowerCase().trim()}|${limit}`;
+  const cached = getCachedLoRAs(cacheKey);
+  if (cached) return cached;
+
   const modelKey = baseModel.toLowerCase();
   let query: string;
 
@@ -696,7 +704,7 @@ export async function getLoRAsForModel(
     return tag ? tag.replace("base_model:", "") : "unknown";
   }
 
-  return models
+  const result = models
     .map((m) => ({
       id: m.id,
       downloads: m.downloads ?? 0,
@@ -718,6 +726,9 @@ export async function getLoRAsForModel(
       const family = matchesVideoFamily(baseModel);
       return family ? matchesVideoFamily(loraBase) === family : false;
     });
+
+  setCachedLoRAs(cacheKey, result);
+  return result;
 }
 
 /** Video-Basis-Modell? Entscheidet Query-Formulierung und Usage-Texte. */

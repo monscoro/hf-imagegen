@@ -1,10 +1,10 @@
-import { type ModelInfo } from "./types";
+import { type ModelInfo, type LoRAInfo } from "./types";
 
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
-interface ModelCacheEntry {
+interface ModelCacheEntry<T = ModelInfo> {
   fetchedAt: number;
-  models: ModelInfo[];
+  models: T[];
 }
 
 interface ModelCache {
@@ -12,6 +12,8 @@ interface ModelCache {
   trending: Record<number, ModelCacheEntry>;
   downloads: Record<number, ModelCacheEntry>;
   video: Record<number, ModelCacheEntry>;
+  /** LoRA-Suchen (Phase 2.B): Key = base_model|search|limit, kleinteilig. */
+  lora: Record<string, ModelCacheEntry<LoRAInfo>>;
 }
 
 let cache: ModelCache = {
@@ -19,9 +21,10 @@ let cache: ModelCache = {
   trending: {},
   downloads: {},
   video: {},
+  lora: {},
 };
 
-function isCacheValid(entry: ModelCacheEntry | null): boolean {
+function isCacheValid(entry: ModelCacheEntry<unknown> | null): boolean {
   if (!entry) return false;
   return Date.now() - entry.fetchedAt < CACHE_TTL_MS;
 }
@@ -80,13 +83,27 @@ export function setCachedVideoModels(limit: number, models: ModelInfo[]): void {
   };
 }
 
+export function getCachedLoRAs(key: string): LoRAInfo[] | null {
+  const entry = cache.lora[key];
+  if (!isCacheValid(entry ?? null)) return null;
+  return entry?.models ?? null;
+}
+
+export function setCachedLoRAs(key: string, loras: LoRAInfo[]): void {
+  // Prozesslokal, 12h TTL, kein Platten-Cache (klein, user-spezifisch).
+  cache.lora[key] = {
+    fetchedAt: Date.now(),
+    models: loras,
+  };
+}
+
 export function getModelCacheInfo(): {
   provider: Record<string, { fetchedAt: Date; expiresInMs: number }>;
   trending: Record<string, { fetchedAt: Date; expiresInMs: number }>;
   downloads: Record<string, { fetchedAt: Date; expiresInMs: number }>;
   video: Record<string, { fetchedAt: Date; expiresInMs: number }>;
 } {
-  const getInfo = (entry: ModelCacheEntry | null) => {
+  const getInfo = (entry: ModelCacheEntry<unknown> | null) => {
     if (!entry) return null;
     return {
       fetchedAt: new Date(entry.fetchedAt),

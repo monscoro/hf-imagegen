@@ -195,7 +195,7 @@ Both serve the last known catalog if the endpoint is unreachable, and never cach
 list_loras(base_model?, search?, limit?)
 ```
 
-Avoid `search` (HF search is strict, often empty) — filter by `base_model` only. Pass `id` as `lora_id` with `backend="hf"`. Video base models from `list_models source="video"` work too (wan/ltx/hunyuan/cogvideo/minimax query branches); each hit carries a `description` line (likes/downloads + notable tags) for picking. Video LoRAs are NOT a `generate_video` parameter — use them locally (ComfyUI/Diffusers, e.g. character LoRAs for a consistent muse); server-side video LoRA support is Phase-3 work.
+Avoid `search` (HF search is strict, often empty) — filter by `base_model` only. Pass `id` as `lora_id` with `backend="hf"`. Results are process-cached for 12h (same TTL as `list_models`, keyed by base_model+search+limit) — repeated lookups cost no API call. Video base models from `list_models source="video"` work too (wan/ltx/hunyuan/cogvideo/minimax query branches); each hit carries a `description` line (likes/downloads + notable tags) for picking. Video LoRAs are NOT a `generate_video` parameter — use them locally (ComfyUI/Diffusers, e.g. character LoRAs for a consistent muse); server-side video LoRA support is Phase-3 work.
 
 ### `list_image_directory` — Browse results & inputs, anywhere
 

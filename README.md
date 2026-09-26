@@ -303,6 +303,12 @@ Two limits the catalog number doesn't show, so they are carried in a `note` fiel
 
 **Animate:** still (`file_path` aus `generate_image`/`compose_images`) + motion → `generate_video`. Exploration: `cuts` mit 3–4 Motion-Ideen in `480p`/`tier:"draft"` (Cent-Bereich pro Clip, Preise: `GET /video/models`), sichten, dann Final mit `tier:"final"` in `720p`/`1080p`.
 
+**Full chain (still → composite → cuts → final):**
+1. `generate_image({prompt:"editorial portrait, golden hour", backend:"pollinations", model_id:"flux.1-schnell", width:768, height:1152})` → `…/pl-…png`
+2. `compose_images({images:["<still>", "<style.png>"], prompt:"use image 1 as the subject, image 2 only as the visual style"})` → composite
+3. `generate_video({image:"<composite>", cuts:["slow dolly-in, fabric sways","static camera, hair moves in wind","orbit right, gaze follows lens"], tier:"draft", resolution:"480p"})` → 4 × ~0.05–0.08 Pollen sichten
+4. `generate_video({image:"<composite>", motion:"<winning cut, refined>", tier:"final", resolution:"720p", aspect_ratio:"9:16"})` → Final
+
 **Find results:** `list_image_directory({limit:1})` → `output_directory` + `filename` (absolute path) → straight into `image_edit`. Images outside the output dir: `list_image_directory({directories:["<folderA>","<folderB>"]})`, then `compose_images` with one absolute path per folder.
 
 ---

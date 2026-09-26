@@ -35,8 +35,8 @@ export const pluginConfigSchematics = createConfigSchematics()
     displayName: "Output Directory",
     subtitle:
       "Directory where generated images are saved. " +
-      "Use ~ for home directory (e.g. ~/hf-images). Created automatically if it does not exist.",
-  }, "~/hf-images")
+      "Use ~ for home directory (e.g. ~/images). Created automatically if it does not exist.",
+  }, "~/images")
   .field("rateLimitCooldown", "numeric", {
     displayName: "Generation Cooldown (ms)",
     subtitle:

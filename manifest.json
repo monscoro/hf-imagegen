@@ -2,14 +2,16 @@
   "type": "plugin",
   "runner": "node",
   "owner": "krone",
-  "name": "hf-image-gen",
-  "revision": 16,
+  "name": "image-gen",
+  "revision": 17,
   "tags": [
     "lmstudio",
     "lmstudio-plugin",
     "image-generation",
     "text-to-image",
+    "image-editing",
     "hugging-face",
+    "pollinations",
     "diffusion",
     "stable-diffusion",
     "ai-art"

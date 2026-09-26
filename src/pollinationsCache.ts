@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
+import { getCacheDir, getCacheFile } from "./cachePaths";
 
 /**
  * Persistenter Cache fuer den Pollinations-Modellkatalog (/image/models).
@@ -10,10 +10,10 @@ import * as os from "os";
  * Plugin-Reload, danach waere der 12h-TTL wertlos — jeder Reload holt den
  * Katalog neu. Auf Platte ueberlebt der Cache Reloads und Plugin-Updates.
  *
- * Ablage in ~/.cache/hf-image-gen/ (neben rateLimit.json und directives.json)
+ * Ablage in ~/.cache/image-gen/ (neben rateLimit.json und directives.json)
  * und bewusst NICHT in tmp/ neben dem Plugin: ein Plugin-Update loescht das
  * tmp/-Verzeichnis, der Home-Cache nicht. Ueberschreiben laesst sich der Pfad
- * per HF_IMAGE_GEN_CACHE_DIR, damit Tests und Probes die echte Datei nicht
+ * per IMAGE_GEN_CACHE_DIR, damit Tests und Probes die echte Datei nicht
  * anfassen.
  *
  * Der Cache enthaelt ausschliesslich den oeffentlichen, unauthentifiziert
@@ -31,13 +31,11 @@ export interface CatalogCacheEnvelope {
 }
 
 export function getCatalogCacheDir(): string {
-  const override = process.env.HF_IMAGE_GEN_CACHE_DIR;
-  if (override) return override;
-  return path.join(os.homedir(), ".cache", "hf-image-gen");
+  return getCacheDir();
 }
 
 export function getCatalogCacheFile(): string {
-  return path.join(getCatalogCacheDir(), "pollinations-catalog.json");
+  return getCacheFile("pollinations-catalog.json");
 }
 
 export function readCatalogCache(): CatalogCacheEnvelope | null {

@@ -20,8 +20,8 @@ import { getCatalogCacheDir } from "./pollinationsCache";
  * Ranking der Listenquellen. Das haelt die Datei bei ~180 KB fuer 2000 Modelle
  * und erspart einen Join.
  *
- * Ablage neben dem Pollinations-Katalog in ~/.cache/hf-image-gen/;
- * HF_IMAGE_GEN_CACHE_DIR gilt fuer beide Caches.
+ * Ablage neben dem Pollinations-Katalog in ~/.cache/image-gen/;
+ * IMAGE_GEN_CACHE_DIR gilt fuer beide Caches.
  *
  * Der Cache enthaelt ausschliesslich oeffentliche, unauthentifiziert abrufbare
  * Daten. Ein HF-Token wird nie hier abgelegt.

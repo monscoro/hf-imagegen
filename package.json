@@ -1,7 +1,7 @@
 {
-  "name": "hf-image-gen",
-  "version": "1.1.0",
-  "description": "Image Generation Plugin for LM Studio — Text-to-Image via Hugging Face Inference API with dynamic model selection and LoRA support.",
+  "name": "image-gen",
+  "version": "1.2.0",
+  "description": "Image Generation Plugin for LM Studio — Text-to-Image and image editing via Hugging Face Inference Providers or Pollinations.ai, with dynamic model selection and LoRA support.",
   "main": "index.js",
   "scripts": {
     "dev": "lms dev",
@@ -13,7 +13,9 @@
     "lmstudio-plugin",
     "image-generation",
     "text-to-image",
+    "image-editing",
     "hugging-face",
+    "pollinations",
     "flux",
     "sdxl",
     "diffusion",

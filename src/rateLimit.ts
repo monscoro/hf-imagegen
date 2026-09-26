@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
+import { getCacheFile, resolveExistingCacheFile, dropLegacyCacheFile } from "./cachePaths";
 
 export interface RateLimitConfig {
   cooldownMs: number;
@@ -13,12 +13,13 @@ interface Entry {
   dayKey: string;
 }
 
-const RATE_LIMIT_FILE = path.join(os.homedir(), ".cache", "hf-image-gen", "rateLimit.json");
+const RATE_LIMIT_FILE = getCacheFile("rateLimit.json");
 
 function loadEntry(): Entry {
   try {
-    if (fs.existsSync(RATE_LIMIT_FILE)) {
-      const raw = fs.readFileSync(RATE_LIMIT_FILE, "utf-8");
+    const file = resolveExistingCacheFile("rateLimit.json");
+    if (fs.existsSync(file)) {
+      const raw = fs.readFileSync(file, "utf-8");
       const parsed = JSON.parse(raw) as Partial<Entry>;
       if (typeof parsed.lastCall === "number" && typeof parsed.count === "number") {
         // dayKey may be missing from pre-2026 configs; a blank dayKey forces an immediate reset.
@@ -35,6 +36,7 @@ function saveEntry(e: Entry): void {
   try {
     fs.mkdirSync(path.dirname(RATE_LIMIT_FILE), { recursive: true });
     fs.writeFileSync(RATE_LIMIT_FILE, JSON.stringify(e), "utf-8");
+    dropLegacyCacheFile("rateLimit.json");
   } catch {
     // persistence is best-effort
   }

@@ -18,6 +18,16 @@ import {
 
 const HF_API_BASE = "https://huggingface.co/api";
 
+/**
+ * Timeout fuer die drei Ranking-Listen (provider/trending/downloads). Die
+ * holen bis zu 500 Zeilen (fetchLimit), weil die Filterkette Quantisierungen,
+ * LoRAs, Altlasten und providerlose Modelle verwirft — mit den 15 s der
+ * kleinen Abfragen wuerden sie auf langsamen Leitungen ins Timeout laufen.
+ * Kurze Listen (returned < limit) sind trotzdem normal: verwirft die Kette
+ * mehr als 11/12 der Zeilen, kommt einfach weniger zurueck.
+ */
+const HF_LIST_TIMEOUT_MS = 30_000;
+
 interface HFModel {
   id: string;
   downloads?: number;
@@ -419,10 +429,12 @@ export async function getProviderModels(
   const headers: Record<string, string> = { Accept: "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(HF_LIST_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = keepUsableModels((await res.json()) as HFModel[], limit, false);
+  // providerQueried=true: die ?inference_provider=-Query belegt selbst die
+  // Verfuegbarkeit, unbekannte Modelle bleiben drin (siehe keepUsableModels).
+  const models = keepUsableModels((await res.json()) as HFModel[], limit, true);
 
   await ensureCatalogBestEffort();
   const result = models.map((m) =>
@@ -446,7 +458,7 @@ export async function getTrendingModels(
   const headers: Record<string, string> = { Accept: "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(HF_LIST_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
   const models = keepUsableModels((await res.json()) as HFModel[], limit);
@@ -473,7 +485,7 @@ export async function getDownloadedModels(
   const headers: Record<string, string> = { Accept: "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(HF_LIST_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
   const models = keepUsableModels((await res.json()) as HFModel[], limit);

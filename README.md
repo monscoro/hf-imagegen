@@ -1,4 +1,4 @@
-# HF Image Gen — Image Generation Plugin for LM Studio
+# Image Gen — Image Generation Plugin for LM Studio
 
 > **Keywords:** lm studio plugin, image generation ai, text to image, image to image, flux lm studio, sdxl lm studio, hugging face image, pollinations, lora support, ai image generator, stable diffusion, flux kontext
 
@@ -19,7 +19,7 @@ Generate and edit images from your LM Studio chat — via **HuggingFace Inferenc
 ## Installation
 
 ```bash
-cd hf-image-gen
+cd image-gen
 npm install
 npx tsc
 ```
@@ -37,7 +37,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 | Default Model | `black-forest-labs/FLUX.1-dev` | Text-to-image model for `generate_image` (backend `hf`). Overridable per call. |
 | Default Edit Model | `black-forest-labs/FLUX.2-dev` | Image-to-image model for `image_edit`. Must be editing-native (FLUX.2-dev, Kontext-dev or Qwen-Image-Edit). |
 | Pollinations API Key | _(blank)_ | **Required for backend `pollinations`** (since Sep 2026, anonymous access removed). Get one at enter.pollinations.ai/keys. Never share `sk_…` keys. |
-| Output Directory | `~/hf-images` | Where images are saved. Created automatically. Supports `~/` prefix. Also the search base for bare filenames in `image_edit` and the scope of `list_output_images`. |
+| Output Directory | `~/images` | Where images are saved. Created automatically. Supports `~/` prefix. Also the search base for bare filenames in `image_edit` and the scope of `list_output_images`. |
 | Generation Cooldown (ms) | `5000` | Minimum gap between generations (both backends). |
 | Daily Generation Limit | `75` | Max images per day, resets at **local** midnight. This is the plugin's own guard — it does **not** track HF credits. |
 | Enable Inclination Prompts | `true` | Master switch for the Neigungsprompt subsystem. Off hides `inclination_prompt_*` tools and stops style-profile injection (stored active profiles resume when re-enabled). |
@@ -165,7 +165,11 @@ Two deliberate exceptions. For `source="provider"` the provider filter is skippe
 
 **HF rows carry measured data, not guesses.** `hf_providers` lists the inference providers currently serving the model (status `live`), `hf_latency_ms` is the measured latency of the fastest one, and `speed` is derived from that. A missing `image_edit` means the model is outside the 1000 most-liked per task, so HuggingFace simply does not say; it is not a `false`. Two things HF does not publish stay static and are not derived from the catalog: `max_reference_images` (always 1 for the HF backend, a plugin constraint) and per-call cost (HF gates its provider price list behind a login, `/api/inference-providers` answers `401` anonymously).
 
-**Model catalog caching.** Two independent 12-hour caches, both under `~/.cache/hf-image-gen/` and both surviving plugin reloads and LM Studio restarts. Set `HF_IMAGE_GEN_CACHE_DIR` to relocate them; neither ever holds a token or API key.
+**Model catalog caching.** Two independent 12-hour caches, both under `~/.cache/image-gen/` and both surviving plugin reloads and LM Studio restarts. Set `IMAGE_GEN_CACHE_DIR` to relocate them; neither ever holds a token or API key.
+
+**What the rename changes on disk.** The plugin was `hf-image-gen` until revision 17 and wrote everything to `~/.cache/hf-image-gen/`. `directives.json`, `library.json` and `rateLimit.json` are read from the old directory if the new one doesn't have them yet, then written to (and removed from) `~/.cache/image-gen/` on the next change. The two model catalogs are disposable and simply refetch. Note that the stores used to be written to the plugin's own `tmp/` directory when that was creatable — that silently depended on a `mkdir` succeeding, and a plugin update would have wiped them; they now always live in the home cache.
+
+**The default output directory moved from `~/hf-images` to `~/images`.** Nothing migrates: images already generated stay in `~/hf-images` and are invisible to `list_output_images` and to `image_edit` with a bare filename, until you either point *Output Directory* back at `~/hf-images` or move the files.
 
 - **Pollinations** (`/image/models`) → `pollinations-catalog.json`. Pollinations prices come from that same file — the endpoint returns them per model, so no second request is made. Reported in `catalog_cache`.
 - **HuggingFace** (`/api/models?…&expand=inferenceProviderMapping`, one request per task) → `huggingface-catalog.json`, ~228 KB for 2000 models. This is the source of `hf_providers`, `hf_latency_ms` and `image_edit`. Reported in `hf_catalog_cache` for HF sources.

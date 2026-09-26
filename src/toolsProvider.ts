@@ -318,7 +318,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const getModel = () => cfg.get("defaultModel").trim() || "black-forest-labs/FLUX.1-dev";
   const getEditModel = () =>
     cfg.get("defaultEditModel").trim() || "black-forest-labs/FLUX.2-dev";
-  const getOutputDir = () => resolvePath(cfg.get("outputDirectory").trim() || "~/hf-images");
+  const getOutputDir = () => resolvePath(cfg.get("outputDirectory").trim() || "~/images");
   const getRateLimitConfig = () => ({
     cooldownMs: Number(cfg.get("rateLimitCooldown")) || 5000,
     dailyCap: Number(cfg.get("rateLimitDailyCap")) || 75,
@@ -1170,7 +1170,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         backend='pollinations'; IDs from source='image-edit' only with image_edit.
         LoRA lookup (include_loras) and the list_loras tool are HF-only.
         Model lists are cached for 12 hours to reduce API calls. The Pollinations
-        catalog cache is persisted to disk (~/.cache/hf-image-gen/pollinations-catalog.json),
+        catalog cache is persisted to disk (~/.cache/image-gen/pollinations-catalog.json),
         so it survives plugin reloads; if /image/models is unreachable the last known
         catalog is served instead of failing. catalog_cache in the result shows its
         age, path and whether the last fetch failed.

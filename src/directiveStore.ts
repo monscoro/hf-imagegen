@@ -1,20 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import type { ImageDirective, DirectiveSource } from "./types";
 import { CURATED_DIRECTIVES } from "./curatedDirectives";
+import { getCacheFile, resolveExistingCacheFile, dropLegacyCacheFile } from "./cachePaths";
 
-const PROJECT_TMP = path.join(__dirname, "tmp");
-const CACHE_DIR = path.join(os.homedir(), ".cache", "hf-image-gen");
-const STORE_FILE = (() => {
-  // Try project-local tmp/ first (dev/test), fall back to ~/.cache/ (production)
-  try {
-    fs.mkdirSync(PROJECT_TMP, { recursive: true });
-    return path.join(PROJECT_TMP, "directives.json");
-  } catch {
-    return path.join(CACHE_DIR, "directives.json");
-  }
-})();
+/** Altes project-lokales Verzeichnis, nur noch als Lese-Fallback (siehe cachePaths). */
+const LEGACY_PROJECT_TMP = path.join(__dirname, "tmp");
+const STORE_FILE = getCacheFile("directives.json");
 
 interface PersistedStore {
   activeIds: string[];
@@ -23,8 +15,11 @@ interface PersistedStore {
 
 function loadPersisted(): PersistedStore {
   try {
-    if (fs.existsSync(STORE_FILE)) {
-      const raw = fs.readFileSync(STORE_FILE, "utf-8");
+    const file = resolveExistingCacheFile("directives.json", [
+      path.join(LEGACY_PROJECT_TMP, "directives.json"),
+    ]);
+    if (fs.existsSync(file)) {
+      const raw = fs.readFileSync(file, "utf-8");
       const parsed = JSON.parse(raw) as PersistedStore & { activeId?: string | null };
       if (
         parsed &&
@@ -66,6 +61,7 @@ function savePersisted(store: PersistedStore): void {
       JSON.stringify({ activeId: store.activeIds[0] ?? null, ...store }, null, 2),
       "utf-8"
     );
+    dropLegacyCacheFile("directives.json");
   } catch {
     // best-effort
   }

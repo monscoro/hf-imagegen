@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
+import { getCacheFile, resolveExistingCacheFile, dropLegacyCacheFile } from "./cachePaths";
 import {
   CURATED_BOOKS,
   CURATED_RECORDS,
@@ -11,23 +11,16 @@ import {
 
 /**
  * Bibliotheks-Store (Bücher + Records + aktive Record-Refs), Pendant zu directiveStore.
- * Persistenz in library.json — project-lokal (tmp/) mit Fallback auf ~/.cache/ (Production),
- * gleiche Logik wie directives.json. Curated-Bücher (skillset/lorebook) bleiben read-only.
+ * Persistenz in library.json unter ~/.cache/image-gen/ (siehe cachePaths.ts),
+ * damit der Stand ein Plugin-Update und den Namenswechsel ueberlebt. Curated-Bücher (skillset/lorebook) bleiben read-only.
  *
  * Aktivierung lebt in einem eigenen Array (activeRecords) statt als Kopie im Profil-Store:
  * kein Inhalts-Duplikat, kein Auseinanderlaufen bei update.
  */
 
-const PROJECT_TMP = path.join(__dirname, "tmp");
-const CACHE_DIR = path.join(os.homedir(), ".cache", "hf-image-gen");
-const STORE_FILE = (() => {
-  try {
-    fs.mkdirSync(PROJECT_TMP, { recursive: true });
-    return path.join(PROJECT_TMP, "library.json");
-  } catch {
-    return path.join(CACHE_DIR, "library.json");
-  }
-})();
+/** Altes project-lokales Verzeichnis, nur noch als Lese-Fallback (siehe cachePaths). */
+const LEGACY_PROJECT_TMP = path.join(__dirname, "tmp");
+const STORE_FILE = getCacheFile("library.json");
 
 interface PersistedLibrary {
   books: LibraryBook[];
@@ -88,8 +81,9 @@ function sanitizeRecord(raw: unknown): LibraryRecord | null {
 
 function loadPersisted(): PersistedLibrary {
   try {
-    if (fs.existsSync(STORE_FILE)) {
-      const raw = fs.readFileSync(STORE_FILE, "utf-8");
+    const file = resolveExistingCacheFile("library.json", [path.join(LEGACY_PROJECT_TMP, "library.json")]);
+    if (fs.existsSync(file)) {
+      const raw = fs.readFileSync(file, "utf-8");
       const parsed = JSON.parse(raw) as Partial<PersistedLibrary>;
       if (parsed && (Array.isArray(parsed.books) || Array.isArray(parsed.records))) {
         const books = (parsed.books ?? [])
@@ -116,6 +110,7 @@ function savePersisted(store: PersistedLibrary): void {
   try {
     fs.mkdirSync(path.dirname(STORE_FILE), { recursive: true });
     fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2), "utf-8");
+    dropLegacyCacheFile("library.json");
   } catch {
     // best-effort
   }

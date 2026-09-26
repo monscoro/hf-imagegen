@@ -274,6 +274,9 @@ export interface PollinationsEditOptions {
   /** API key (enter.pollinations.ai). Pflicht seit Sep 2026. */
   apiKey: string;
   quality?: "low" | "medium" | "high" | "hd";
+  /** Output-Groesse: nur als Paar wirksam (size=WIDTHxHEIGHT wie bei generations). */
+  width?: number;
+  height?: number;
 }
 
 /**
@@ -702,6 +705,12 @@ export function buildPollinationsEditForm(opts: PollinationsEditOptions): {
     } else {
       qualityDropped = true;
     }
+  }
+
+  // Groesse wie bei generations als size=WIDTHxHEIGHT; nur das Paar zaehlt,
+  // eine einzelne Dimension wuerde das Seitenverhaeltnis unbestimmt lassen.
+  if (opts.width && opts.height) {
+    form.append("size", `${opts.width}x${opts.height}`);
   }
 
   for (const [index, image] of opts.images.entries()) {

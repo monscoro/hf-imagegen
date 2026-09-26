@@ -19,11 +19,12 @@ export type OutputImageSort = "newest" | "oldest" | "name";
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
 
 /**
- * Kompakte, paginierte Auflistung der Bilder im Output-Verzeichnis —
- * gleichzeitig generierte Ergebnisse (generate_image/image_edit) UND
- * Input-/Referenzbilder, gegen die image_edit bloße Dateinamen zuerst auflöst.
- * Absichtlich auf dieses eine Verzeichnis begrenzt (kein beliebiger Dateizugriff):
- * große Verzeichnisse werden in häppchenweisen Seiten gelesen statt komplett in den Kontext.
+ * Kompakte, paginierte Auflistung der Bilder EINES Verzeichnisses — von
+ * list_image_directory pro Eintrag in 'directories' aufgerufen (Default: das
+ * Output-Verzeichnis mit generierten Ergebnissen UND Input-/Referenzbildern,
+ * gegen die image_edit bloße Dateinamen zuerst aufloest). Beliebige lokale
+ * Verzeichnisse sind ok: image_edit oeffnet ohnehin jede absolute Pfadangabe
+ * als Input, das reine Auflisten ist kein zusaetzlicher Zugriff.
  * Fehlendes Verzeichnis = leere Liste, kein Fehler.
  */
 export async function listOutputImages(

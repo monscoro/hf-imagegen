@@ -37,7 +37,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 | Default Model | `black-forest-labs/FLUX.1-dev` | Text-to-image model for `generate_image` (backend `hf`). Overridable per call. |
 | Default Edit Model | `black-forest-labs/FLUX.2-dev` | Image-to-image model for `image_edit`. Must be editing-native (FLUX.2-dev, Kontext-dev or Qwen-Image-Edit). |
 | Pollinations API Key | _(blank)_ | **Required for backend `pollinations`** (since Sep 2026, anonymous access removed). Get one at enter.pollinations.ai/keys. Never share `sk_…` keys. |
-| Output Directory | `~/images` | Where images are saved. Created automatically. Supports `~/` prefix. Also the search base for bare filenames in `image_edit` and the scope of `list_output_images`. |
+| Output Directory | `~/images` | Where images are saved. Created automatically. Supports `~/` prefix. Also the search base for bare filenames in `image_edit` and the default scope of `list_image_directory`. |
 | Generation Cooldown (ms) | `5000` | Minimum gap between generations (both backends). |
 | Daily Generation Limit | `75` | Max images per day, resets at **local** midnight. This is the plugin's own guard — it does **not** track HF credits. |
 | Enable Inclination Prompts | `true` | Master switch for the Neigungsprompt subsystem. Off hides `inclination_prompt_*` tools and stops style-profile injection (stored active profiles resume when re-enabled). |
@@ -53,11 +53,11 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 | Content filter | Provider-side moderation | Strict filter off by default (`safe=off`); illegal content still moderated |
 | Negative prompt | ✅ supported | ❌ ignored (reported in response notes) |
 | LoRA (`lora_id`) | ✅ FLUX via fal-ai | ❌ rejected with a clear error |
-| Image editing | ✅ `image_edit` (editing-native HF models, one reference) | ✅ `image_edit` (single **or multi-reference** via `POST /v1/images/edits`, model-specific limits), `multi_image_edit` (2+ references, enforced by the schema) |
+| Image editing | ✅ `image_edit` (editing-native HF models, one reference) | ✅ `image_edit` (single **or multi-reference** via `POST /v1/images/edits`, model-specific limits), `compose_images` (2+ references, enforced by the schema) |
 | Rate limit | Config cooldown + daily cap | Same, plus 15s anon / 5s with-key tier gap |
 | Best for | Quality, LoRAs, precise control | Quick tests, permissive fashion/editorial takes & edits |
 
-**Rule of thumb:** HuggingFace IDs ↔ `backend="hf"`, Pollinations IDs ↔ `backend="pollinations"`, editing-native IDs ↔ `image_edit`. Mixing them fails — the tools say so explicitly. `multi_image_edit` is always Pollinations; HF takes exactly one reference image.
+**Rule of thumb:** HuggingFace IDs ↔ `backend="hf"`, Pollinations IDs ↔ `backend="pollinations"`, editing-native IDs ↔ `image_edit`. Mixing them fails — the tools say so explicitly. `compose_images` is always Pollinations; HF takes exactly one reference image.
 
 ---
 
@@ -87,10 +87,10 @@ Returns `file_path`, `output_dir`, `backend`, `model_used`, sizes, a `quota` blo
 ### `image_edit` — Edit one or many reference images (hf or pollinations)
 
 ```
-image_edit(image, images?, prompt, backend?, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?, quality?, name?)
+image_edit(image, images?, prompt, backend?, model_id?, provider?, negative_prompt?, lora_id?, lora_scale?, quality?, width?, height?, name?)
 ```
 
-Reference image(s) = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` is the **first** reference and is always a plain string. Absolute local paths are preferred (the `file_path` returned by an earlier result); bare filenames, relative paths and public URLs also work. Leave `images` unset for a single-image edit. If the result has to **merge two or more images** rather than change one, use [`multi_image_edit`](#multi_image_edit--combine-two-or-more-images-pollinations) — it shares this implementation and requires at least 2 references.
+Reference image(s) = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt gates). `image` is the **first** reference and is always a plain string. Absolute local paths are preferred (the `file_path` returned by an earlier result); bare filenames, relative paths and public URLs also work. Leave `images` unset for a single-image edit. If the result has to **merge two or more images** rather than change one, use [`compose_images`](#compose_images--combine-two-or-more-images-pollinations) — it shares this implementation and requires at least 2 references.
 
 **Multi-image editing is supported by the `pollinations` backend:** put the first reference in `image` and up to 15 more in `images` — all are uploaded together in one `POST /v1/images/edits` request, order preserved, so the prompt can address them by position. (An earlier version accepted an array in `image`; models that stringified that array into a single string caused "Reference image not found" errors, so `image` is string-only and a stringified array is still auto-recovered for compatibility.) The tool reads `max_reference_images` from the live model catalog and puts a note in the result when the count exceeds it — it does **not** block, because the catalog is only advisory (`x-ai/grok-imagine-image-quality` declares 1 but processes 2, `flux.1-kontext-pro` declares 1 and silently drops the second image). Models verified to combine several references: `black-forest-labs/flux.2-klein-4b` (10), `openai/gpt-image-2` (16), `bytedance/seedream-5.0-lite` (14), `google/gemini-3-pro-image` (14). HF remains single-reference only.
 
@@ -102,17 +102,18 @@ Reference image(s) = **KEEP**, prompt = **CHANGE** (mirrors the Neigungsprompt g
 | `model_id` | _(backend default)_ | hf: `defaultEditModel` (`FLUX.2-dev`). pollinations: blank = `x-ai/grok-imagine-image-quality` (few filters, declares 1 reference but does process 2); for 2+ references pick a model with a higher `max_reference_images`, e.g. `flux.2-klein-4b` or `seedream5`. |
 | `provider` / `negative_prompt` / `lora_id` | | HF only — ignored or rejected with pollinations. |
 | `quality` | unset | pollinations only; documented for gpt-image/grok-imagine-image-2.0. |
+| `width` / `height` | `0` (= default) | pollinations only (0–2048), sent as POST `size=WIDTHxHEIGHT`. Both required — a single dimension is ignored with a note. |
 | `name` | `""` | Optional filename slug for the result — same sanitize/append rules as `generate_image`. |
 
 **hf:** only editing-native models work — base T2I models (FLUX.1-dev, SDXL, Qwen-Image) have no image-to-image provider mapping and fail; the error message says exactly that. `lora_id` is passed through to fal-ai (I2I effectiveness under verification). **pollinations:** default is deliberately non-restrictive (`grok-imagine-image-quality`) — kontext/seedream strict filters flag fashion-editorial and burn credits on failed edits. For a single reference that still needs precise KEEP/CHANGE work, `flux.1-kontext-pro` is the recommended pick (free, editing-native, holds pose/composition/identity and follows complex instructions); only intimate fashion-editorial edits need the permissive default. Returns `file_path`, `output_dir`, `backend`, the full `quota` block, and a clear warning when the plugin's daily limit is hit.
 
-### `multi_image_edit` — Combine two or more images (pollinations)
+### `compose_images` — Combine two or more images (pollinations)
 
 ```
-multi_image_edit(images, prompt, model_id?, quality?, name?)
+compose_images(images, prompt, model_id?, auto_model?, quality?, width?, height?, name?)
 ```
 
-**Same implementation as `image_edit`, one different contract.** The core lives once in `runImageEdit`; `image_edit` and `multi_image_edit` both call it. The only difference is schema validation: `image_edit` takes a required `image` string plus optional `images`, `multi_image_edit` takes **only** `images` with `.min(2)`. So the two-image minimum is enforced by the schema, not by a sentence in a description — a single-image call cannot get through. `multi_image_edit` maps its first entry to `image` and the rest to `images` and then runs the identical code path: same reference resolution, same multipart upload, same `max_reference_images` advisory, same quota, same result fields.
+**Same implementation as `image_edit`, one different contract.** The core lives once in `runImageEdit`; `image_edit` and `compose_images` both call it. The only difference is schema validation: `image_edit` takes a required `image` string plus optional `images`, `compose_images` takes **only** `images` with `.min(2)`. So the two-image minimum is enforced by the schema, not by a sentence in a description — a single-image call cannot get through. `compose_images` maps its first entry to `image` and the rest to `images` and then runs the identical code path: same reference resolution, same multipart upload, same `max_reference_images` advisory, same quota, same result fields.
 
 Use it when the result has to **merge** sources — "image 1 is the subject, image 2 only the garment, image 3 as the style" — which is a different task from "change this one image". For a single reference, `image_edit` is the right tool.
 
@@ -120,8 +121,10 @@ Use it when the result has to **merge** sources — "image 1 is the subject, ima
 |---|---|---|
 | `images` | _(required, 2–15)_ | Ordered reference images. 15 max. Absolute `file_path` from an earlier result preferred; bare filenames, relative paths and public URLs also work. |
 | `prompt` | _(required)_ | How the images combine. Address them by position — the order here is the order the prompt refers to. |
-| `model_id` | _(configured default)_ | Pick by `max_reference_images`: `flux.2-klein-4b` (10, cheapest), `gpt-image-2` (16), `seedream5` (14), `nanobanana-pro` (14). Never `flux.1-kontext-pro` for 2+ — it drops image 2 silently. |
+| `model_id` | _(blank)_ | Override — always wins. Blank + `auto_model` on = automatic pick by count (see below). Blank + `auto_model` off = configured Pollinations edit default. Never `flux.1-kontext-pro` for 2+ — it drops image 2 silently. |
+| `auto_model` | `true` | Automatic model selection by reference count (only when `model_id` is blank): 2 → configured default (non-restrictive), 3–10 → `flux.2-klein-4b` (cheapest verified multi-image), 11–16 → `gpt-image-2` (highest count). The pick is reported in the result `notes`. |
 | `quality` | unset | Documented for gpt-image/grok-imagine-image-2.0; ignored elsewhere with a note. |
+| `width` / `height` | `0` (= default) | Output size in pixels, sent as POST `size=WIDTHxHEIGHT`. Both required — a single dimension is ignored with a note. E.g. portrait `768`/`1152` for fashion editorial. |
 | `name` | `""` | Optional filename slug, same rules as `generate_image`. |
 
 `backend` is deliberately **not** a parameter. HF Inference accepts exactly one reference and rejects the rest, so a second image is impossible there — exposing the switch would only offer a guaranteed error. The tool is Pollinations by construction and needs `pollinationsApiKey`. That also means `provider`, `negative_prompt` and `lora_id` are absent: all three are HF-only, and HF cannot do this task.
@@ -169,7 +172,7 @@ Two deliberate exceptions. For `source="provider"` the provider filter is skippe
 
 **What the rename changes on disk.** The plugin was `hf-image-gen` until revision 17 and wrote everything to `~/.cache/hf-image-gen/`. `directives.json`, `library.json` and `rateLimit.json` are read from the old directory if the new one doesn't have them yet, then written to (and removed from) `~/.cache/image-gen/` on the next change. The two model catalogs are disposable and simply refetch. Note that the stores used to be written to the plugin's own `tmp/` directory when that was creatable — that silently depended on a `mkdir` succeeding, and a plugin update would have wiped them; they now always live in the home cache.
 
-**The default output directory moved from `~/hf-images` to `~/images`.** Nothing migrates: images already generated stay in `~/hf-images` and are invisible to `list_output_images` and to `image_edit` with a bare filename, until you either point *Output Directory* back at `~/hf-images` or move the files.
+**The default output directory moved from `~/hf-images` to `~/images`.** Nothing migrates: images already generated stay in `~/hf-images` and are invisible to `list_image_directory` (default scope) and to `image_edit` with a bare filename, until you either point *Output Directory* back at `~/hf-images`, move the files — or pass the old folder in `list_image_directory({directories:[…]})`.
 
 - **Pollinations** (`/image/models`) → `pollinations-catalog.json`. Pollinations prices come from that same file — the endpoint returns them per model, so no second request is made. Reported in `catalog_cache`.
 - **HuggingFace** (`/api/models?…&expand=inferenceProviderMapping`, one request per task) → `huggingface-catalog.json`, ~228 KB for 2000 models. This is the source of `hf_providers`, `hf_latency_ms` and `image_edit`. Reported in `hf_catalog_cache` for HF sources.
@@ -184,13 +187,13 @@ list_loras(base_model?, search?, limit?)
 
 Avoid `search` (HF search is strict, often empty) — filter by `base_model` only. Pass `id` as `lora_id` with `backend="hf"`.
 
-### `list_output_images` — Browse results & inputs
+### `list_image_directory` — Browse results & inputs, anywhere
 
 ```
-list_output_images(sort?, limit?, offset?, filter?)
+list_image_directory(directories?, sort?, limit?, offset?, filter?)
 ```
 
-Paginated, compact listing of the output directory — generated results **and** input/reference images (`image_edit` resolves bare filenames against it first; newest first, `limit=1` = latest image). Use instead of reading large folders at once; for `image_edit`, pass the absolute `output_directory` + `filename` (preferred over a bare filename).
+Paginated, compact listing of the output directory by default — generated results **and** input/reference images (`image_edit` resolves bare filenames against it first; newest first, `limit=1` = latest image). Pass `directories` (up to 10, absolute or `~/` paths) to browse other folders — e.g. two folders to combine one image each with `compose_images`. `sort`/`limit`/`offset`/`filter` apply per directory; a missing folder returns an empty list, not an error. For `image_edit` / `compose_images`, pass the absolute `directory` + `filename` (preferred over a bare filename).
 
 ### `inclination_prompt_list` / `manage` / `library` — Neigungsprompts & Bibliothek (gated by Enable Inclination Prompts)
 
@@ -288,7 +291,7 @@ Two limits the catalog number doesn't show, so they are carried in a `note` fiel
 
 **Community-alpha fallback (Pollinations):** if a `community/*` model fails, retry with `klein` or `flux`.
 
-**Find results:** `list_output_images({limit:1})` → `output_directory` + `filename` (absolute path) → straight into `image_edit`.
+**Find results:** `list_image_directory({limit:1})` → `output_directory` + `filename` (absolute path) → straight into `image_edit`. Images outside the output dir: `list_image_directory({directories:["<folderA>","<folderB>"]})`, then `compose_images` with one absolute path per folder.
 
 ---
 
@@ -333,7 +336,7 @@ Two limits the catalog number doesn't show, so they are carried in a `note` fiel
 
 **LoRAs via fal-ai.** `generate_image` routes LoRA calls to `fal-ai`; I2I LoRA passthrough exists and is honestly marked "under verification". Curated prompts stay under ~150 words to bound token cost on every-turn injection.
 
-**Output browsing instead of directory dumps.** LLMs choke on large folders — `list_output_images` paginates the single output directory (the only place the plugin reads: generated results and input/reference images alike), and bare filenames resolve against it first (then the process CWD). Tools return the absolute `output_dir`/`file_path`, explicitly telling the LLM *not* to strip paths to bare filenames when handing results to other plugins — absolute paths are preferred everywhere, since relative paths resolve against the plugin process CWD, not the chat directory.
+**Output browsing instead of directory dumps.** LLMs choke on large folders — `list_image_directory` paginates (per directory, up to 10 at once): by default the output directory (generated results and input/reference images alike), or any folders passed in `directories`. Bare filenames resolve against the output dir first (then the process CWD). Tools return the absolute `output_dir`/`file_path`, explicitly telling the LLM *not* to strip paths to bare filenames when handing results to other plugins — absolute paths are preferred everywhere, since relative paths resolve against the plugin process CWD, not the chat directory.
 
 **Daily guard is local, and it's not HF credits.** The quota block (`limit/used/remaining/resets_in_hours`) reflects the config'd `Daily Generation Limit`. After a live-test confusion ("0 remaining despite HF credits!"), the counter was rebuilt on the **local calendar day** (ready to reset at local midnight) and the response now labels itself a *plugin guard*, names the reset, and appends a clear warning at `remaining: 0`.
 

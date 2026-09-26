@@ -48,7 +48,7 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
       kostet trotzdem Credits) — für solche Edits grok-imagine-image-quality nehmen.
       seedream5 ebenfalls STRICT (nur als expliziter Fallback).
 • User wants the file named / labeled                           → generate_image/image_edit 'name' param (slug, auto-sanitized)
-• User asks which images exist / result / input for image_edit  → list_output_images (paginated; limit=1 + newest = latest)
+• User asks which images exist / result / input for image_edit  → list_image_directory (paginated; limit=1 + newest = latest; 'directories' for folders outside the output dir)
 • User asks what models are available                        → list_models
 • User asks about LoRAs, styles, or custom adapters          → list_loras
 • User will wissen, was es gibt / was gerade aktiv ist (Neigung, Stimmung, Style, Bücher) → inclination_prompt_list (Gesamtübersicht, read-only)

@@ -2,7 +2,7 @@ import { text, tool, type Tool, type ToolCallContext, type ToolsProvider } from 
 
 /**
  * Argumente der geteilten image_edit-Kernfunktion. `image_edit` und
- * `multi_image_edit` nutzen dieselbe Implementierung und unterscheiden sich nur
+ * `compose_images` nutzen dieselbe Implementierung und unterscheiden sich nur
  * in der Zod-Validierung: dort ist `image` Pflicht und `images` optional, hier
  * sind mindestens zwei Referenzen Pflicht. Deshalb dieser Typ statt zweier
  * fast identischer Objektliterale.
@@ -18,7 +18,11 @@ type ImageEditArgs = {
   lora_id: string;
   lora_scale: number;
   quality?: "low" | "medium" | "high" | "hd";
+  width: number;
+  height: number;
   name: string;
+  /** Hinweis aus compose_images (Auto-Modellwahl), vom Kern in notes uebernommen. */
+  autoNote?: string;
 };
 
 type ToolContext = ToolCallContext;
@@ -329,8 +333,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   let isGenerating = false;
   let lastPollinationsCall = 0;
 
-  /** Geteilter Kern von image_edit und multi_image_edit — nicht doppelt pflegen. */
-  const runImageEdit = async ({ image, images, prompt, backend, model_id, provider, negative_prompt, lora_id, lora_scale, quality, name }: ImageEditArgs, ctx: ToolContext): Promise<string> => {
+  /** Geteilter Kern von image_edit und compose_images — nicht doppelt pflegen. */
+  const runImageEdit = async ({ image, images, prompt, backend, model_id, provider, negative_prompt, lora_id, lora_scale, quality, width, height, name, autoNote }: ImageEditArgs, ctx: ToolContext): Promise<string> => {
       const usePollinations = backend === "pollinations";
       const imageInputs = normalizeImageEditReferences(image, images);
       if (!usePollinations && imageInputs.length !== 1) {
@@ -420,10 +424,19 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         if (quality !== undefined && !usePollinations) {
           notes.push("quality is only supported with backend='pollinations' and was ignored here.");
         }
+        if ((width || height) && !usePollinations) {
+          notes.push("width/height are only supported with backend='pollinations' and were ignored here.");
+        }
 
         if (usePollinations) {
           if (cleanNegative) {
             notes.push("negative_prompt is not supported by Pollinations and was ignored.");
+          }
+          if (autoNote) {
+            notes.push(autoNote);
+          }
+          if ((width && !height) || (!width && height)) {
+            notes.push("POST size needs width AND height (WIDTHxHEIGHT); a single dimension was ignored. Use both for exact size.");
           }
           if (provider.trim() && provider.trim() !== "auto") {
             notes.push(`provider='${provider.trim()}' is HF-only and was ignored (backend='pollinations').`);
@@ -444,6 +457,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             images: inputImages,
             apiKey: pollinationsKey,
             quality,
+            width: width || undefined,
+            height: height || undefined,
           });
           if (qualityDropped && quality) {
             notes.push(`quality='${quality}' is only documented for gpt-image/grok-imagine-image-2.0 models and was ignored for '${modelToUse}'.`);
@@ -617,10 +632,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         FILES: saved under plugin output directory (config 'Output Directory'). Optional
         'name' appends a readable filename slug (sanitized) after the timestamp — set it
-        when the user asks to name/label the file; it also makes list_output_images
+        when the user asks to name/label the file; it also makes list_image_directory
         filtering useful. Hand the image to other tools as the returned absolute
         file_path (image_edit accepts it from ANY earlier tool result — do NOT strip it
-        to a bare filename). Find results via list_output_images.
+        to a bare filename). Find results via list_image_directory.
         quota.remaining counts plugin daily limit, not HF credits.
       `,
       parameters: {
@@ -854,10 +869,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         ONE REFERENCE OR SEVERAL? If the result has to MERGE two or more images into
         one — a person from image 1 wearing the garment from image 2, in the style of
-        image 3 — use multi_image_edit instead. It requires at least 2 references and
+        image 3 — use compose_images instead. It requires at least 2 references and
         is the right tool for combining sources. This tool is the single-reference
         variant and also accepts 'images' for Pollinations, but prefer
-        multi_image_edit when combining is the actual task.
+        compose_images when combining is the actual task.
 
         REFERENCE IMAGES
         • 'image' = the FIRST reference, always a plain string. Prefer the ABSOLUTE
@@ -897,7 +912,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         FILES: saved under the plugin output directory (config 'Output Directory').
         Optional 'name' appends a sanitized filename slug after the timestamp. Hand the
         result to other tools as the returned absolute file_path — do NOT strip it to a
-        bare filename. Find results via list_output_images.
+        bare filename. Find results via list_image_directory.
         quota.remaining counts the plugin's own daily limit, not HF credits.
       `,
       parameters: {
@@ -953,6 +968,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "Blank = medium (server default). Only documented for gpt-image/grok-imagine-image-2.0; " +
           "for other models it is ignored and a note is added to the result."
         ),
+        width: z.number().int().min(0).max(2048).default(0).describe(
+          "Output width in pixels (backend='pollinations' only, ignored with backend='hf'). " +
+          "Needs height as well (POST size=WIDTHxHEIGHT); 0 = backend default."
+        ),
+        height: z.number().int().min(0).max(2048).default(0).describe(
+          "Output height in pixels (backend='pollinations' only, ignored with backend='hf'). " +
+          "Needs width as well; 0 = backend default. Portrait e.g. 768x1152 for fashion editorial."
+        ),
         name: z.string().default("").describe(
           "Optional filename label for the result (e.g. 'latex-v2'). Sanitized to " +
           "lowercase a-z0-9- (max 40 chars) and appended after the timestamp: " +
@@ -964,7 +987,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     }),
 
     tool({
-      name: "multi_image_edit",
+      name: "compose_images",
       description: text`
         Combine TWO OR MORE existing images into one new image. This is the multi-image
         variant of image_edit and shares its implementation — use image_edit for a single
@@ -982,7 +1005,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         • Prefer the absolute file_path from an earlier generate_image/image_edit result.
           Bare filenames resolve against the plugin output directory first, relative paths
           against the plugin process CWD (not the chat directory). Public http(s) URLs
-          work too. Use list_output_images to find existing images.
+          work too. Use list_image_directory to find existing images — including
+          images outside the output directory (pass their folders in 'directories').
         • All references go into ONE request, so the prompt can address them by position:
           "use image 1 as the subject, image 2 only for the garment, image 3 as style".
         • Use generate_image if there is no reference image yet.
@@ -999,7 +1023,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Verified by actual multi-image calls, not by catalog claims. Avoid
         flux.1-kontext-pro here: it silently drops image 2. The catalog limit is advisory
         and a mismatch only warns in the notes, it never fails the call.
-        Blank model_id picks the configured default; browse with
+        Blank model_id picks the configured default — or leave auto_model on (default)
+        and the tool picks by reference count (2 → default, 3–10 → klein, 11–16 →
+        gpt-image-2); the choice is reported in the result notes. Browse with
         list_models source='pollinations' (see max_reference_images and multi_image).
 
         An active Neigungsprompt guides how the change is worded, same as generate_image.
@@ -1023,15 +1049,30 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "Everything you do not mention tends to be carried over from the references."
         ),
         model_id: z.string().default("").describe(
-          "Model override. Blank = configured Pollinations edit default. Pick a model whose " +
-          "max_reference_images covers your image count: klein (10, cheapest), gpt-image-2 (16), " +
-          "seedream5 (14), nanobanana-pro (14). Do NOT use flux.1-kontext-pro for 2+ images — " +
-          "it drops image 2 silently. Full IDs or the aliases flux/kontext/seedream5; " +
-          "browse with list_models source='pollinations'."
+          "Model override — always wins over auto_model. Blank + auto_model on (default) = " +
+          "automatic pick by reference count. Blank + auto_model off = configured Pollinations " +
+          "edit default. Pick a model whose max_reference_images covers your image count: " +
+          "klein (10, cheapest), gpt-image-2 (16), seedream5 (14), nanobanana-pro (14). " +
+          "Do NOT use flux.1-kontext-pro for 2+ images — it drops image 2 silently. " +
+          "Full IDs or the aliases flux/kontext/seedream5; browse with list_models source='pollinations'."
+        ),
+        auto_model: z.boolean().default(true).describe(
+          "Automatic model selection by reference count (only when model_id is blank): " +
+          "2 references → configured default (non-restrictive), 3–10 → klein (cheapest verified " +
+          "multi-image model), 11–16 → gpt-image-2 (highest count). The pick is reported in " +
+          "the result notes; an explicit model_id always wins. Set false to force the default."
         ),
         quality: z.enum(["low", "medium", "high", "hd"]).optional().describe(
           "Image quality. Blank = medium (server default). Only documented for " +
           "gpt-image/grok-imagine-image-2.0; ignored for other models with a note."
+        ),
+        width: z.number().int().min(0).max(2048).default(0).describe(
+          "Output width in pixels. Needs height as well (POST size=WIDTHxHEIGHT); " +
+          "0 = backend default."
+        ),
+        height: z.number().int().min(0).max(2048).default(0).describe(
+          "Output height in pixels. Needs width as well; 0 = backend default. " +
+          "Portrait e.g. 768x1152 for fashion editorial."
         ),
         name: z.string().default("").describe(
           "Optional filename label for the result (e.g. 'outfit-composite'). Sanitized to " +
@@ -1039,23 +1080,44 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "pl-2026-09-25_12-00-00_outfit-composite.png. Blank = timestamp only."
         ),
       },
-      implementation: safe_impl("multi_image_edit", async (args, ctx) => {
+      implementation: safe_impl("compose_images", async (args, ctx) => {
         // Auf den geteilten Kern abbilden: erstes Bild wird 'image', der Rest 'images'.
         // Das ist der ganze Unterschied — die Logik bleibt an einer Stelle.
         const [first, ...rest] = args.images;
+        // Auto-Modellwahl nach Referenzanzahl — nur wenn kein explizites Modell
+        // gesetzt ist. Staffelung: Default (tolerant) → klein (billig, 10) →
+        // gpt-image-2 (16). Die Wahl landet ueber autoNote in den notes.
+        let modelId = args.model_id;
+        let autoNote: string | undefined;
+        if (!modelId.trim() && args.auto_model) {
+          const count = args.images.length;
+          modelId =
+            count <= 2
+              ? POLLINATIONS_DEFAULT_EDIT_MODEL
+              : count <= 10
+                ? "black-forest-labs/flux.2-klein-4b"
+                : "openai/gpt-image-2";
+          autoNote =
+            `auto_model picked '${modelId}' for ${count} references ` +
+            `(2 → default, 3–10 → klein, 11–16 → gpt-image-2). ` +
+            `Override any time with model_id.`;
+        }
         return runImageEdit(
           {
             image: first,
             images: rest.length > 0 ? rest : undefined,
             prompt: args.prompt,
             backend: "pollinations",
-            model_id: args.model_id,
+            model_id: modelId,
             provider: "auto",
             negative_prompt: "",
             lora_id: "",
             lora_scale: 1.0,
             quality: args.quality,
+            width: args.width,
+            height: args.height,
             name: args.name,
+            autoNote,
           },
           ctx
         );
@@ -1063,43 +1125,64 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     }),
 
     tool({
-      name: "list_output_images",
+      name: "list_image_directory",
       description: text`
-        List images in the plugin output directory — the shared workspace holding both
-        generated results (generate_image/image_edit) and input/reference images
-        (image_edit resolves bare filenames against this directory first).
-        Paginated and compact — use it instead of reading a large directory at once.
+        List images in directories — the plugin output directory by default
+        (generated results and reference images), or any directories you pass
+        explicitly. Paginated and compact — use it instead of reading a large
+        directory at once.
 
-        Use when the user asks which images exist, wants the latest result, or needs to
-        locate an input/reference image for image_edit — a prior result or a file placed
-        in this directory (newest first by default, so limit=1 returns the latest image).
-        Entries return 'filename'; for image_edit, prefer the absolute path
-        output_directory + filename. Walk large folders page by page via offset.
-        Scoped to the output directory only.
+        Use when the user asks which images exist, wants the latest result, or
+        needs to locate input/reference images for image_edit / compose_images —
+        including images that live OUTSIDE the output directory (e.g. "one image
+        from folder A, one from folder B": pass both folders in 'directories'
+        and pick one entry per folder). Entries return 'filename'; pass the
+        absolute path (directory + filename) to image_edit / compose_images —
+        preferred over bare filenames. Walk large folders page by page via offset
+        (sort/limit/offset/filter apply per directory).
       `,
       parameters: {
+        directories: z.array(z.string().trim().min(1)).max(10).default([]).describe(
+          "Directories to list (absolute paths or ~/ prefix; relative paths resolve " +
+          "against the plugin process CWD, not the chat directory). Empty = only the " +
+          "plugin output directory. Example: directories=['C:/fotos/shooting','C:/fotos/style'] " +
+          "to combine one image per folder with compose_images."
+        ),
         sort: z.enum(["newest", "oldest", "name"]).default("newest").describe(
-          "Sort order. Default newest first (limit=1 gives the latest image)."
+          "Sort order per directory. Default newest first (limit=1 gives the latest image)."
         ),
         limit: z.number().int().min(1).max(100).default(20).describe(
-          "Entries per page (max 100)."
+          "Entries per page and directory (max 100)."
         ),
         offset: z.number().int().min(0).default(0).describe(
-          "Skip this many entries for paging (e.g. 20 for page 2 with limit 20)."
+          "Skip this many entries per directory for paging (e.g. 20 for page 2 with limit 20)."
         ),
         filter: z.string().default("").describe(
           "Substring filter on filenames (e.g. a date or keyword). Leave blank for all."
         ),
       },
-      implementation: safe_impl("list_output_images", async ({ sort, limit, offset, filter }, ctx) => {
+      implementation: safe_impl("list_image_directory", async ({ directories, sort, limit, offset, filter }, ctx) => {
         const outputDir = getOutputDir();
-        ctx.status("Listing output images…");
-        const result = await listOutputImages(outputDir, { sort, limit, offset, filter });
+        ctx.status("Listing image directories…");
+        // Leeres Array = nur Output-Dir; doppelte (auch nach ~/ -Aufloesung
+        // gleiche) Verzeichnisse nur einmal lesen. Fehlende Verzeichnisse
+        // liefern eine leere Liste, keinen Fehler (siehe listOutputImages).
+        const resolved = directories.length > 0
+          ? [...new Set(directories.map((d) => resolvePath(d)))]
+          : [outputDir];
+        const results = [];
+        for (const directory of resolved) {
+          const result = await listOutputImages(directory, { sort, limit, offset, filter });
+          results.push({
+            directory,
+            ...result,
+            has_more: result.offset + result.entries.length < result.total,
+          });
+        }
         return json({
           output_directory: outputDir,
-          ...result,
-          has_more: result.offset + result.entries.length < result.total,
-          usage: "For image_edit pass the absolute path: output_directory + filename (preferred over bare filename).",
+          directories: results,
+          usage: "For image_edit / compose_images pass the absolute path: directory + filename (preferred over bare filename).",
         });
       }),
     }),
@@ -1169,6 +1252,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         generate_image backend='hf'; IDs from source='pollinations' only with
         backend='pollinations'; IDs from source='image-edit' only with image_edit.
         LoRA lookup (include_loras) and the list_loras tool are HF-only.
+        SIZES: no source publishes supported sizes per model, so rows carry no size
+        field — sizes are a request parameter, not catalog data. Pollinations rows
+        accept width+height (generate_image, image_edit, compose_images; POST needs
+        BOTH, a single dimension is ignored); HF rows ignore width/height.
         Model lists are cached for 12 hours to reduce API calls. The Pollinations
         catalog cache is persisted to disk (~/.cache/image-gen/pollinations-catalog.json),
         so it survives plugin reloads; if /image/models is unreachable the last known
@@ -1435,7 +1522,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   ? "Editing-native IDs for the image_edit tool, taken from the cached image-to-image catalog " +
                     "(curated first, then the most-liked models a provider currently serves). " +
                     "image_edit_default_model applies here; current_default_model is the text-to-image default — do not use it for editing. " +
-                    "backend='hf' accepts exactly ONE reference image — for 2+ use multi_image_edit or source='pollinations'."
+                    "backend='hf' accepts exactly ONE reference image — for 2+ use compose_images or source='pollinations'."
                   : "HuggingFace IDs for generate_image backend='hf'. Pass model_id to generate_image to use a model.",
         });
       }),

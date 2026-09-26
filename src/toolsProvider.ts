@@ -1190,7 +1190,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           .min(5)
           .max(50)
           .default(20)
-          .describe("Maximum number of models (only for provider/trending/downloads; ignored for curated/pollinations)."),
+          .describe("Maximum number of models (only for provider/trending/downloads; ignored for curated/pollinations). Filtering (quantizations, LoRAs, pre-SDXL, models without live provider) may return fewer — see requested_limit/returned."),
         include_loras: z.boolean()
           .default(false)
           .describe("Include compatible LoRAs per model (HF sources only, skipped for source='pollinations'; slower, needs API calls)."),
@@ -1342,6 +1342,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
         return json({
           source,
+          // Ranking-Quellen koennen kuerzer ausfallen als limit: die Filterkette
+          // (Quantisierung, LoRA, pre-SDXL, ohne live-Provider) verwirft aus bis
+          // zu 500 API-Zeilen — returned < requested_limit ist normal, kein Fehler.
+          ...(usesModelCache ? { requested_limit: limit, returned: models.length } : {}),
           current_default_model: currentDefault,
           ...(isPollinations
             ? { pollinations_default_model: POLLINATIONS_DEFAULT_MODEL }

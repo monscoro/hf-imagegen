@@ -57,17 +57,28 @@ const QUANTIZATION_MARKERS = [
   "int4",
   "4bit",
   "8bit",
-  "q4_",
-  "q5_",
-  "q6_",
-  "q8_",
+  "q4",
+  "q5",
+  "q6",
+  "q8",
   "nf4",
   "bnb",
 ];
 
-export function isQuantizationArtifact(modelId: string): boolean {
+/**
+ * Repo-Name in Tokens zerlegt (Trenner: alles ausser a-z0-9). "valorant-style"
+ * wird zu {valorant, style} statt "lora" als Substring zu enthalten — ein
+ * includes()-Check wuerde solche Namen fälschlich als LoRA/Quantisierung
+ * verwerfen. Geprueft wird nur der Repo-Name, nicht der Autor.
+ */
+function repoNameTokens(modelId: string): Set<string> {
   const repo = modelId.slice(modelId.indexOf("/") + 1).toLowerCase();
-  return QUANTIZATION_MARKERS.some((marker) => repo.includes(marker));
+  return new Set(repo.split(/[^a-z0-9]+/).filter((t) => t.length > 0));
+}
+
+export function isQuantizationArtifact(modelId: string): boolean {
+  const tokens = repoNameTokens(modelId);
+  return QUANTIZATION_MARKERS.some((marker) => tokens.has(marker));
 }
 
 /**
@@ -79,13 +90,15 @@ export function isQuantizationArtifact(modelId: string): boolean {
  * nicht aufrufbar, also fliegen sie aus den Modelllisten raus.
  *
  * Geprueft wird nur der Repo-Name, nicht der Autor: sonst wuerde ein Autor
- * namens "lora-collective" komplett verschwinden.
+ * namens "lora-collective" komplett verschwinden. Und nur ganze Tokens, kein
+ * Substring: "valorant-style" enthaelt "lora", ist aber kein Adapter.
  *
  * Die eigentliche LoRA-Suche (getLoRAsForModel, list_loras) filtert bewusst
  * NICHT — dort sind genau diese Modelle gesucht.
  */
 export function isLoRAArtifact(modelId: string): boolean {
-  return modelId.slice(modelId.indexOf("/") + 1).toLowerCase().includes("lora");
+  const tokens = repoNameTokens(modelId);
+  return tokens.has("lora") || tokens.has("loras");
 }
 
 /**
@@ -344,7 +357,9 @@ export function getHfCatalogCacheInfo(): {
     const withProviders = new Set<string>();
     for (const entry of disk.models) {
       seen.add(entry.id);
-      if (entry.providers.length > 0) withProviders.add(entry.id);
+      // Nur live zaehlen: staging/error-only Modelle sind nicht aufrufbar,
+      // und die Filterkette (keepUsableModels, image-edit) verlangt live.
+      if (entry.providers.some((p) => p.status === "live")) withProviders.add(entry.id);
     }
     modelsWithProviders = withProviders.size;
   }
@@ -527,7 +542,12 @@ export async function getHfImageEditModels(limit: number = 20): Promise<ModelInf
     (e) =>
       e.task === "image-to-image" &&
       e.providers.some((p) => p.status === "live") &&
-      // gleiche Altsschwelle wie in den Ranking-Listen
+      // Nur die Namenshaelfte der Altschwelle: HFCatalogEntry hat kein
+      // createdAt (die expand=inferenceProviderMapping-Projektion liefert es
+      // nicht), deshalb greift hier isPreSdxlArtifact ohne Datum. Offizielle
+      // Alt-Repos fliegen trotzdem raus; Finetunes wie dreamshaper-7, die nur
+      // ueber das Datum erkennbar waeren, schluepfen auf diesem Pfad durch,
+      // waehrend die Ranking-Listen sie per createdAt verwerfen.
       !isPreSdxlArtifact(e.id)
   );
   if (withProvider.length === 0) return curated.slice(0, limit);

@@ -482,6 +482,8 @@ export interface PollinationsVideoModelCapabilities {
   name: string;
   aliases?: string[];
   category?: string;
+  /** true = community-/Drittanbieter-Spiegel — fliegt aus list_models source='video'. */
+  community?: boolean;
   title?: string;
   publisher?: string;
   paid_only?: boolean;

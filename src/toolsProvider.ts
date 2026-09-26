@@ -143,6 +143,10 @@ function buildPollinationsVideoRows(
     const key = cap.name.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
+    // Wie bei den Image-Extras: fremde Kategorien und Community-Spiegel
+    // gehoeren nicht in die Liste.
+    if (cap.category && cap.category !== "video") continue;
+    if (cap.community) continue;
     const parts: string[] = [];
     if (cap.title && cap.title !== cap.name) parts.push(cap.title);
     if (cap.min_duration !== undefined) {
@@ -1217,8 +1221,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         provider 'auto' or fal-ai/replicate/wavespeed). HF v1 uses model defaults for length
         and size — duration/resolution/aspect_ratio/audio/end_image/tier are Pollinations-only
         and noted as ignored; video LoRAs need a live-verified provider path first (follow-up).
-        Requests send safe=false/private/nologo like the image endpoints (filters off,
-        hidden from the public feed, no watermark with key). If both 'motion' and 'cuts'
+        Video requests send safe=false (filters off, documented default). If both 'motion' and 'cuts'
         are set, 'cuts' wins. Renders take minutes. Each clip counts one daily-guard
         unit and is billed per second (Pollinations) or provider credit (HF).
       `,
@@ -1247,7 +1250,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         cuts: z.array(z.string().trim().min(1)).max(6).default([]).describe(
           "Exploration set: 2–6 motion variants of the SAME still, rendered sequentially " +
           "(cheap: use tier='draft', resolution='480p' — a 4-cut set costs ~0.30 pollen). " +
-          "One failed cut doesn't kill the set; each cut returns file_path or error."
+          "One failed cut doesn't kill the set; each cut returns file_path or error. " +
+          "A single entry behaves exactly like 'motion' (flat result shape)."
         ),
         model_id: z.string().default("").describe(
           "Model override — always wins over 'tier'. Blank = tier pick. Full IDs " +
@@ -1320,8 +1324,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           );
         }
 
-        // motion vs cuts: cuts wins (noted); a single cut behaves like motion
-        // (flat result shape); neither means nothing to render.
+        // motion vs cuts: cuts wins (noted); a single cut behaves exactly like
+        // motion (flat result shape); neither means nothing to render.
         const notes: string[] = [];
         let motions: string[];
         if (args.cuts.length > 0) {
@@ -1335,6 +1339,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           throw new Error(
             "Provide 'motion' for one clip or 'cuts' (2–6 motion variants) for an exploration set. " +
             "Blank motion with empty cuts cannot render."
+          );
+        }
+        // Jeder Clip kostet eine Daily-Guard-Einheit (recordGeneration pro Clip):
+        // Vorkasse pruefen, damit ein 6er-Set nicht mitten im Satz an die Wand faehrt.
+        if (rateLimitResult.remaining < motions.length) {
+          throw new Error(
+            `Not enough daily quota for ${motions.length} clip(s): ` +
+            `${rateLimitResult.remaining} remaining of ${rateLimitResult.limit} ` +
+            `(resets in ~${rateLimitResult.resetInHours}h). Reduce 'cuts' or wait.`
           );
         }
 
@@ -1370,6 +1383,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           audio = target.audio;
           sendEndFrame = target.sendEndFrame;
           notes.push(...target.notes);
+          // Unbekannte ID (Tippfehler?): weder Live-Katalog noch statische
+          // Tabellen kennen sie — kein Fail (koennte neu sein), aber ehrlich
+          // melden statt nach Upload + MinutenRender scheitern zu lassen.
+          if (liveVideoCaps && !liveVideoCaps.has(modelToUse.toLowerCase())) {
+            notes.push(
+              `'${modelToUse}' is not in the live video catalog — passthrough without ` +
+              "validation (possible typo or brand-new model). Check list_models source='video'."
+            );
+          }
           notes.push(
             "Pollinations video is billed per generated second (model pricing: GET /video/models). " +
             `This call requests ${motions.length} clip(s) of ${duration}s.`
@@ -1448,7 +1470,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 lastPollinationsCall = Date.now();
               } else {
                 const providerToUse = (args.provider.trim() || "auto") as
-                  "auto" | "fal-ai" | "replicate" | "wavespeed" | "together" | "nscale";
+                  "auto" | "fal-ai" | "replicate" | "wavespeed";
                 const hf = new InferenceClient(getToken());
                 const inputBlob = new Blob([new Uint8Array(startInput.buffer)], {
                   type: startInput.mimeType,
@@ -1500,16 +1522,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           };
           if (motions.length === 1) {
             const clip = clips[0];
+            // Single-Fehler werfen oben (tool_error) — hier gibt es nur Erfolg.
             return json({
               ...base,
               file_path: clip.file_path,
               filename: clip.file_path ? path.basename(clip.file_path) : undefined,
               file_size_bytes: clip.file_size_bytes,
               motion: clip.motion,
-              error: clip.error,
-              message: clip.file_path
-                ? `Video saved to ${clip.file_path}`
-                : `Video failed: ${clip.error}`,
+              message: `Video saved to ${clip.file_path}`,
             });
           }
           return json({
@@ -1914,15 +1934,20 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           models: models.map((m) => {
             // is_default bezieht sich auf den Default des jeweiligen Katalogs:
             // pollinations → Pollinations-T2I-Default, image-edit → HF-Edit-Default, sonst HF-T2I-Default.
+            // video meldet keinen Default (Feld waere ueberall false) — das Flag entfaellt dort.
             const row = {
               ...m,
               cost: costMap[m.id]?.cost ?? m.cost,
-              is_default:
-                source === "pollinations"
-                  ? m.id === POLLINATIONS_DEFAULT_MODEL
-                  : source === "image-edit"
-                    ? m.id === editDefault
-                    : m.id === currentDefault,
+              ...(source === "video"
+                ? {}
+                : {
+                    is_default:
+                      source === "pollinations"
+                        ? m.id === POLLINATIONS_DEFAULT_MODEL
+                        : source === "image-edit"
+                          ? m.id === editDefault
+                          : m.id === currentDefault,
+                  }),
             };
             if (source === "image-edit") {
               return {

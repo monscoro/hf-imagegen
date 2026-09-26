@@ -81,12 +81,11 @@ const KNOWN_RESOLUTIONS: Record<string, string[]> = {
   "google/veo-3.1-fast": ["720p", "1080p"],
 };
 
-/** Aspect-Ratios aus den Docs. Default: 16:9/9:16 (dokumentiert: "most models"). */
+/** Aspect-Ratios aus den Docs (der Katalog liefert keine — nur diese sind belegt, Rest Passthrough). */
 const KNOWN_ASPECTS: Record<string, string[]> = {
   "minimax/minimax-h3-max-turbo": ["16:9", "9:16", "21:9", "4:3", "1:1", "3:4"],
   "minimax/minimax-h3": ["16:9"],
 };
-const DEFAULT_ASPECTS = ["16:9", "9:16"];
 
 /** Modelle mit end_frame in video_capabilities (Live-Katalog). */
 const END_FRAME_MODELS = new Set([
@@ -202,18 +201,20 @@ export function resolveVideoTarget(
   const audioCapable = caps
     ? caps.includes("audio_output")
     : AUDIO_CAPABLE_MODELS.has(lookup);
-  const known = liveEntry ? true : liveDur !== undefined || resolutions !== undefined;
+  const known = liveDur !== undefined || resolutions !== undefined || caps !== undefined;
 
   if (dur) {
+    // Range zuerst: bei inkonsistentem Katalog (allowed ausserhalb min/max)
+    // meldet die Range die gueltige Spanne, nicht die Liste.
+    if (input.duration < dur.min || input.duration > dur.max) {
+      throw new Error(
+        `Duration ${input.duration}s is outside '${model}' range (${dur.min}–${dur.max}s).`
+      );
+    }
     if (dur.allowed && !dur.allowed.includes(input.duration)) {
       throw new Error(
         `Duration ${input.duration}s is not supported by '${model}'. ` +
         `Valid durations: ${dur.allowed.join(", ")}.`
-      );
-    }
-    if (input.duration < dur.min || input.duration > dur.max) {
-      throw new Error(
-        `Duration ${input.duration}s is outside '${model}' range (${dur.min}–${dur.max}s).`
       );
     }
     if (dur.step && input.duration % dur.step !== 0) {
@@ -234,8 +235,11 @@ export function resolveVideoTarget(
 
   let aspectRatio = input.aspectRatio.trim();
   if (aspectRatio) {
-    const valid = KNOWN_ASPECTS[lookup] ?? DEFAULT_ASPECTS;
-    if (!valid.includes(aspectRatio)) {
+    // Nur Modelle mit explizitem Aspect-Wissen werden geprueft — der Katalog
+    // liefert keine Aspect-Daten, und raten duerfen wir nicht: Unbekanntes
+    // laeuft durch (Server entscheidet), statt hard zu scheitern.
+    const valid = KNOWN_ASPECTS[lookup];
+    if (valid && !valid.includes(aspectRatio)) {
       throw new Error(
         `Aspect ratio '${aspectRatio}' is not supported by '${model}'. ` +
         `Valid: ${valid.join(", ")}.`
@@ -318,8 +322,10 @@ export interface VideoRequestOptions {
 /**
  * GET /video/{motion} — synchron, rendert serverseitig Minuten. Auth laeuft
  * ueber den Authorization-Header beim Download (kein Key in der URL).
- * safe=false/private/nologo wie bei den Bild-Endpoints: Filter aus, kein
- * Feed, kein Watermark mit Key.
+ * Nur dokumentierte Query-Params (APIDOCS v0.3.0): private/nologo sind
+ * Image-Endpoint-Gewohnheiten und stehen nicht in der Video-Doku — ein
+ * strikter Endpoint wuerde unbekannte Params mit 400 quittieren, also weg
+ * damit. safe=false ist dokumentiert (Default off, explizit gesetzt).
  */
 export function buildVideoRequestUrl(opts: VideoRequestOptions): string {
   const url = new URL(`${VIDEO_API_BASE}/${encodeURIComponent(opts.motion)}`);
@@ -329,8 +335,6 @@ export function buildVideoRequestUrl(opts: VideoRequestOptions): string {
   if (opts.resolution.trim()) url.searchParams.set("resolution", opts.resolution.trim());
   if (opts.audio) url.searchParams.set("audio", "true");
   url.searchParams.set("safe", "false");
-  url.searchParams.set("private", "true");
-  url.searchParams.set("nologo", "true");
   // Doku: mehrere URLs mit "|" getrennt in EINEM image-Parameter.
   if (opts.imageUrls.length > 0) url.searchParams.set("image", opts.imageUrls.join("|"));
   return url.toString();

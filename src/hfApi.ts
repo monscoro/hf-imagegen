@@ -419,7 +419,10 @@ function toModelInfo(
   const latency = getHfBestLiveLatency(m.id);
   return {
     id: m.id,
-    description,
+    // Video-Rows: Provider in den Text — dort steht sonst nur Boilerplate,
+    // und die Zeile ist die einzige Stelle mit Live-Signal.
+    description:
+      source === "video" && live.length > 0 ? `${description} — live: ${live.join(", ")}` : description,
     style: "varies",
     speed: hfSpeedFromLatency(latency) ?? "medium",
     access: "free",
@@ -546,13 +549,22 @@ export async function getHfVideoModels(
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const seen = new Map<string, HFModel>();
+  // Pro Tag best-effort (wie fetchHfCatalog): faellt eine Seite aus, traegt
+  // die andere die Liste allein — nur beide tot werfen.
   for (const tag of HF_VIDEO_TAGS) {
-    const url = `${HF_API_BASE}/models?pipeline_tag=${tag}&sort=trendingScore&limit=${fetchLimit}`;
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(HF_LIST_TIMEOUT_MS) });
-    if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
-    for (const m of (await res.json()) as HFModel[]) {
-      if (m?.id && !seen.has(m.id)) seen.set(m.id, m);
+    try {
+      const url = `${HF_API_BASE}/models?pipeline_tag=${tag}&sort=trendingScore&limit=${fetchLimit}`;
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(HF_LIST_TIMEOUT_MS) });
+      if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
+      for (const m of (await res.json()) as HFModel[]) {
+        if (m?.id && !seen.has(m.id)) seen.set(m.id, m);
+      }
+    } catch {
+      // naechster Tag; erst danach entscheiden
     }
+  }
+  if (seen.size === 0) {
+    throw new Error("HF API error: both video tag pages failed.");
   }
 
   // Katalog ZUERST (anders als bei den Bild-Listen): Video-Listen sind voll

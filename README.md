@@ -135,7 +135,7 @@ Use it when the result has to **merge** sources — "image 1 is the subject, ima
 generate_video(image, end_image?, motion?, cuts?, model_id?, tier?, duration?, aspect_ratio?, resolution?, audio?, name?)
 ```
 
-Still → Startframe-Upload (unlisted Media-URL) → `GET /video/{motion}` → MP4 nach `~/images` (`pv-…mp4`). Ein Clip pro Call oder ein Explorations-Satz: `cuts` (2–6 Motion-Varianten desselben Stills, sequenziell, Einzelfehler killen den Satz nicht). `motion` leer = LLM schreibt Kamera+Subjekt-Bewegung, dauer-skaliert. `tier` bei leerer `model_id`: `draft` (`seedance-1-pro-fast`, billigste Exploration), `standard` (`h3-max-turbo`, Sweet Spot mit Audio), `final` (`grok-video-pro`, toleranteste Filter) — Wahl steht in den Notes. `duration` wird gegen Modell-Limits validiert (fail fast statt abgerechnetem Fehlcall), `resolution` pro Modell-Tier (`480p` = billige Exploration), `aspect_ratio` (`16:9`/`9:16`), `audio` wo unterstützt. Jeder Clip zählt eine Daily-Guard-Einheit, abgerechnet wird pro Sekunde. Backend ist Pollinations per Konstruktion (HF-Video folgt).
+Still → Startframe-Upload (unlisted Media-URL) → `GET /video/{motion}` → MP4 nach `~/images` (`pv-…mp4`). Ein Clip pro Call oder ein Explorations-Satz: `cuts` (2–6 Motion-Varianten desselben Stills, sequenziell, Einzelfehler killen den Satz nicht). `motion` leer = LLM schreibt Kamera+Subjekt-Bewegung, dauer-skaliert. `tier` bei leerer `model_id`: `draft` (`seedance-1-pro-fast`, billigste Exploration), `standard` (`h3-max-turbo`, Sweet Spot mit Audio), `final` (`grok-imagine-video`, toleranteste Filter) — Wahl steht in den Notes. `duration`/`resolution`/`aspect_ratio`/`audio` werden gegen den Live-Katalog validiert (fail fast statt abgerechnetem Fehlcall; statische Tabellen als Offline-Fallback). Browse: `list_models source="video"`. Jeder Clip zählt eine Daily-Guard-Einheit, abgerechnet wird pro Sekunde. Backend ist Pollinations per Konstruktion (HF-Video folgt).
 
 ### `list_models` — Browse models per backend
 
@@ -150,12 +150,13 @@ list_models(source?, provider?, limit?, include_loras?, include_catalog?, filter
 | `provider` | `generate_image` + `hf` | Needs `provider` (fal-ai, replicate, wavespeed, …). Never `pollinations` — use `source="pollinations"`. |
 | `trending` / `downloads` | `generate_image` + `hf` | Live HF catalog, ranked by `trendingScore` or `downloads`. |
 | `pollinations` | `generate_image`/`image_edit` + `pollinations` | 7 curated models plus `catalog_extras` with the full live catalog (77 entries). Requires API key. Aliases: `flux`, `kontext`, `seedream5`. |
+| `video` | `generate_video` + `pollinations` (HF rows: future backend) | Pollinations live rows first (durations, resolutions, caps, pollen/s per row), then HF live rows (`text-to-video` + `image-to-video` tags, provider-enriched). No curated list — both sides live, never stale. |
 
 `include_catalog` and `filter` apply to `source="pollinations"` (`catalog_extras`); `filter` has no effect on any other source. `limit` applies to every source except `curated`.
 
-**The response only contains what the requested source needs.** Diagnostic blocks appear per source rather than always: `catalog_cache` only for `pollinations`, `hf_catalog_cache` only for the HF sources, `model_cache` only for `provider`/`trending`/`downloads`. Consequently a `curated` call reads no cache file at all, a `trending` call reads only the HF catalog, and a `pollinations` call only the Pollinations one. Before, every call read both (~357 KB of JSON parsed per call, ~5.5 ms warm); now it is 0 / 228 / 65 KB and 0.1 / 2.7 / 2.0 ms respectively. Costs are source-specific for the same reason: HF rows get the static `HF_COSTS` table, Pollinations rows the live catalog. Mixing them could have shown a Pollinations price on a model the caller was about to run through `backend='hf'`.
+**The response only contains what the requested source needs.** Diagnostic blocks appear per source rather than always: `catalog_cache` only for `pollinations`, `hf_catalog_cache` for the HF sources (including `video`), `video_catalog_cache` only for `video`, `model_cache` only for `provider`/`trending`/`downloads`/`video`. Consequently a `curated` call reads no cache file at all, a `trending` call reads only the HF catalog, and a `pollinations` call only the Pollinations one. Before, every call read both (~357 KB of JSON parsed per call, ~5.5 ms warm); now it is 0 / 228 / 65 KB and 0.1 / 2.7 / 2.0 ms respectively. Costs are source-specific for the same reason: HF rows get the static `HF_COSTS` table, Pollinations rows the live catalog. Mixing them could have shown a Pollinations price on a model the caller was about to run through `backend='hf'`.
 
-**`default_not_in_list` warns when the configured default is filtered out.** The artifact and pre-SDXL filters can exclude a configured `defaultModel` or `defaultEditModel` — a LoRA or a pre-2023 checkpoint, or simply a model that no provider serves. In that case no row is flagged `is_default` and the field names the missing model plus the likely cause, instead of the response quietly pointing at a default that is not in the list.
+**`default_not_in_list` warns when the configured default is filtered out.** The artifact and pre-SDXL filters can exclude a configured `defaultModel` or `defaultEditModel` — a LoRA or a pre-2023 checkpoint, or simply a model that no provider serves. In that case no row is flagged `is_default` and the field names the missing model plus the likely cause, instead of the response quietly pointing at a default that is not in the list. (`video` is exempt: it has no configured default, image defaults never appear in a video list.)
 
 LoRA lookup (`include_loras`) and `list_loras` are HF-only.
 
@@ -183,17 +184,18 @@ Two deliberate exceptions. For `source="provider"` the provider filter is skippe
 **The default output directory moved from `~/hf-images` to `~/images`.** Nothing migrates: images already generated stay in `~/hf-images` and are invisible to `list_image_directory` (default scope) and to `image_edit` with a bare filename, until you either point *Output Directory* back at `~/hf-images`, move the files — or pass the old folder in `list_image_directory({directories:[…]})`.
 
 - **Pollinations** (`/image/models`) → `pollinations-catalog.json`. Pollinations prices come from that same file — the endpoint returns them per model, so no second request is made. Reported in `catalog_cache`.
-- **HuggingFace** (`/api/models?…&expand=inferenceProviderMapping`, one request per task) → `huggingface-catalog.json`, ~228 KB for 2000 models. This is the source of `hf_providers`, `hf_latency_ms` and `image_edit`. Reported in `hf_catalog_cache` for HF sources.
+- **Pollinations video** (`/video/models`) → `video-catalog.json`: prices per tier, durations, resolutions, capabilities, health. Reported in `video_catalog_cache` (only `source="video"`); `generate_video` validates live against it.
+- **HuggingFace** (`/api/models?…&expand=inferenceProviderMapping`, one request per task) → `huggingface-catalog.json`, ~400 KB for 4000 models across text-to-image, image-to-image, text-to-video and image-to-video. This is the source of `hf_providers`, `hf_latency_ms` and `image_edit`. Reported in `hf_catalog_cache` for HF sources.
 
 Both serve the last known catalog if the endpoint is unreachable, and never cache a failed fetch — one timeout cannot cost you the prices or the mapping for 12 hours.
 
-### `list_loras` — Search LoRA adapters (HF only)
+### `list_loras` — Search LoRA adapters (HF only, images + video)
 
 ```
 list_loras(base_model?, search?, limit?)
 ```
 
-Avoid `search` (HF search is strict, often empty) — filter by `base_model` only. Pass `id` as `lora_id` with `backend="hf"`.
+Avoid `search` (HF search is strict, often empty) — filter by `base_model` only. Pass `id` as `lora_id` with `backend="hf"`. Video base models from `list_models source="video"` work too (wan/ltx/hunyuan/cogvideo/minimax query branches); each hit carries a `description` line (likes/downloads + notable tags) for picking. Video LoRAs are NOT a `generate_video` parameter — use them locally (ComfyUI/Diffusers, e.g. character LoRAs for a consistent muse); server-side video LoRA support is Phase-3 work.
 
 ### `list_image_directory` — Browse results & inputs, anywhere
 

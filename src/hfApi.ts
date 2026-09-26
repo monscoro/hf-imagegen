@@ -7,6 +7,8 @@ import {
   setCachedTrendingModels,
   getCachedDownloadedModels,
   setCachedDownloadedModels,
+  getCachedVideoModels,
+  setCachedVideoModels,
 } from "./modelCache";
 import {
   readHfCatalogCache,
@@ -515,6 +517,56 @@ export async function getDownloadedModels(
 }
 
 /**
+ * Video-Modelle fuer list_models source='video' (HF-Seite).
+ *
+ * Beide Video-Tasks live (text-to-video + image-to-video, trendingScore),
+ * zusammengeführt und deduped — ein Modell steht oft in beiden. Gleiche
+ * Filterkette wie die Ranking-Listen: LoRA-Adapter und Quantisierungen sind
+ * auch hier keine aufrufbaren Modelle (die Listen sind voll davon, siehe
+ * MiniMax-LoRAs); die Pre-SDXL-Schwelle laeuft ins Leere (alles post-2023).
+ * Provider-Nachweis gibt es keinen (kein ?inference_provider=?), also gilt
+ * die Standardregel: unbekannt + Katalog geladen = raus, bekannt + kein
+ * live-Provider = raus.
+ */
+const HF_VIDEO_TAGS = ["text-to-video", "image-to-video"] as const;
+
+export async function getHfVideoModels(
+  limit: number = 20,
+  token?: string
+): Promise<ModelInfo[]> {
+  const cached = getCachedVideoModels(limit);
+  if (cached) return cached;
+
+  const fetchLimit = Math.min(limit * 12, 500);
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const seen = new Map<string, HFModel>();
+  for (const tag of HF_VIDEO_TAGS) {
+    const url = `${HF_API_BASE}/models?pipeline_tag=${tag}&sort=trendingScore&limit=${fetchLimit}`;
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(HF_LIST_TIMEOUT_MS) });
+    if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
+    for (const m of (await res.json()) as HFModel[]) {
+      if (m?.id && !seen.has(m.id)) seen.set(m.id, m);
+    }
+  }
+
+  // Katalog ZUERST (anders als bei den Bild-Listen): Video-Listen sind voll
+  // mit nicht aufrufbarem Beiwerk (Workflows, Merges, ControlNets) — ohne
+  // Provider-Filter kaeme beim ersten Call nach jedem Reload nur Schrott.
+  // Platten-Cache macht das im Normalfall netzfrei.
+  await ensureCatalogBestEffort();
+  const models = keepUsableModels([...seen.values()], limit);
+
+  const result = models.map((m) =>
+    toModelInfo(m, "video", `${m.id} — Video model (HuggingFace pipeline_tag)`)
+  );
+
+  setCachedVideoModels(limit, result);
+  return result;
+}
+
+/**
  * Editing-native Modelle fuer list_models source='image-edit'.
  *
  * Quelle ist der image-to-image-Teil des Katalogs statt einer handgepflegten
@@ -607,6 +659,17 @@ export async function getLoRAsForModel(
     query = search ? `${search} krea lora` : "krea lora";
   } else if (modelKey.includes("qwen")) {
     query = search ? `${search} qwen lora` : "qwen lora";
+  } else if (modelKey.includes("wan")) {
+    query = search ? `${search} wan lora` : "wan lora";
+  } else if (modelKey.includes("ltx")) {
+    query = search ? `${search} ltx lora` : "ltx lora";
+  } else if (modelKey.includes("hunyuan")) {
+    query = search ? `${search} hunyuan video lora` : "hunyuan video lora";
+  } else if (modelKey.includes("cogvideo")) {
+    query = search ? `${search} cogvideo lora` : "cogvideo lora";
+  } else if (modelKey.includes("minimax")) {
+    // "minimax" allein trifft auch Text-Modelle — Video-Disambiguierung noetig.
+    query = search ? `${search} minimax video lora` : "minimax video lora";
   } else {
     query = search || `${baseModel.split("/").pop()} lora`;
   }
@@ -634,17 +697,62 @@ export async function getLoRAsForModel(
       downloads: m.downloads ?? 0,
       likes: m.likes ?? 0,
       base_model: extractBaseModel(m),
-      tags: (m.tags ?? []).filter((t) =>
-        ["lora", "flux", "sdxl", "stable-diffusion", "krea", "qwen"].includes(t)
-      ),
+      tags: (m.tags ?? []).filter((t) => LORA_FAMILY_TAGS.includes(t)),
+      description: describeLoRA(m),
     }))
     .filter((m) => {
       if (!baseModel) return true;
       const loraBase = m.base_model.toLowerCase();
       const searchBase = baseModel.toLowerCase();
       const modelShort = searchBase.split("/").pop() || "";
-      return loraBase.includes(searchBase) || loraBase.includes(modelShort);
+      if (loraBase.includes(searchBase) || loraBase.includes(modelShort)) return true;
+      // Video-LoRAs deklarieren die Familie statt der Version
+      // ("Comfy-Org/MiniMax-H3" statt "MiniMax-H3-Turbo") — Familien-Match,
+      // sonst wuerde der Versionsfilter fast alles verwerfen.
+      const family = VIDEO_MODEL_FAMILIES.find((f) => searchBase.includes(f));
+      return family ? loraBase.includes(family) : false;
     });
+}
+
+/** Video-Basis-Modell? Entscheidet Query-Formulierung und Usage-Texte. */
+const VIDEO_MODEL_FAMILIES = ["wan", "ltx", "hunyuan", "cogvideo", "minimax"];
+
+export function isVideoBaseModelId(modelId: string): boolean {
+  const key = modelId.toLowerCase();
+  return VIDEO_MODEL_FAMILIES.some((f) => key.includes(f));
+}
+
+/** Familien-Tags (Bild + Video) fuer das tags-Feld. */
+const LORA_FAMILY_TAGS = [
+  "lora",
+  "flux",
+  "sdxl",
+  "stable-diffusion",
+  "krea",
+  "qwen",
+  "wan",
+  "ltx",
+  "hunyuan",
+  "cogvideo",
+  "minimax",
+  "video",
+];
+
+/** Rauschen raus: Lizenzen, Regionen, base_model-Tags, Sprachcodes, Task-/Runtime-Tags. */
+const LORA_TAG_NOISE =
+  /^(arxiv:|license:|region:|base_model:)|^[a-z]{2}$|^(diffusers|comfyui|safetensors|transformers|pytorch|text-to-video|image-to-video|text-to-image|image-to-image)$/;
+
+/**
+ * Kurzbeschreibung aus Listen-Daten: Die List-Response enthaelt kein cardData,
+ * also sind Likes/Downloads + die auffaelligsten Tags alles, was das LLM zur
+ * Auswahl bekommt. Max. 6 Tags, ASCII (Encoding-Historie des Repos).
+ */
+function describeLoRA(m: HFModel): string {
+  const stats = `${m.likes ?? 0} likes, ${m.downloads ?? 0} downloads`;
+  const notable = (m.tags ?? [])
+    .filter((t) => !LORA_FAMILY_TAGS.includes(t) && !LORA_TAG_NOISE.test(t))
+    .slice(0, 6);
+  return notable.length > 0 ? `${stats} | ${notable.join(", ")}` : stats;
 }
 
 export async function getDefaultLoRAs(

@@ -3,8 +3,11 @@ import {
   readCatalogCache,
   writeCatalogCache,
   getCatalogCacheFile,
+  readNamedCatalogCache,
+  writeNamedCatalogCache,
   type CatalogCacheEnvelope,
 } from "./pollinationsCache";
+import { getCacheFile } from "./cachePaths";
 
 /**
  * Pollinations.ai backend — zweites Backend neben HuggingFace.
@@ -458,6 +461,195 @@ export function getPollinationsCatalogCacheInfo(): {
     file: getCatalogCacheFile(),
     persisted: disk !== null,
     lastFetchFailureAt: lastFetchFailureAt > 0 ? new Date(lastFetchFailureAt) : null,
+  };
+}
+
+/**
+ * Video-Modellkatalog (GET /video/models) — gleiche 12h-Platten-Cache-Mechanik
+ * wie der Image-Katalog oben (TTL, stale-while-error, Backoff, In-Flight-Dedup),
+ * eigene Datei (video-catalog.json). Felder maschinenlesbar: Preise pro Tier,
+ * Durations, Resolutions, video_capabilities, Health — generate_video validiert
+ * live dagegen, list_models source='video' zeigt sie an.
+ */
+const VIDEO_CATALOG_FILE = "video-catalog.json";
+const VIDEO_CATALOG_URL = "https://gen.pollinations.ai/video/models";
+const VIDEO_CATALOG_TTL_MS = 12 * 60 * 60 * 1000;
+const VIDEO_FAILED_RETRY_BACKOFF_MS = 10 * 60 * 1000;
+
+export interface PollinationsVideoModelCapabilities {
+  name: string;
+  aliases?: string[];
+  category?: string;
+  title?: string;
+  publisher?: string;
+  paid_only?: boolean;
+  pricing?: {
+    currency?: string;
+    completionVideoSeconds?: number | string;
+    promptVideoSeconds?: number | string;
+  };
+  pricing_variants?: {
+    name?: string;
+    label?: string;
+    pricing?: { completionVideoSeconds?: number | string };
+  }[];
+  pricing_default_label?: string;
+  resolutions?: string[];
+  video_capabilities?: string[];
+  min_duration?: number;
+  max_duration?: number;
+  default_duration?: number;
+  allowed_durations?: number[];
+  duration_step?: number;
+  max_reference_images?: number;
+  health?: { status?: string; success_rate?: number | null; requests?: number };
+}
+
+interface VideoCapabilitiesCache {
+  fetchedAt: number;
+  capabilities: Map<string, PollinationsVideoModelCapabilities>;
+}
+
+let videoCapabilitiesCache: VideoCapabilitiesCache | null = null;
+let videoCapabilitiesPromise: Promise<Map<string, PollinationsVideoModelCapabilities>> | null = null;
+let lastVideoFetchFailureAt = 0;
+
+function buildVideoCapabilityMap(
+  raw: unknown[]
+): Map<string, PollinationsVideoModelCapabilities> {
+  const capabilities = new Map<string, PollinationsVideoModelCapabilities>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as PollinationsVideoModelCapabilities & { id?: string };
+    const name = typeof e.name === "string" ? e.name : e.id;
+    if (typeof name !== "string" || !name) continue;
+    const model: PollinationsVideoModelCapabilities = { ...e, name };
+    capabilities.set(name.toLowerCase(), model);
+    for (const alias of Array.isArray(e.aliases) ? e.aliases : []) {
+      if (typeof alias === "string" && alias) {
+        capabilities.set(alias.toLowerCase(), model);
+      }
+    }
+  }
+  return capabilities;
+}
+
+async function fetchVideoCatalog(): Promise<unknown[]> {
+  const response = await fetch(VIDEO_CATALOG_URL, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Could not load Pollinations video catalog: ${response.status} ${response.statusText}`
+    );
+  }
+  const raw = (await response.json()) as unknown;
+  if (!Array.isArray(raw)) {
+    throw new Error("Pollinations video catalog response was not an array.");
+  }
+  return raw;
+}
+
+function videoCapabilitiesFromCache(
+  cache: CatalogCacheEnvelope | null
+): Map<string, PollinationsVideoModelCapabilities> | null {
+  if (!cache) return null;
+  const map = buildVideoCapabilityMap(cache.models);
+  return map.size > 0 ? map : null;
+}
+
+function rememberVideoCapabilities(
+  capabilities: Map<string, PollinationsVideoModelCapabilities>,
+  fetchedAt: number
+): Map<string, PollinationsVideoModelCapabilities> {
+  videoCapabilitiesCache = { fetchedAt, capabilities };
+  return capabilities;
+}
+
+async function loadVideoCapabilities(): Promise<
+  Map<string, PollinationsVideoModelCapabilities>
+> {
+  const now = Date.now();
+  const disk = readNamedCatalogCache(VIDEO_CATALOG_FILE);
+
+  if (disk && now - disk.fetchedAt < VIDEO_CATALOG_TTL_MS) {
+    const map = videoCapabilitiesFromCache(disk);
+    if (map) return rememberVideoCapabilities(map, disk.fetchedAt);
+  }
+
+  if (disk && now - lastVideoFetchFailureAt < VIDEO_FAILED_RETRY_BACKOFF_MS) {
+    const map = videoCapabilitiesFromCache(disk);
+    if (map) return rememberVideoCapabilities(map, disk.fetchedAt);
+  }
+
+  try {
+    const raw = await fetchVideoCatalog();
+    const map = buildVideoCapabilityMap(raw);
+    if (map.size === 0) {
+      throw new Error("Pollinations video catalog contained no usable model entries.");
+    }
+    const fetchedAt = Date.now();
+    writeNamedCatalogCache(VIDEO_CATALOG_FILE, raw, fetchedAt);
+    lastVideoFetchFailureAt = 0;
+    return rememberVideoCapabilities(map, fetchedAt);
+  } catch (error) {
+    lastVideoFetchFailureAt = Date.now();
+    const map = videoCapabilitiesFromCache(disk);
+    if (map) return rememberVideoCapabilities(map, disk!.fetchedAt);
+    throw error;
+  }
+}
+
+export async function getPollinationsVideoCapabilities(): Promise<
+  Map<string, PollinationsVideoModelCapabilities>
+> {
+  if (
+    videoCapabilitiesCache &&
+    Date.now() - videoCapabilitiesCache.fetchedAt < VIDEO_CATALOG_TTL_MS
+  ) {
+    return videoCapabilitiesCache.capabilities;
+  }
+  if (!videoCapabilitiesPromise) {
+    videoCapabilitiesPromise = loadVideoCapabilities().finally(() => {
+      videoCapabilitiesPromise = null;
+    });
+  }
+  return videoCapabilitiesPromise;
+}
+
+/** Alter/Status des Video-Katalog-Caches fuer list_models und Diagnose. */
+export function getPollinationsVideoCatalogCacheInfo(): {
+  fetchedAt: Date | null;
+  expiresInMs: number;
+  file: string;
+  persisted: boolean;
+  models: number;
+  lastFetchFailureAt: Date | null;
+} {
+  const disk = readNamedCatalogCache(VIDEO_CATALOG_FILE);
+  const now = Date.now();
+  let models = 0;
+  if (disk) {
+    const seen = new Set<string>();
+    for (const entry of disk.models) {
+      if (entry && typeof entry === "object") {
+        const e = entry as { name?: unknown; id?: unknown };
+        const name = typeof e.name === "string" ? e.name : e.id;
+        if (typeof name === "string" && name) seen.add(name.toLowerCase());
+      }
+    }
+    models = seen.size;
+  }
+  return {
+    fetchedAt: disk ? new Date(disk.fetchedAt) : null,
+    expiresInMs: disk
+      ? Math.max(0, VIDEO_CATALOG_TTL_MS - (now - disk.fetchedAt))
+      : 0,
+    file: getCacheFile(VIDEO_CATALOG_FILE),
+    persisted: disk !== null,
+    models,
+    lastFetchFailureAt: lastVideoFetchFailureAt > 0 ? new Date(lastVideoFetchFailureAt) : null,
   };
 }
 

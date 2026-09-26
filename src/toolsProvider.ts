@@ -1,4 +1,5 @@
 import { text, tool, type Tool, type ToolCallContext, type ToolsProvider } from "@lmstudio/sdk";
+import type { ModelInfo } from "./types";
 
 /**
  * Argumente der geteilten image_edit-Kernfunktion. `image_edit` und
@@ -42,6 +43,8 @@ import {
   getLoRAsForModel,
   getDefaultLoRAs,
   getHfImageEditModels,
+  getHfVideoModels,
+  isVideoBaseModelId,
   getHfCatalogCacheInfo,
   ensureCatalogBestEffort,
 } from "./hfApi";
@@ -75,11 +78,14 @@ import {
   inspectPollinationsEditReferences,
   describePollinationsReferenceSupport,
   getPollinationsModelCapabilities,
+  getPollinationsVideoCapabilities,
+  getPollinationsVideoCatalogCacheInfo,
   listPollinationsCatalogExtras,
   detectImageMime,
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_DEFAULT_EDIT_MODEL,
   type PollinationsEditModelCapabilities,
+  type PollinationsVideoModelCapabilities,
 } from "./pollinations";
 import { getHfCosts, getPollinationsCostMap, getCatalogState } from "./costCache";
 import {
@@ -116,6 +122,54 @@ async function loadPollinationsCapabilities(): Promise<
 > {
   try {
     return await getPollinationsModelCapabilities();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Totale Video-Rows aus dem Live-Katalog (/video/models): eine Zeile pro Modell,
+ * Aliase deduped. Absichtlich schlank — Dauer/Resolution/Caps/Preis in EINER
+ * Beschreibungszeile, damit die Liste nicht pro Modell explodiert.
+ */
+function buildPollinationsVideoRows(
+  caps: Map<string, PollinationsVideoModelCapabilities> | null
+): ModelInfo[] {
+  if (!caps) return [];
+  const seen = new Set<string>();
+  const rows: ModelInfo[] = [];
+  for (const cap of caps.values()) {
+    const key = cap.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const parts: string[] = [];
+    if (cap.title && cap.title !== cap.name) parts.push(cap.title);
+    if (cap.min_duration !== undefined) {
+      parts.push(`${cap.min_duration}–${cap.max_duration ?? cap.min_duration}s`);
+    }
+    if (cap.resolutions?.length) parts.push(cap.resolutions.join("/"));
+    const vcaps = (cap.video_capabilities ?? []).filter((c) => c !== "start_frame");
+    if (vcaps.length) parts.push(vcaps.join("+"));
+    const rate = cap.pricing?.completionVideoSeconds;
+    const cost = typeof rate === "number" ? `${rate} pollen/s` : undefined;
+    rows.push({
+      id: cap.name,
+      description: parts.length > 0 ? `${cap.name} — ${parts.join(", ")}` : cap.name,
+      style: "varies",
+      speed: "medium",
+      access: cap.paid_only ? "pro" : "free",
+      source: "video",
+      ...(cost ? { cost } : {}),
+    });
+  }
+  return rows;
+}
+
+async function loadPollinationsVideoCapabilities(): Promise<
+  Map<string, PollinationsVideoModelCapabilities> | null
+> {
+  try {
+    return await getPollinationsVideoCapabilities();
   } catch {
     return null;
   }
@@ -1177,7 +1231,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         ),
         model_id: z.string().default("").describe(
           "Model override — always wins over 'tier'. Blank = tier pick. Full IDs " +
-          "(aliases like image models are NOT documented for video — use full IDs)."
+          "(video aliases are NOT documented — use full IDs). " +
+          "Browse: list_models source='video'."
         ),
         tier: z.enum(["draft", "standard", "final"]).default("standard").describe(
           "Model tier when model_id is blank: draft = bytedance/seedance-1-pro-fast (cheapest), " +
@@ -1251,16 +1306,21 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         }
 
         // Cheap validation (model, duration, resolution, aspect, audio, endframe)
-        // BEFORE any I/O: a failed render would still be billed.
-        const target = resolveVideoTarget({
-          modelId: args.model_id,
-          tier: args.tier as VideoTier,
-          duration: args.duration,
-          resolution: args.resolution,
-          aspectRatio: args.aspect_ratio,
-          audio: args.audio,
-          wantEndFrame: args.end_image.trim().length > 0,
-        });
+        // BEFORE any I/O: a failed render would still be billed. Live catalog
+        // when reachable (disk-cached, no extra cost), static tables as fallback.
+        const liveVideoCaps = await loadPollinationsVideoCapabilities();
+        const target = resolveVideoTarget(
+          {
+            modelId: args.model_id,
+            tier: args.tier as VideoTier,
+            duration: args.duration,
+            resolution: args.resolution,
+            aspectRatio: args.aspect_ratio,
+            audio: args.audio,
+            wantEndFrame: args.end_image.trim().length > 0,
+          },
+          liveVideoCaps ?? undefined
+        );
         notes.push(...target.notes);
         notes.push(
           "Pollinations video is billed per generated second (model pricing: GET /video/models). " +
@@ -1461,6 +1521,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           e.g. fal-ai, replicate) — for backend='hf'.
         - "trending" / "downloads": live HuggingFace catalog ranked by trendingScore or
           downloads — for backend='hf'.
+        - "video": video models for generate_video — Pollinations live rows FIRST
+          (usable today: durations, resolutions, caps and pollen/s per row), then HF live
+          rows (text-to-video + image-to-video tags, provider-enriched; for the future
+          HF backend). No curated list — both sides are live and therefore current.
         - "pollinations": Pollinations.ai models (requires pollinationsApiKey in config).
           ALIASES: only "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
           "seedream5" (= seedream-5.0-lite). Use FULL IDs for all other models.
@@ -1521,9 +1585,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         age, path and whether the last fetch failed.
       `,
       parameters: {
-        source: z.enum(["curated", "provider", "trending", "downloads", "pollinations", "image-edit"])
+        source: z.enum(["curated", "provider", "trending", "downloads", "pollinations", "image-edit", "video"])
           .default("curated")
-          .describe("Which catalog to list. Default: curated (expert-verified HuggingFace IDs for backend='hf'). Use 'image-edit' for image_edit models."),
+          .describe("Which catalog to list. Default: curated (expert-verified HuggingFace IDs for backend='hf'). Use 'image-edit' for image_edit models, 'video' for generate_video models (Pollinations live rows first, then HF live rows)."),
         provider: z.string()
           .default("")
           .describe(
@@ -1535,10 +1599,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           .min(5)
           .max(50)
           .default(20)
-          .describe("Maximum number of models (only for provider/trending/downloads; ignored for curated/pollinations). Filtering (quantizations, LoRAs, pre-SDXL, models without live provider) may return fewer — see requested_limit/returned."),
+          .describe("Maximum number of models (only for provider/trending/downloads/video; ignored for curated/pollinations). Filtering (quantizations, LoRAs, pre-SDXL, models without live provider) may return fewer — see requested_limit/returned."),
         include_loras: z.boolean()
           .default(false)
-          .describe("Include compatible LoRAs per model (HF sources only, skipped for source='pollinations'; slower, needs API calls)."),
+          .describe("Include compatible LoRAs per model (HF image sources only, skipped for source='pollinations'/'video'; slower, needs API calls)."),
         include_catalog: z.boolean()
           .default(true)
           .describe("source='pollinations' only: also list the live /image/models entries that are not in the curated list (sorted by max_reference_images). Set false to save tokens."),
@@ -1587,14 +1651,27 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             // auf die kuratierten IDs zurueck (siehe getHfImageEditModels)
             models = await getHfImageEditModels(limit);
             break;
+          case "video": {
+            // Zwei Herkuenfte, eine Liste: Pollinations live (direkt nutzbar,
+            // generate_video rendert heute nur dort) zuerst, dann HF live
+            // (Provider-anreichert, Vorschein auf das kuenftige HF-Backend).
+            // Faellt der Video-Katalog aus, bleiben die HF-Rows allein stehen.
+            const hfVideo = await getHfVideoModels(limit, token || undefined);
+            models = [
+              ...buildPollinationsVideoRows(await loadPollinationsVideoCapabilities()),
+              ...hfVideo,
+            ];
+            break;
+          }
           default:
             models = getCuratedModels();
         }
 
         const LORA_CAP = 10;
         let loraTruncated = false;
-        // LoRA lookup is HF-only: Pollinations models have no HF LoRA ecosystem.
-        if (include_loras && models.length > 0 && source !== "pollinations") {
+        // LoRA lookup is HF-only: Pollinations models have no HF LoRA ecosystem,
+        // and video rows have none either.
+        if (include_loras && models.length > 0 && source !== "pollinations" && source !== "video") {
           const targets = models.slice(0, LORA_CAP);
           loraTruncated = models.length > LORA_CAP;
           ctx.status(`Loading compatible LoRAs for ${targets.length} models...`);
@@ -1619,7 +1696,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         // curated ist handgepflegt und braucht weder Preise noch Katalog.
         const needsHfCatalog = source !== "curated" && !isPollinations;
         const usesModelCache =
-          source === "provider" || source === "trending" || source === "downloads";
+          source === "provider" ||
+          source === "trending" ||
+          source === "downloads" ||
+          source === "video";
 
         // Preise: eine Quelle braucht genau eine Haelfte. curated/image-edit/
         // provider/trending/downloads zeigen HF-Modelle, nur source=pollinations
@@ -1673,7 +1753,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             ? editDefault
             : currentDefault;
         const defaultPresent = models.some((m) => m.id === effectiveDefault);
-        const defaultWarning = defaultPresent
+        // source='video' hat keinen konfigurierten Default (Bild-Defaults stehen
+        // nie in einer Video-Liste) — ohne Ausnahme wuerde hier immer warnen.
+        const defaultWarning = defaultPresent || source === "video"
           ? undefined
           : source === "image-edit"
             ? `image_edit_default_model '${effectiveDefault}' steht nicht in dieser Liste — ` +
@@ -1719,6 +1801,22 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               }
             : {}),
           ...(hfCatalogInfo ? { hf_catalog_cache: hfCatalogInfo } : {}),
+          ...(() => {
+            // Video-Katalog-Diagnose nur bei source='video' (Token-Leitplanke).
+            if (source !== "video") return {};
+            const vraw = getPollinationsVideoCatalogCacheInfo();
+            return {
+              video_catalog_cache: {
+                source: "https://gen.pollinations.ai/video/models",
+                file: vraw.file,
+                persisted: vraw.persisted,
+                fetched_at: vraw.fetchedAt?.toISOString() ?? null,
+                expires_in_hours: Math.round(vraw.expiresInMs / 3600000),
+                last_fetch_failure: vraw.lastFetchFailureAt?.toISOString() ?? null,
+                models: vraw.models,
+              },
+            };
+          })(),
           ...(defaultWarning ? { default_not_in_list: defaultWarning } : {}),
           models: models.map((m) => {
             // is_default bezieht sich auf den Default des jeweiligen Katalogs:
@@ -1789,15 +1887,17 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "list_loras",
       description: text`
-        Search HuggingFace for LoRA adapters (HF backend only — Pollinations models have no LoRA support).
+        Search HuggingFace for LoRA adapters — image AND video base models
+        (HF backend only — Pollinations models have no LoRA support).
 
         IMPORTANT: Avoid using the 'search' keyword filter! It often returns zero results because HuggingFace search is very strict.
         Instead, use only 'base_model' to find all compatible LoRAs, then pick from the results.
         Only use 'search' as a last resort with a very broad term (e.g. 'anime') if the result list is too large to browse.
 
         Use 'base_model' to find LoRAs compatible with a specific model.
-        The base_model should be a model ID from list_models (e.g. 
-'black-forest-labs/FLUX.2-dev').
+        The base_model should be a model ID from list_models (e.g.
+'black-forest-labs/FLUX.2-dev' for images, 'Lightricks/LTX-2.5' or 'Wan-AI/Wan2.2-TI2V-5B' for video).
+        Each hit carries a short 'description' (likes/downloads + notable tags) for picking.
       `,
       parameters: {
         base_model: z.string()
@@ -1805,7 +1905,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           .describe(
             "Filter LoRAs by compatible base model. " +
               "Use model IDs from list_models (e.g. 'black-forest-labs/FLUX.2-dev', " +
-              "'stabilityai/stable-diffusion-xl-base-1.0'). " +
+              "'stabilityai/stable-diffusion-xl-base-1.0', or a video ID from " +
+              "list_models source='video' like 'Lightricks/LTX-2.5'). " +
               "Leave blank to search all LoRAs."
           ),
         search: z.string()
@@ -1839,15 +1940,27 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           token || undefined
         );
 
+        // Video-LoRAs sind (noch) kein generate-Input: kein lora_id-Passthrough
+        // wie bei Bildern, sondern eigenstaendig nutzbar (lokal/ComfyUI) und
+        // Kandidaten fuer den kuenftigen HF-Video-Passthrough (Phase 3).
+        const isVideoBase = cleanBaseModel ? isVideoBaseModelId(cleanBaseModel) : false;
         return json({
           query: cleanSearch || "all",
           base_model_filter: cleanBaseModel || "none (showing all)",
           results,
           count: results.length,
-          usage: cleanBaseModel
-            ? `These LoRAs are compatible with ${cleanBaseModel}. Pass the 'id' field as lora_id in generate_image (backend='hf').`
-            : "Pass the 'id' field as lora_id in generate_image (backend='hf'). Use base_model to filter for specific models.",
-          note: "LoRA generation uses fal-ai provider. lora_scale default is 1.0; try 0.6–0.9 for subtle effects.",
+          usage: !cleanBaseModel
+            ? "Pass the 'id' field as lora_id in generate_image (backend='hf'). Use base_model to filter for specific models."
+            : isVideoBase
+              ? `These LoRAs match video base ${cleanBaseModel} (see 'description' per hit for picking). ` +
+                "Use them locally (ComfyUI/Diffusers: base model + LoRA) — character LoRAs keep a muse " +
+                "consistent across clips, style/motion LoRAs carry aesthetics and camera moves. " +
+                "They are NOT a generate_video parameter (Pollinations has no LoRA concept); " +
+                "server-side video LoRA support is Phase-3 work."
+              : `These LoRAs are compatible with ${cleanBaseModel}. Pass the 'id' field as lora_id in generate_image (backend='hf').`,
+          note: isVideoBase
+            ? "Video LoRAs are adapters, not models: they need their base model at render time. Check 'base_model' per hit."
+            : "LoRA generation uses fal-ai provider. lora_scale default is 1.0; try 0.6–0.9 for subtle effects.",
         });
       }),
     }),

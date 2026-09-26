@@ -38,13 +38,17 @@ export function getCatalogCacheFile(): string {
   return getCacheFile("pollinations-catalog.json");
 }
 
-export function readCatalogCache(): CatalogCacheEnvelope | null {
+/**
+ * Benannte Variante fuer weitere Kataloge (Video): gleiche Envelope-Form,
+ * gleiche Atomar-Garantie, andere Datei. Die Standard-Funktionen unten
+ * delegieren mit dem Image-Katalog-Namen.
+ */
+export function readNamedCatalogCache(fileName: string): CatalogCacheEnvelope | null {
   try {
-    const file = getCatalogCacheFile();
+    const file = getCacheFile(fileName);
     if (!fs.existsSync(file)) return null;
     const parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as Partial<CatalogCacheEnvelope> | null;
     if (!parsed || typeof parsed !== "object") return null;
-    // Version mismatch = andere Feldstruktur als der Parser erwartet: verwerfen.
     if (parsed.version !== CACHE_VERSION) return null;
     if (typeof parsed.fetchedAt !== "number" || !Array.isArray(parsed.models)) return null;
     return {
@@ -53,21 +57,13 @@ export function readCatalogCache(): CatalogCacheEnvelope | null {
       models: parsed.models,
     };
   } catch {
-    // korrupte Datei, kein Leserecht, … — alles ist fuer uns "kein Cache"
     return null;
   }
 }
 
-/**
- * Schreibt den Katalog atomar: erst in eine PID-spezifische Temp-Datei, dann
- * rename. Bricht der Prozess mitten im Schreiben ab, bleibt die alte Datei
- * intakt statt zur Haelfte beschrieben zu werden. Wird der Schreibvorgang
- * blockiert (read-only Plugin-Verzeichnis o. Ae.), meldet die Funktion false
- * und der Aufgeber faellt auf reinen Speicher-Cache zurueck.
- */
-export function writeCatalogCache(models: unknown[], fetchedAt?: number): boolean {
+export function writeNamedCatalogCache(fileName: string, models: unknown[], fetchedAt?: number): boolean {
   try {
-    const file = getCatalogCacheFile();
+    const file = getCacheFile(fileName);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const envelope: CatalogCacheEnvelope = {
       version: CACHE_VERSION,
@@ -81,4 +77,19 @@ export function writeCatalogCache(models: unknown[], fetchedAt?: number): boolea
   } catch {
     return false;
   }
+}
+
+export function readCatalogCache(): CatalogCacheEnvelope | null {
+  return readNamedCatalogCache("pollinations-catalog.json");
+}
+
+/**
+ * Schreibt den Katalog atomar: erst in eine PID-spezifische Temp-Datei, dann
+ * rename. Bricht der Prozess mitten im Schreiben ab, bleibt die alte Datei
+ * intakt statt zur Haelfte beschrieben zu werden. Wird der Schreibvorgang
+ * blockiert (read-only Plugin-Verzeichnis o. Ae.), meldet die Funktion false
+ * und der Aufgeber faellt auf reinen Speicher-Cache zurueck.
+ */
+export function writeCatalogCache(models: unknown[], fetchedAt?: number): boolean {
+  return writeNamedCatalogCache("pollinations-catalog.json", models, fetchedAt);
 }

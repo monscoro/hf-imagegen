@@ -29,7 +29,7 @@ import { getCatalogCacheDir } from "./pollinationsCache";
  * Jede Funktion in diesem Modul ist fehlertolerant und wirft nie: ein kaputter
  * Cache darf keinen Tool-Aufruf scheitern lassen, er ist nur ein Cache.
  */
-const HF_CATALOG_VERSION = 1;
+const HF_CATALOG_VERSION = 2;
 
 const HF_API_BASE = "https://huggingface.co/api";
 
@@ -41,7 +41,7 @@ interface RawProviderMapping {
   performance?: { requestLatencyMs?: unknown } | null;
 }
 
-export type HFTask = "text-to-image" | "image-to-image";
+export type HFTask = "text-to-image" | "image-to-image" | "text-to-video" | "image-to-video";
 
 export interface HFCatalogProvider {
   provider: string;
@@ -157,13 +157,15 @@ export function projectHfModel(raw: unknown, task: HFTask): HFCatalogEntry | nul
   };
 }
 
-const CATALOG_TASKS: HFTask[] = ["text-to-image", "image-to-image"];
+const CATALOG_TASKS: HFTask[] = ["text-to-image", "image-to-image", "text-to-video", "image-to-video"];
 
 /**
- * Laedt beide Katalogseiten in einem Durchgang. Der Server lieert hoechstens
+ * Laedt alle Katalogseiten in einem Durchgang. Der Server liefert hoechstens
  * 1000 Modelle je Seite, was fuer die Provider-Menge deutlich ueber der
  * tatsaechlichen Groesse liegt (226 text-to-image, 244 image-to-image mit
- * Mapping) — deshalb genuegen zwei Requests ohne Paginierung.
+ * Mapping; Video-Seiten sind kleiner) — deshalb genuegen vier Requests ohne
+ * Paginierung. Version 2: Video-Tasks kamen dazu, alte Caches ohne sie werden
+ * verworfen und neu geholt.
  *
  * `sort=likes` statt `createdAt`: nach Aktualitaet sortiert liefert Modelle
  * ohne jegliche Nutzung, die Liste ist dann unbrauchbar. Eine vollstaendige

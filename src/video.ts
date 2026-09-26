@@ -81,15 +81,6 @@ const KNOWN_ASPECTS: Record<string, string[]> = {
 };
 const DEFAULT_ASPECTS = ["16:9", "9:16"];
 
-/** In irgendeiner Tabelle bekannt (Dauer/Resolution/Caps) → validierbar. */
-function isKnownVideoModel(lookup: string): boolean {
-  return (
-    lookup in KNOWN_DURATIONS ||
-    lookup in KNOWN_RESOLUTIONS ||
-    END_FRAME_MODELS.has(lookup) ||
-    AUDIO_CAPABLE_MODELS.has(lookup)
-  );
-}
 /** Modelle mit end_frame in video_capabilities (Live-Katalog). */
 const END_FRAME_MODELS = new Set([
   "minimax/minimax-h3-max-turbo",
@@ -140,12 +131,19 @@ export interface ResolvedVideoTarget {
   notes: string[];
 }
 
+import type { PollinationsVideoModelCapabilities } from "./pollinations";
+
 /**
  * Einstiegspunkt der Modell-Aufloesung: Tier → Modell, dann alle Limits.
  * Harte Fehler werfen (fail fast vor jedem bezahlten Call), weiche landen
- * in notes. Unbekannte Modelle laufen im Passthrough (Phase 2 validiert live).
+ * in notes. Mit Live-Katalog (Phase 2) gelten dessen Werte, sonst die
+ * statischen Tabellen unten (Offline-Fallback). Unbekannte Modelle laufen
+ * im Passthrough.
  */
-export function resolveVideoTarget(input: VideoTargetInput): ResolvedVideoTarget {
+export function resolveVideoTarget(
+  input: VideoTargetInput,
+  live?: Map<string, PollinationsVideoModelCapabilities>
+): ResolvedVideoTarget {
   const notes: string[] = [];
   const key = input.modelId.trim().toLowerCase();
 
@@ -162,33 +160,59 @@ export function resolveVideoTarget(input: VideoTargetInput): ResolvedVideoTarget
   }
   const lookup = model.toLowerCase();
 
-  const known = KNOWN_DURATIONS[lookup];
-  if (known) {
-    if (known.allowed && !known.allowed.includes(input.duration)) {
+  // Live-Katalog schlaegt statische Tabellen (Alias-Keys sind in der Map
+  // enthalten, deshalb findet auch eine Alias-ID ihren Eintrag).
+  const liveEntry = live?.get(lookup);
+  const known = liveEntry
+    ? true
+    : lookup in KNOWN_DURATIONS ||
+      lookup in KNOWN_RESOLUTIONS ||
+      END_FRAME_MODELS.has(lookup) ||
+      AUDIO_CAPABLE_MODELS.has(lookup);
+  const dur: KnownDurations | undefined = liveEntry &&
+    (liveEntry.min_duration !== undefined ||
+      liveEntry.max_duration !== undefined ||
+      liveEntry.allowed_durations)
+    ? {
+        min: liveEntry.min_duration ?? 1,
+        max: liveEntry.max_duration ?? 120,
+        allowed: liveEntry.allowed_durations,
+        step: liveEntry.duration_step,
+      }
+    : KNOWN_DURATIONS[lookup];
+  const resolutions: string[] | undefined = liveEntry?.resolutions ?? KNOWN_RESOLUTIONS[lookup];
+  const endCapable = liveEntry
+    ? (liveEntry.video_capabilities ?? []).includes("end_frame")
+    : END_FRAME_MODELS.has(lookup);
+  const audioCapable = liveEntry
+    ? (liveEntry.video_capabilities ?? []).includes("audio_output")
+    : AUDIO_CAPABLE_MODELS.has(lookup);
+
+  if (dur) {
+    if (dur.allowed && !dur.allowed.includes(input.duration)) {
       throw new Error(
         `Duration ${input.duration}s is not supported by '${model}'. ` +
-        `Valid durations: ${known.allowed.join(", ")}.`
+        `Valid durations: ${dur.allowed.join(", ")}.`
       );
     }
-    if (input.duration < known.min || input.duration > known.max) {
+    if (input.duration < dur.min || input.duration > dur.max) {
       throw new Error(
-        `Duration ${input.duration}s is outside '${model}' range (${known.min}–${known.max}s).`
+        `Duration ${input.duration}s is outside '${model}' range (${dur.min}–${dur.max}s).`
       );
     }
-    if (known.step && input.duration % known.step !== 0) {
+    if (dur.step && input.duration % dur.step !== 0) {
       throw new Error(
         `Duration ${input.duration}s is not supported by '${model}'. ` +
-        `Duration must be a multiple of ${known.step} (range ${known.min}–${known.max}s).`
+        `Duration must be a multiple of ${dur.step} (range ${dur.min}–${dur.max}s).`
       );
     }
   }
 
   let resolution = input.resolution.trim();
-  const knownRes = KNOWN_RESOLUTIONS[lookup];
-  if (resolution && knownRes && !knownRes.includes(resolution)) {
+  if (resolution && resolutions && !resolutions.includes(resolution)) {
     throw new Error(
       `Resolution '${resolution}' is not supported by '${model}'. ` +
-      `Valid tiers: ${knownRes.join(", ")}.`
+      `Valid tiers: ${resolutions.join(", ")}.`
     );
   }
 
@@ -204,13 +228,13 @@ export function resolveVideoTarget(input: VideoTargetInput): ResolvedVideoTarget
   }
 
   let audio = input.audio;
-  if (audio && isKnownVideoModel(lookup) && !AUDIO_CAPABLE_MODELS.has(lookup)) {
+  if (audio && known && !audioCapable) {
     audio = false;
     notes.push(`audio=true is not supported by '${model}' and was ignored.`);
   }
 
   let sendEndFrame = input.wantEndFrame;
-  if (sendEndFrame && isKnownVideoModel(lookup) && !END_FRAME_MODELS.has(lookup)) {
+  if (sendEndFrame && known && !endCapable) {
     sendEndFrame = false;
     notes.push(`'${model}' has no end_frame capability — end_image was ignored (start frame only).`);
   }

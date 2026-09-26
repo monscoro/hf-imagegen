@@ -11,12 +11,14 @@ interface ModelCache {
   provider: Record<string, ModelCacheEntry>;
   trending: Record<number, ModelCacheEntry>;
   downloads: Record<number, ModelCacheEntry>;
+  video: Record<number, ModelCacheEntry>;
 }
 
 let cache: ModelCache = {
   provider: {},
   trending: {},
   downloads: {},
+  video: {},
 };
 
 function isCacheValid(entry: ModelCacheEntry | null): boolean {
@@ -65,10 +67,24 @@ export function setCachedDownloadedModels(limit: number, models: ModelInfo[]): v
   };
 }
 
+export function getCachedVideoModels(limit: number): ModelInfo[] | null {
+  const entry = cache.video[limit];
+  if (!isCacheValid(entry ?? null)) return null;
+  return entry?.models ?? null;
+}
+
+export function setCachedVideoModels(limit: number, models: ModelInfo[]): void {
+  cache.video[limit] = {
+    fetchedAt: Date.now(),
+    models,
+  };
+}
+
 export function getModelCacheInfo(): {
   provider: Record<string, { fetchedAt: Date; expiresInMs: number }>;
   trending: Record<string, { fetchedAt: Date; expiresInMs: number }>;
   downloads: Record<string, { fetchedAt: Date; expiresInMs: number }>;
+  video: Record<string, { fetchedAt: Date; expiresInMs: number }>;
 } {
   const getInfo = (entry: ModelCacheEntry | null) => {
     if (!entry) return null;
@@ -93,9 +109,15 @@ export function getModelCacheInfo(): {
     downloadsInfo[key] = getInfo(entry)!;
   }
 
+  const videoInfo: Record<string, { fetchedAt: Date; expiresInMs: number }> = {};
+  for (const [key, entry] of Object.entries(cache.video)) {
+    videoInfo[key] = getInfo(entry)!;
+  }
+
   return {
     provider: providerInfo,
     trending: trendingInfo,
     downloads: downloadsInfo,
+    video: videoInfo,
   };
 }

@@ -4,7 +4,8 @@ export type ModelSource =
   | "trending"
   | "downloads"
   | "pollinations"
-  | "image-edit";
+  | "image-edit"
+  | "video";
 
 export interface LoRAInfo {
   id: string;
@@ -12,6 +13,8 @@ export interface LoRAInfo {
   likes: number;
   base_model: string;
   tags: string[];
+  /** Kurzzeile fuer das LLM: Likes/Downloads + auffaelligste Tags (kein Card-Text in List-Responses). */
+  description?: string;
 }
 
 export interface ModelInfo {

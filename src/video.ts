@@ -7,34 +7,36 @@
  * in ~/images. Oeffentliche URLs als Startframe brauchen keinen Upload und
  * werden direkt durchgereicht.
  *
- * Duration/Resolution werden hier gegen eine statische Tabelle der
- * Tier-Modelle validiert (spart fehlgeschlagene, aber abgerechnete Calls).
- * Phase 2 ersetzt das durch den Live-Katalog (/video/models).
+ * Alle Modell-Limits (Dauer, Resolution, Aspect, Audio, Endframe) werden VOR
+ * dem Call gegen statische Tabellen aus den APIDOCS (v0.3.0) und dem
+ * Live-Katalog (GET /video/models) validiert: harte Fehler werfen (fail fast
+ * statt abgerechnetem Fehlcall), weiche werden als Note gemeldet. Phase 2
+ * ersetzt die Tabellen durch den Live-Katalog.
  */
-
-export const POLLINATIONS_DEFAULT_VIDEO_MODEL = "alibaba/wan-2.7";
 
 export type VideoTier = "draft" | "standard" | "final";
 
 /**
- * Tier → Modell. Draft = billigste Exploration (480p-Cents-Bereich),
- * Standard = Sweet Spot mit Audio, Final = toleranteste Filter.
- * Explizite model_id gewinnt immer gegen den Tier.
+ * Tier → Modell (kanonische IDs aus GET /video/models, keine Aliase).
+ * Draft = billigste Exploration, Standard = Sweet Spot mit Audio,
+ * Final = toleranteste Filter. Explizite model_id gewinnt immer.
  */
 export const VIDEO_TIER_MODELS: Record<VideoTier, string> = {
   draft: "bytedance/seedance-1-pro-fast",
   standard: "minimax/minimax-h3-max-turbo",
-  final: "x-ai/grok-video-pro",
+  final: "x-ai/grok-imagine-video",
 };
 
 interface KnownDurations {
   min: number;
   max: number;
-  /** Wenn gesetzt: nur diese Werte sind gueltig, alles andere scheitert serverseitig. */
+  /** Nur diese Werte sind gueltig, alles andere scheitert serverseitig. */
   allowed?: number[];
+  /** Dauer muss ein Vielfaches sein (nova-reel: 6er-Schritte). */
+  step?: number;
 }
 
-/** Aus den APIDOCS (v0.3.0), Stand 09/2026. Unbekannte Modelle: passthrough. */
+/** APIDOCS v0.3.0 + Live-Katalog, Stand 09/2026. Unbekannte Modelle: passthrough. */
 const KNOWN_DURATIONS: Record<string, KnownDurations> = {
   "alibaba/wan-2.7": { min: 2, max: 15 },
   "alibaba/wan-2.6": { min: 5, max: 15, allowed: [5, 10, 15] },
@@ -47,53 +49,183 @@ const KNOWN_DURATIONS: Record<string, KnownDurations> = {
   "bytedance/seedance-2.5": { min: 4, max: 4, allowed: [4] },
   "minimax/minimax-h3-max-turbo": { min: 5, max: 15, allowed: [5, 10, 15] },
   "minimax/minimax-h3": { min: 5, max: 5, allowed: [5] },
-  "x-ai/grok-video-pro": { min: 1, max: 15 },
+  "x-ai/grok-imagine-video": { min: 1, max: 15 },
   "x-ai/grok-imagine-video-1.5": { min: 1, max: 15 },
   "google/veo-3.1-fast": { min: 4, max: 8, allowed: [4, 6, 8] },
-  "amazon/nova-reel-v1": { min: 6, max: 120 },
+  "google/gemini-omni-1.1-flash": { min: 3, max: 10 },
+  "amazon/nova-reel-v1": { min: 6, max: 120, step: 6 },
   "prunaai/p-video": { min: 1, max: 10 },
   "alibaba/happyhorse-1.1": { min: 3, max: 15 },
 };
 
-export function resolveVideoModel(modelId: string, tier: VideoTier): { model: string; autoNote: string | null } {
-  if (modelId.trim()) return { model: modelId.trim(), autoNote: null };
-  const model = tier === "draft" ? VIDEO_TIER_MODELS.draft
-    : tier === "final" ? VIDEO_TIER_MODELS.final
-    : VIDEO_TIER_MODELS.standard;
-  return {
-    model,
-    autoNote:
-      `tier '${tier}' picked '${model}' (draft = cheapest exploration, ` +
-      `standard = sweet spot with audio, final = most tolerant filters). ` +
-      `Override any time with model_id.`,
-  };
+/** resolutions[] aus dem Live-Katalog. Fehlt das Modell → passthrough. */
+const KNOWN_RESOLUTIONS: Record<string, string[]> = {
+  "minimax/minimax-h3-max-turbo": ["480p", "768p", "1080p"],
+  "google/gemini-omni-1.1-flash": ["720p", "360p", "1080p", "4k"],
+  "alibaba/wan-3.0": ["480p", "720p", "1080p"],
+  "bytedance/seedance-2.0-fast": ["480p"],
+  "bytedance/seedance-2.0-mini": ["720p", "480p"],
+  "minimax/minimax-h3": ["480p", "768p", "2k"],
+  "bytedance/seedance-2.5": ["480p", "720p"],
+  "x-ai/grok-imagine-video-1.5": ["720p", "480p", "1080p"],
+  "alibaba/wan-2.7": ["720p", "1080p"],
+  "prunaai/p-video": ["720p", "1080p"],
+  "bytedance/seedance-1-pro-fast": ["720p", "480p", "1080p"],
+  "google/veo-3.1-fast": ["720p", "1080p"],
+};
+
+/** Aspect-Ratios aus den Docs. Default: 16:9/9:16 (dokumentiert: "most models"). */
+const KNOWN_ASPECTS: Record<string, string[]> = {
+  "minimax/minimax-h3-max-turbo": ["16:9", "9:16", "21:9", "4:3", "1:1", "3:4"],
+  "minimax/minimax-h3": ["16:9"],
+};
+const DEFAULT_ASPECTS = ["16:9", "9:16"];
+
+/** In irgendeiner Tabelle bekannt (Dauer/Resolution/Caps) → validierbar. */
+function isKnownVideoModel(lookup: string): boolean {
+  return (
+    lookup in KNOWN_DURATIONS ||
+    lookup in KNOWN_RESOLUTIONS ||
+    END_FRAME_MODELS.has(lookup) ||
+    AUDIO_CAPABLE_MODELS.has(lookup)
+  );
+}
+/** Modelle mit end_frame in video_capabilities (Live-Katalog). */
+const END_FRAME_MODELS = new Set([
+  "minimax/minimax-h3-max-turbo",
+  "google/gemini-omni-1.1-flash",
+  "alibaba/wan-3.0",
+  "bytedance/seedance-2.0-fast",
+  "bytedance/seedance-2.0-mini",
+  "bytedance/seedance-2.5",
+  "bytedance/seedance-2.0",
+  "alibaba/wan-2.7",
+  "alibaba/wan-2.2-fast",
+  "google/veo-3.1-fast",
+]);
+
+/** Modelle mit audio_output in video_capabilities (Live-Katalog). */
+const AUDIO_CAPABLE_MODELS = new Set([
+  "minimax/minimax-h3-max-turbo",
+  "minimax/minimax-h3",
+  "google/gemini-omni-1.1-flash",
+  "alibaba/wan-3.0",
+  "alibaba/wan-2.7",
+  "alibaba/wan-2.6",
+  "bytedance/seedance-2.0-fast",
+  "bytedance/seedance-2.0-mini",
+  "bytedance/seedance-2.5",
+  "bytedance/seedance-2.0",
+  "x-ai/grok-imagine-video-1.5",
+  "google/veo-3.1-fast",
+]);
+
+export interface VideoTargetInput {
+  modelId: string;
+  tier: VideoTier;
+  duration: number;
+  resolution: string;
+  aspectRatio: string;
+  audio: boolean;
+  wantEndFrame: boolean;
 }
 
-/** Gueltige Dauer oder Wurf mit den gueltigen Werten (spart abgerechnete Fehlcalls). */
-export function resolveVideoDuration(model: string, requested: number): number {
-  const known = KNOWN_DURATIONS[model.toLowerCase()];
-  if (!known) return requested;
-  if (known.allowed && !known.allowed.includes(requested)) {
-    throw new Error(
-      `Duration ${requested}s is not supported by '${model}'. ` +
-      `Valid durations: ${known.allowed.join(", ")}.`
+export interface ResolvedVideoTarget {
+  model: string;
+  duration: number;
+  resolution: string;
+  aspectRatio: string;
+  audio: boolean;
+  sendEndFrame: boolean;
+  notes: string[];
+}
+
+/**
+ * Einstiegspunkt der Modell-Aufloesung: Tier → Modell, dann alle Limits.
+ * Harte Fehler werfen (fail fast vor jedem bezahlten Call), weiche landen
+ * in notes. Unbekannte Modelle laufen im Passthrough (Phase 2 validiert live).
+ */
+export function resolveVideoTarget(input: VideoTargetInput): ResolvedVideoTarget {
+  const notes: string[] = [];
+  const key = input.modelId.trim().toLowerCase();
+
+  let model: string;
+  if (key) {
+    model = input.modelId.trim();
+  } else {
+    model = VIDEO_TIER_MODELS[input.tier];
+    notes.push(
+      `tier '${input.tier}' picked '${model}' (draft = cheapest exploration, ` +
+      `standard = sweet spot with audio, final = most tolerant filters). ` +
+      `Override any time with model_id.`
     );
   }
-  if (requested < known.min || requested > known.max) {
+  const lookup = model.toLowerCase();
+
+  const known = KNOWN_DURATIONS[lookup];
+  if (known) {
+    if (known.allowed && !known.allowed.includes(input.duration)) {
+      throw new Error(
+        `Duration ${input.duration}s is not supported by '${model}'. ` +
+        `Valid durations: ${known.allowed.join(", ")}.`
+      );
+    }
+    if (input.duration < known.min || input.duration > known.max) {
+      throw new Error(
+        `Duration ${input.duration}s is outside '${model}' range (${known.min}–${known.max}s).`
+      );
+    }
+    if (known.step && input.duration % known.step !== 0) {
+      throw new Error(
+        `Duration ${input.duration}s is not supported by '${model}'. ` +
+        `Duration must be a multiple of ${known.step} (range ${known.min}–${known.max}s).`
+      );
+    }
+  }
+
+  let resolution = input.resolution.trim();
+  const knownRes = KNOWN_RESOLUTIONS[lookup];
+  if (resolution && knownRes && !knownRes.includes(resolution)) {
     throw new Error(
-      `Duration ${requested}s is outside '${model}' range (${known.min}–${known.max}s).`
+      `Resolution '${resolution}' is not supported by '${model}'. ` +
+      `Valid tiers: ${knownRes.join(", ")}.`
     );
   }
-  return requested;
+
+  let aspectRatio = input.aspectRatio.trim();
+  if (aspectRatio) {
+    const valid = KNOWN_ASPECTS[lookup] ?? DEFAULT_ASPECTS;
+    if (!valid.includes(aspectRatio)) {
+      throw new Error(
+        `Aspect ratio '${aspectRatio}' is not supported by '${model}'. ` +
+        `Valid: ${valid.join(", ")}.`
+      );
+    }
+  }
+
+  let audio = input.audio;
+  if (audio && isKnownVideoModel(lookup) && !AUDIO_CAPABLE_MODELS.has(lookup)) {
+    audio = false;
+    notes.push(`audio=true is not supported by '${model}' and was ignored.`);
+  }
+
+  let sendEndFrame = input.wantEndFrame;
+  if (sendEndFrame && isKnownVideoModel(lookup) && !END_FRAME_MODELS.has(lookup)) {
+    sendEndFrame = false;
+    notes.push(`'${model}' has no end_frame capability — end_image was ignored (start frame only).`);
+  }
+
+  return { model, duration: input.duration, resolution, aspectRatio, audio, sendEndFrame, notes };
 }
 
 const MEDIA_UPLOAD_URL = "https://media.pollinations.ai/upload";
 const VIDEO_API_BASE = "https://gen.pollinations.ai/video";
 
 /**
- * Still hochladen, Media-URL zurueck. Antwort ist JSON {id, url, …};
- * Link-Header und Plaintext werden als Fallback akzeptiert.
- * Untagged = unlisted, 30-Tage-Lifecycle — genug fuer einen Startframe.
+ * Still hochladen, Media-URL zurueck. Antwort ist JSON {id, url, …} —
+ * gelesen wird der Body als Text (JSON-Versuch, dann Link-Header, dann
+ * blanke URL), damit kein Formatwechsel den Upload kippt. Untagged =
+ * unlisted, 30-Tage-Lifecycle — genug fuer einen Startframe.
  */
 export async function uploadStillToPollinations(
   buffer: Buffer,
@@ -116,12 +248,14 @@ export async function uploadStillToPollinations(
     const errText = await res.text().catch(() => "");
     throw new Error(`Media upload failed: ${res.status} ${res.statusText} ${errText}`);
   }
+  const text = await res.text().catch(() => "");
   try {
-    const parsed = (await res.json()) as { url?: string };
+    const parsed = JSON.parse(text) as { url?: string };
     if (parsed?.url) return parsed.url;
   } catch {
     // kein JSON — Fallbacks unten
   }
+  if (/^https?:\/\/\S+$/.test(text.trim())) return text.trim();
   const link = res.headers.get("Link") ?? "";
   const match = link.match(/<([^>]+)>/);
   if (match) return match[1];
@@ -139,10 +273,14 @@ export interface VideoRequestOptions {
   audio: boolean;
   /** Startframe zuerst, optional Endframe danach (oeffentliche URLs). */
   imageUrls: string[];
-  apiKey: string;
 }
 
-/** GET /video/{motion} — synchron, rendert serverseitig Minuten. */
+/**
+ * GET /video/{motion} — synchron, rendert serverseitig Minuten. Auth laeuft
+ * ueber den Authorization-Header beim Download (kein Key in der URL).
+ * safe=false/private/nologo wie bei den Bild-Endpoints: Filter aus, kein
+ * Feed, kein Watermark mit Key.
+ */
 export function buildVideoRequestUrl(opts: VideoRequestOptions): string {
   const url = new URL(`${VIDEO_API_BASE}/${encodeURIComponent(opts.motion)}`);
   url.searchParams.set("model", opts.model);
@@ -153,17 +291,20 @@ export function buildVideoRequestUrl(opts: VideoRequestOptions): string {
   url.searchParams.set("safe", "false");
   url.searchParams.set("private", "true");
   url.searchParams.set("nologo", "true");
-  for (const imageUrl of opts.imageUrls) {
-    url.searchParams.append("image", imageUrl);
-  }
+  // Doku: mehrere URLs mit "|" getrennt in EINEM image-Parameter.
+  if (opts.imageUrls.length > 0) url.searchParams.set("image", opts.imageUrls.join("|"));
   return url.toString();
 }
 
-/** MP4 herunterladen. Video rendert Minuten — Timeout entsprechend gross. */
+/**
+ * MP4 herunterladen. Video rendert Minuten — Timeout entsprechend gross.
+ * Akzeptiert video/*, mp4 und octet-stream (manche Gateways typisieren um);
+ * Text/JSON ist immer ein Fehlerbody und wird als Vorschau gemeldet.
+ */
 export async function downloadVideo(url: string, apiKey: string): Promise<Buffer> {
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${apiKey}` },
-    signal: AbortSignal.timeout(600_000),
+    signal: AbortSignal.timeout(900_000),
   });
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
@@ -177,7 +318,11 @@ export async function downloadVideo(url: string, apiKey: string): Promise<Buffer
   }
   const contentType = (res.headers.get("content-type") || "").toLowerCase();
   const buffer = Buffer.from(await res.arrayBuffer());
-  if (!contentType.startsWith("video/") && !contentType.includes("mp4")) {
+  const looksVideo =
+    contentType.startsWith("video/") ||
+    contentType.includes("mp4") ||
+    contentType.includes("octet-stream");
+  if (!looksVideo) {
     const preview = buffer.toString("utf-8").slice(0, 200);
     throw new Error(`Pollinations returned no video (content-type: ${contentType || "unknown"}): ${preview}`);
   }

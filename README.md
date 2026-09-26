@@ -299,7 +299,7 @@ Two limits the catalog number doesn't show, so they are carried in a `note` fiel
 
 **Community-alpha fallback (Pollinations):** if a `community/*` model fails, retry with `klein` or `flux`.
 
-**Animate:** still (`file_path` aus `generate_image`/`compose_images`) + motion → `generate_video`. Exploration: `cuts` mit 3–4 Motion-Ideen in `480p`/`tier:"draft"` (~0.30 Pollen), sichten, dann Final mit `tier:"final"` in `720p`/`1080p`.
+**Animate:** still (`file_path` aus `generate_image`/`compose_images`) + motion → `generate_video`. Exploration: `cuts` mit 3–4 Motion-Ideen in `480p`/`tier:"draft"` (Cent-Bereich pro Clip, Preise: `GET /video/models`), sichten, dann Final mit `tier:"final"` in `720p`/`1080p`.
 
 **Find results:** `list_image_directory({limit:1})` → `output_directory` + `filename` (absolute path) → straight into `image_edit`. Images outside the output dir: `list_image_directory({directories:["<folderA>","<folderB>"]})`, then `compose_images` with one absolute path per folder.
 

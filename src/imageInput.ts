@@ -6,6 +6,8 @@ export interface ResolvedImageInput {
   buffer: Buffer;
   mimeType: string;
   source: "file" | "url";
+  /** Nur bei source "url": die Original-URL (durchreichbar ohne Re-Upload). */
+  url?: string;
 }
 
 function sniffImageMime(buffer: Buffer, fallbackExt = ""): string | null {
@@ -73,7 +75,7 @@ export async function resolveImageInput(
         `URL does not point to an image (content-type: ${headerMime || "unknown"}).`
       );
     }
-    return { buffer, mimeType: sniffed ?? headerMime, source: "url" };
+    return { buffer, mimeType: sniffed ?? headerMime, source: "url", url: clean };
   }
 
   const expanded = expandHome(clean);

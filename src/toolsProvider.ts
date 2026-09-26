@@ -83,8 +83,7 @@ import {
 } from "./pollinations";
 import { getHfCosts, getPollinationsCostMap, getCatalogState } from "./costCache";
 import {
-  resolveVideoModel,
-  resolveVideoDuration,
+  resolveVideoTarget,
   uploadStillToPollinations,
   buildVideoRequestUrl,
   downloadVideo,
@@ -1153,7 +1152,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         • 'end_image' (optional): end frame (models with end_frame capability). 'audio' where supported.
 
         BACKEND is always Pollinations (needs pollinationsApiKey); HF video comes later.
-        Renders take minutes. Each clip counts one daily-guard unit and is billed per second.
+        Requests send safe=false/private/nologo like the image endpoints (filters off,
+        hidden from the public feed, no watermark with key). If both 'motion' and 'cuts'
+        are set, 'cuts' wins. Renders take minutes. Each clip counts one daily-guard
+        unit and is billed per second.
       `,
       parameters: {
         image: z.string().trim().min(1).describe(
@@ -1214,8 +1216,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         if (!rateLimitResult.ok) {
           throw new Error(rateLimitResult.error);
         }
-        // Gleiche Account-Rate wie generate_image (~1 Request pro 5s).
+        // Same account rate as generate_image (~1 request per 5s): fast-fail at
+        // entry, plus a wait before every clip (renders take minutes, so the
+        // wait is ~0 in practice — except after a preceding quick image call).
         const pollinationsCooldownMs = 5_000;
+        const waitForSlot = async () => {
+          const waitMs = pollinationsCooldownMs - (Date.now() - lastPollinationsCall);
+          if (waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
+        };
         const waited = Date.now() - lastPollinationsCall;
         if (waited < pollinationsCooldownMs) {
           throw new Error(
@@ -1224,70 +1232,91 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           );
         }
 
-        const motions = args.cuts.length > 0 ? [...args.cuts] : [args.motion.trim()].filter((m) => m);
-        if (motions.length < (args.cuts.length > 0 ? 2 : 1)) {
+        // motion vs cuts: cuts wins (noted); a single cut behaves like motion
+        // (flat result shape); neither means nothing to render.
+        const notes: string[] = [];
+        let motions: string[];
+        if (args.cuts.length > 0) {
+          motions = [...args.cuts];
+          if (args.motion.trim()) {
+            notes.push("Both 'motion' and 'cuts' were set — 'cuts' wins, 'motion' was ignored.");
+          }
+        } else if (args.motion.trim()) {
+          motions = [args.motion.trim()];
+        } else {
           throw new Error(
             "Provide 'motion' for one clip or 'cuts' (2–6 motion variants) for an exploration set. " +
             "Blank motion with empty cuts cannot render."
           );
         }
 
-        const outputDir = getOutputDir();
-        await mkdir(outputDir, { recursive: true });
-
-        const startInput = await resolveImageInput(args.image, [outputDir]);
-        const endInput = args.end_image.trim()
-          ? await resolveImageInput(args.end_image, [outputDir])
-          : null;
-
-        const { model: modelToUse, autoNote } = resolveVideoModel(args.model_id, args.tier as VideoTier);
-        const duration = resolveVideoDuration(modelToUse, args.duration);
-
-        const notes: string[] = [];
-        if (autoNote) notes.push(autoNote);
+        // Cheap validation (model, duration, resolution, aspect, audio, endframe)
+        // BEFORE any I/O: a failed render would still be billed.
+        const target = resolveVideoTarget({
+          modelId: args.model_id,
+          tier: args.tier as VideoTier,
+          duration: args.duration,
+          resolution: args.resolution,
+          aspectRatio: args.aspect_ratio,
+          audio: args.audio,
+          wantEndFrame: args.end_image.trim().length > 0,
+        });
+        notes.push(...target.notes);
         notes.push(
           "Pollinations video is billed per generated second (model pricing: GET /video/models). " +
-          `This call rendered ${motions.length} clip(s) of ${duration}s.`
+          `This call requests ${motions.length} clip(s) of ${target.duration}s.`
         );
 
-        // Lokale Stills hochladen (unlisted Media-URL als Startframe); bereits
-        // oeffentliche URLs werden als Bytes erneut hochgeladen — ein Upload,
-        // keine zweite Logik. Endframe nur mitgeben, sonst ignorieren (Note).
-        ctx.status("Uploading start frame…");
-        const startUrl = await uploadStillToPollinations(startInput.buffer, startInput.mimeType, pollinationsKey);
-        const endUrl = endInput
-          ? await uploadStillToPollinations(endInput.buffer, endInput.mimeType, pollinationsKey)
-          : null;
-        const imageUrls = endUrl ? [startUrl, endUrl] : [startUrl];
-        if (!endUrl && args.end_image.trim()) {
-          notes.push("No end frame supplied — single start frame used.");
-        }
-
+        // Lock BEFORE expensive I/O (matches runImageEdit): two concurrent calls
+        // must not both pay uploads only for one to fail on the lock.
         if (isGenerating) {
           throw new Error("Another generation is already in progress. Wait for it to finish.");
         }
         isGenerating = true;
 
         try {
+          const outputDir = getOutputDir();
+          await mkdir(outputDir, { recursive: true });
+
+          const startInput = await resolveImageInput(args.image, [outputDir]);
+          const endInput = target.sendEndFrame
+            ? await resolveImageInput(args.end_image, [outputDir])
+            : null;
+
+          // Local stills go through the (unlisted) media store as start frame;
+          // already-public URLs pass through without re-upload.
+          ctx.status("Uploading start frame…");
+          const startUrl = startInput.url
+            ?? await uploadStillToPollinations(startInput.buffer, startInput.mimeType, pollinationsKey);
+          const endUrl = endInput
+            ? endInput.url
+              ?? await uploadStillToPollinations(endInput.buffer, endInput.mimeType, pollinationsKey)
+            : null;
+          const imageUrls = endUrl ? [startUrl, endUrl] : [startUrl];
+
           const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
           const slug = slugifyFilename(args.name);
           const clips: { motion: string; file_path?: string; file_size_bytes?: number; error?: string }[] = [];
 
           for (let i = 0; i < motions.length; i++) {
+            if (ctx.signal.aborted) {
+              clips.push({ motion: motions[i], error: "cancelled" });
+              break;
+            }
             const motionText = motions[i];
             const tag = motions.length > 1 ? ` (cut ${i + 1}/${motions.length})` : "";
             try {
+              await waitForSlot();
               const url = buildVideoRequestUrl({
                 motion: motionText,
-                model: modelToUse,
-                duration,
-                aspectRatio: args.aspect_ratio,
-                resolution: args.resolution,
-                audio: args.audio,
+                model: target.model,
+                duration: target.duration,
+                aspectRatio: target.aspectRatio,
+                resolution: target.resolution,
+                audio: target.audio,
                 imageUrls,
-                apiKey: pollinationsKey,
               });
-              ctx.status(`Rendering video${tag} (${modelToUse}, ~minutes)…`);
+              ctx.status(`Rendering video${tag} (${target.model}, ~minutes)…`);
               const buffer = await downloadVideo(url, pollinationsKey);
               const filename = `pv-${stamp}${slug ? `-${slug}` : ""}${motions.length > 1 ? `-cut${i + 1}` : ""}.mp4`;
               const filePath = path.join(outputDir, filename);
@@ -1297,6 +1326,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               clips.push({ motion: motionText, file_path: filePath, file_size_bytes: buffer.length });
             } catch (cutErr: unknown) {
               const msg = cutErr instanceof Error ? cutErr.message : String(cutErr);
+              if (motions.length === 1) throw cutErr;
               clips.push({ motion: motionText, error: msg });
             }
           }
@@ -1314,11 +1344,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             success: succeeded.length > 0,
             output_dir: outputDir,
             backend: "pollinations",
-            model_used: modelToUse,
-            duration,
-            aspect_ratio: args.aspect_ratio || null,
-            resolution: args.resolution,
-            audio: args.audio,
+            model_used: target.model,
+            duration: target.duration,
+            aspect_ratio: target.aspectRatio || null,
+            resolution: target.resolution || null,
+            audio: target.audio,
             start_image: args.image,
             end_image: args.end_image.trim() || null,
             mime_type: "video/mp4",

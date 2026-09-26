@@ -16,6 +16,14 @@
 export type VideoTier = "draft" | "standard" | "final";
 
 /**
+ * HF-Default (I2V-nativ, live verifiziert: fal-ai/replicate/wavespeed).
+ * Video-LoRAs: serverseitig noch ohne verifizierten Provider-Pfad
+ * (das SDK liesse Extra-Params durch, aber kein bezahlter Call hat es je
+ * bestaetigt) — deshalb kein lora_id am Tool, Follow-up mit Live-Call.
+ */
+export const HF_DEFAULT_VIDEO_MODEL = "Wan-AI/Wan2.2-TI2V-5B";
+
+/**
  * Tier → Modell (kanonische IDs aus GET /video/models, keine Aliase).
  * Draft = billigste Exploration, Standard = Sweet Spot mit Audio,
  * Final = toleranteste Filter. Explizite model_id gewinnt immer.

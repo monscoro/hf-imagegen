@@ -93,6 +93,7 @@ import {
   uploadStillToPollinations,
   buildVideoRequestUrl,
   downloadVideo,
+  HF_DEFAULT_VIDEO_MODEL,
   type VideoTier,
 } from "./video";
 import { getModelCacheInfo } from "./modelCache";
@@ -1191,37 +1192,53 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "generate_video",
       description: text`
-        Animate a still image into a short video clip (image-to-video, Pollinations only).
+        Animate a still image into a short video clip (image-to-video).
         Typical chain: generate_image / compose_images → generate_video.
 
         • 'image' (required): start frame — absolute file_path from an earlier result (preferred),
-          bare filename (output dir), relative path or public URL. Local files are uploaded to the
-          Pollinations media store first (unlisted, 30-day lifecycle); public URLs skip the upload.
+          bare filename (output dir), relative path or public URL. With backend='pollinations',
+          local files are uploaded to the Pollinations media store first (unlisted, 30-day
+          lifecycle); public URLs skip the upload. With backend='hf' the bytes go straight
+          to the inference provider.
         • 'motion' OR 'cuts' (one required): 'motion' renders one clip; 'cuts' (2–6) renders an
           exploration set of the SAME still with different motions, sequentially — one failed cut
           doesn't kill the set. Blank motion = you write it: camera move + subject motion, scaled
           to the duration ("5s: slow dolly-in, fabric sways in wind").
-        • 'tier' picks the model when model_id is blank: draft (cheapest exploration),
-          standard (sweet spot with audio), final (most tolerant filters). Explicit model_id wins.
+        • 'tier' picks the model when model_id is blank (Pollinations only): draft (cheapest
+          exploration), standard (sweet spot with audio), final (most tolerant filters).
+          Explicit model_id wins.
         • 'duration' is validated against the model's limits and fails fast (veo 4/6/8, wan 2–15 …).
         • 'resolution': tier string per model ("480p"/"720p"/"1080p") — 480p default keeps
           exploration cheap, raise for finals. 'aspect_ratio': "16:9"/"9:16" (blank = server decides).
         • 'end_image' (optional): end frame (models with end_frame capability). 'audio' where supported.
 
-        BACKEND is always Pollinations (needs pollinationsApiKey); HF video comes later.
+        BACKENDS: 'pollinations' (default, needs pollinationsApiKey) — full feature set above.
+        'hf' (needs HF token): image-to-video via Inference Providers (default Wan2.2-TI2V-5B,
+        provider 'auto' or fal-ai/replicate/wavespeed). HF v1 uses model defaults for length
+        and size — duration/resolution/aspect_ratio/audio/end_image/tier are Pollinations-only
+        and noted as ignored; video LoRAs need a live-verified provider path first (follow-up).
         Requests send safe=false/private/nologo like the image endpoints (filters off,
         hidden from the public feed, no watermark with key). If both 'motion' and 'cuts'
         are set, 'cuts' wins. Renders take minutes. Each clip counts one daily-guard
-        unit and is billed per second.
+        unit and is billed per second (Pollinations) or provider credit (HF).
       `,
       parameters: {
         image: z.string().trim().min(1).describe(
           "Start frame — absolute file_path from an earlier generate_image/compose_images result " +
           "(preferred), bare filename (output dir), relative path or public http(s) URL."
         ),
+        backend: z.enum(["pollinations", "hf"]).default("pollinations").describe(
+          "Video backend: 'pollinations' (full features, needs pollinationsApiKey) or 'hf' " +
+          "(HuggingFace Inference Providers, needs HF token; v1: model defaults for length/size)."
+        ),
+        provider: z.string().default("auto").describe(
+          "HF inference sub-provider (backend='hf' only, ignored with 'pollinations'). " +
+          "Default auto resolves via the model's own mapping - always prefer it. " +
+          "Known video providers: fal-ai, replicate, wavespeed."
+        ),
         end_image: z.string().default("").describe(
           "Optional end frame (same path rules as 'image'). Only models with end_frame capability " +
-          "use it; others ignore it with a note."
+          "use it; others ignore it with a note. Pollinations only in v1 — ignored with backend='hf' (noted)."
         ),
         motion: z.string().default("").describe(
           "Motion prompt for ONE clip (camera + subject movement, scaled to 'duration'). " +
@@ -1238,24 +1255,27 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           "Browse: list_models source='video'."
         ),
         tier: z.enum(["draft", "standard", "final"]).default("standard").describe(
-          "Model tier when model_id is blank: draft = bytedance/seedance-1-pro-fast (cheapest), " +
+          "Model tier when model_id is blank (backend='pollinations' only, ignored with 'hf'): " +
+          "draft = bytedance/seedance-1-pro-fast (cheapest), " +
           "standard = minimax/minimax-h3-max-turbo (sweet spot, audio), " +
           "final = x-ai/grok-imagine-video (most tolerant filters). Pick is reported in notes."
         ),
         duration: z.number().int().min(1).max(120).default(5).describe(
-          "Clip length in seconds. Validated against the model's limits (fails fast with the " +
-          "valid values instead of burning a billed call)."
+          "Clip length in seconds (backend='pollinations' only, ignored with 'hf' — noted). " +
+          "Validated against the model's limits (fails fast with the valid values instead of burning a billed call)."
         ),
         aspect_ratio: z.string().default("").describe(
           'Orientation, e.g. "16:9" or "9:16" (fashion portrait). Blank = server decides. ' +
-          "h3-max-turbo also supports 21:9/4:3/1:1/3:4."
+          "h3-max-turbo also supports 21:9/4:3/1:1/3:4. Pollinations only in v1 — ignored with backend='hf' (noted)."
         ),
         resolution: z.string().default("480p").describe(
           "Resolution tier per model (480p/720p/1080p; minimax uses 768p instead of 720p). " +
-          "480p keeps exploration cheap; raise for finals. Higher tiers bill more per second."
+          "480p keeps exploration cheap; raise for finals. Higher tiers bill more per second. " +
+          "Pollinations only in v1 — ignored with backend='hf' (noted)."
         ),
         audio: z.boolean().default(false).describe(
-          "Generate audio with the video (only models with audio_output; some always add audio)."
+          "Generate audio with the video (only models with audio_output; some always add audio). " +
+          "Pollinations only in v1 — ignored with backend='hf' (noted)."
         ),
         name: z.string().default("").describe(
           "Optional filename label (e.g. 'runway-turn'). Sanitized like image results: " +
@@ -1263,11 +1283,19 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         ),
       },
       implementation: safe_impl("generate_video", async (args, ctx) => {
-        const pollinationsKey = getPollinationsKey();
-        if (!pollinationsKey) {
+        const usePollinations = args.backend !== "hf";
+        const pollinationsKey = usePollinations ? getPollinationsKey() : "";
+        if (usePollinations && !pollinationsKey) {
           throw new Error(
             "Pollinations API key is not set (required since Sep 2026). " +
             "Set pollinationsApiKey in plugin config (get one at https://enter.pollinations.ai/keys)."
+          );
+        }
+        if (!usePollinations && !getToken()) {
+          throw new Error(
+            "HuggingFace API token is not set. " +
+            "Go to plugin settings and paste your token from huggingface.co/settings/tokens. " +
+            "Alternatively use backend='pollinations' which needs no HF token."
           );
         }
         const rateLimitResult = checkRateLimit(getRateLimitConfig());
@@ -1277,13 +1305,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         // Same account rate as generate_image (~1 request per 5s): fast-fail at
         // entry, plus a wait before every clip (renders take minutes, so the
         // wait is ~0 in practice — except after a preceding quick image call).
+        // Pollinations-only: HF providers rate-limit per account behind the SDK.
         const pollinationsCooldownMs = 5_000;
         const waitForSlot = async () => {
+          if (!usePollinations) return;
           const waitMs = pollinationsCooldownMs - (Date.now() - lastPollinationsCall);
           if (waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
         };
         const waited = Date.now() - lastPollinationsCall;
-        if (waited < pollinationsCooldownMs) {
+        if (usePollinations && waited < pollinationsCooldownMs) {
           throw new Error(
             `Pollinations allows ~1 request per ${pollinationsCooldownMs / 1000}s on your tier. ` +
             `Wait ${Math.ceil((pollinationsCooldownMs - waited) / 1000)}s and retry.`
@@ -1308,27 +1338,54 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           );
         }
 
-        // Cheap validation (model, duration, resolution, aspect, audio, endframe)
-        // BEFORE any I/O: a failed render would still be billed. Live catalog
-        // when reachable (disk-cached, no extra cost), static tables as fallback.
-        const liveVideoCaps = await loadPollinationsVideoCapabilities();
-        const target = resolveVideoTarget(
-          {
-            modelId: args.model_id,
-            tier: args.tier as VideoTier,
-            duration: args.duration,
-            resolution: args.resolution,
-            aspectRatio: args.aspect_ratio,
-            audio: args.audio,
-            wantEndFrame: args.end_image.trim().length > 0,
-          },
-          liveVideoCaps ?? undefined
-        );
-        notes.push(...target.notes);
-        notes.push(
-          "Pollinations video is billed per generated second (model pricing: GET /video/models). " +
-          `This call requests ${motions.length} clip(s) of ${target.duration}s.`
-        );
+        // Cheap validation BEFORE any I/O: a failed render would still be billed.
+        // Pollinations: model/tier + duration/resolution/aspect/audio/endframe
+        // against the live catalog (disk-cached), static tables as fallback.
+        // HF v1: explicit model or verified default; length/size come from model
+        // defaults — the Pollinations-only knobs are noted once, not per param.
+        let modelToUse: string;
+        let duration: number | null;
+        let aspectRatio: string | null;
+        let resolution: string | null;
+        let audio: boolean;
+        let sendEndFrame: boolean;
+        if (usePollinations) {
+          const liveVideoCaps = await loadPollinationsVideoCapabilities();
+          const target = resolveVideoTarget(
+            {
+              modelId: args.model_id,
+              tier: args.tier as VideoTier,
+              duration: args.duration,
+              resolution: args.resolution,
+              aspectRatio: args.aspect_ratio,
+              audio: args.audio,
+              wantEndFrame: args.end_image.trim().length > 0,
+            },
+            liveVideoCaps ?? undefined
+          );
+          modelToUse = target.model;
+          duration = target.duration;
+          aspectRatio = target.aspectRatio || null;
+          resolution = target.resolution || null;
+          audio = target.audio;
+          sendEndFrame = target.sendEndFrame;
+          notes.push(...target.notes);
+          notes.push(
+            "Pollinations video is billed per generated second (model pricing: GET /video/models). " +
+            `This call requests ${motions.length} clip(s) of ${duration}s.`
+          );
+        } else {
+          modelToUse = args.model_id.trim() || HF_DEFAULT_VIDEO_MODEL;
+          duration = null;
+          aspectRatio = null;
+          resolution = null;
+          audio = false;
+          sendEndFrame = false;
+          notes.push(
+            `backend='hf' (v1): '${modelToUse}' renders with model defaults for length and size — ` +
+            "duration/resolution/aspect_ratio/audio/end_image/tier are Pollinations-only and were ignored."
+          );
+        }
 
         // Lock BEFORE expensive I/O (matches runImageEdit): two concurrent calls
         // must not both pay uploads only for one to fail on the lock.
@@ -1342,20 +1399,25 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           await mkdir(outputDir, { recursive: true });
 
           const startInput = await resolveImageInput(args.image, [outputDir]);
-          const endInput = target.sendEndFrame
+          const endInput = sendEndFrame
             ? await resolveImageInput(args.end_image, [outputDir])
             : null;
 
-          // Local stills go through the (unlisted) media store as start frame;
-          // already-public URLs pass through without re-upload.
-          ctx.status("Uploading start frame…");
-          const startUrl = startInput.url
-            ?? await uploadStillToPollinations(startInput.buffer, startInput.mimeType, pollinationsKey);
-          const endUrl = endInput
-            ? endInput.url
-              ?? await uploadStillToPollinations(endInput.buffer, endInput.mimeType, pollinationsKey)
-            : null;
-          const imageUrls = endUrl ? [startUrl, endUrl] : [startUrl];
+          // Pollinations: local stills go through the (unlisted) media store as
+          // start frame; already-public URLs pass through without re-upload.
+          // HF: bytes go straight to the inference provider (no upload).
+          let imageUrls: string[] = [];
+          if (usePollinations) {
+            ctx.status("Uploading start frame…");
+            const startUrl = startInput.url
+              ?? await uploadStillToPollinations(startInput.buffer, startInput.mimeType, pollinationsKey);
+            const endUrl = endInput
+              ? endInput.url
+                ?? await uploadStillToPollinations(endInput.buffer, endInput.mimeType, pollinationsKey)
+              : null;
+            imageUrls = endUrl ? [startUrl, endUrl] : [startUrl];
+          }
+          const filePrefix = usePollinations ? "pv" : "hv";
 
           const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
           const slug = slugifyFilename(args.name);
@@ -1369,23 +1431,41 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             const motionText = motions[i];
             const tag = motions.length > 1 ? ` (cut ${i + 1}/${motions.length})` : "";
             try {
-              await waitForSlot();
-              const url = buildVideoRequestUrl({
-                motion: motionText,
-                model: target.model,
-                duration: target.duration,
-                aspectRatio: target.aspectRatio,
-                resolution: target.resolution,
-                audio: target.audio,
-                imageUrls,
-              });
-              ctx.status(`Rendering video${tag} (${target.model}, ~minutes)…`);
-              const buffer = await downloadVideo(url, pollinationsKey);
-              const filename = `pv-${stamp}${slug ? `-${slug}` : ""}${motions.length > 1 ? `-cut${i + 1}` : ""}.mp4`;
+              let buffer: Buffer;
+              if (usePollinations) {
+                await waitForSlot();
+                const url = buildVideoRequestUrl({
+                  motion: motionText,
+                  model: modelToUse,
+                  duration: duration ?? args.duration,
+                  aspectRatio: aspectRatio ?? "",
+                  resolution: resolution ?? "",
+                  audio,
+                  imageUrls,
+                });
+                ctx.status(`Rendering video${tag} (${modelToUse}, ~minutes)…`);
+                buffer = await downloadVideo(url, pollinationsKey);
+                lastPollinationsCall = Date.now();
+              } else {
+                const providerToUse = (args.provider.trim() || "auto") as
+                  "auto" | "fal-ai" | "replicate" | "wavespeed" | "together" | "nscale";
+                const hf = new InferenceClient(getToken());
+                const inputBlob = new Blob([new Uint8Array(startInput.buffer)], {
+                  type: startInput.mimeType,
+                });
+                ctx.status(`Rendering video${tag} (${modelToUse} via ${providerToUse}, ~minutes)…`);
+                const blob = await hf.imageToVideo({
+                  provider: providerToUse,
+                  model: modelToUse,
+                  inputs: inputBlob,
+                  parameters: { prompt: motionText },
+                }) as unknown as Blob;
+                buffer = Buffer.from(await blob.arrayBuffer());
+              }
+              const filename = `${filePrefix}-${stamp}${slug ? `-${slug}` : ""}${motions.length > 1 ? `-cut${i + 1}` : ""}.mp4`;
               const filePath = path.join(outputDir, filename);
               await writeFile(filePath, buffer);
               recordGeneration();
-              lastPollinationsCall = Date.now();
               clips.push({ motion: motionText, file_path: filePath, file_size_bytes: buffer.length });
             } catch (cutErr: unknown) {
               const msg = cutErr instanceof Error ? cutErr.message : String(cutErr);
@@ -1406,12 +1486,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           const base = {
             success: succeeded.length > 0,
             output_dir: outputDir,
-            backend: "pollinations",
-            model_used: target.model,
-            duration: target.duration,
-            aspect_ratio: target.aspectRatio || null,
-            resolution: target.resolution || null,
-            audio: target.audio,
+            backend: usePollinations ? "pollinations" : "hf",
+            model_used: modelToUse,
+            duration,
+            aspect_ratio: aspectRatio,
+            resolution,
+            audio,
             start_image: args.image,
             end_image: args.end_image.trim() || null,
             mime_type: "video/mp4",
@@ -1525,9 +1605,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         - "trending" / "downloads": live HuggingFace catalog ranked by trendingScore or
           downloads — for backend='hf'.
         - "video": video models for generate_video — Pollinations live rows FIRST
-          (usable today: durations, resolutions, caps and pollen/s per row), then HF live
-          rows (text-to-video + image-to-video tags, provider-enriched; for the future
-          HF backend). No curated list — both sides are live and therefore current.
+          (full features: durations, resolutions, caps and pollen/s per row), then HF live
+          rows (text-to-video + image-to-video tags, provider-enriched — for backend='hf').
+          No curated list — both sides are live and therefore current.
         - "pollinations": Pollinations.ai models (requires pollinationsApiKey in config).
           ALIASES: only "flux" (= flux.1-schnell), "kontext" (= flux.1-kontext-pro),
           "seedream5" (= seedream-5.0-lite). Use FULL IDs for all other models.

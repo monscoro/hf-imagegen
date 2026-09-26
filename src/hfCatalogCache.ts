@@ -17,8 +17,8 @@ import { getCatalogCacheDir } from "./pollinationsCache";
  * _id, id, likes und das Mapping. Die Felder fuer Ranking und Parameter
  * (downloads, trendingScore, safetensors, cardData) fehlen dort. Sie werden
  * deshalb gar nicht erst gespeichert, sondern bleiben beim server-seitigen
- * Ranking der Listenquellen. Das haelt die Datei bei ~180 KB fuer 2000 Modelle
- * und erspart einen Join.
+ * Ranking der Listenquellen. Das haelt die Datei bei ~400 KB fuer 4000 Modelle
+ * (vier Tasks) und erspart einen Join.
  *
  * Ablage neben dem Pollinations-Katalog in ~/.cache/image-gen/;
  * IMAGE_GEN_CACHE_DIR gilt fuer beide Caches.
@@ -173,29 +173,38 @@ const CATALOG_TASKS: HFTask[] = ["text-to-image", "image-to-image", "text-to-vid
  * und waere fuer die Auswahl sinnlos.
  */
 export async function fetchHfCatalog(): Promise<HFCatalogEntry[]> {
+  // Pro Task best-effort: faellt EINE Seite aus (Timeout, 5xx), duerfen die
+  // anderen drei nicht mit ihr sterben — sonst waere der alte Cache (durch den
+  // Versions-Bump bereits verworfen) weg und die Listen gaenzlich ungefiltert.
+  // Nur wenn ALLE Seiten scheitern, wirft der Aufruf (Aufrufer: stale/backoff).
   const collected: HFCatalogEntry[] = [];
+  const failed: string[] = [];
   for (const task of CATALOG_TASKS) {
-    const url =
-      `${HF_API_BASE}/models?pipeline_tag=${task}` +
-      `&sort=likes&direction=-1&limit=1000&expand=inferenceProviderMapping`;
-    const response = await fetch(url, {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) {
-      throw new Error(`HF catalog error for ${task}: ${response.status} ${response.statusText}`);
-    }
-    const raw = (await response.json()) as unknown;
-    if (!Array.isArray(raw)) {
-      throw new Error(`HF catalog response for ${task} was not an array.`);
-    }
-    for (const item of raw) {
-      const entry = projectHfModel(item, task);
-      if (entry) collected.push(entry);
+    try {
+      const url =
+        `${HF_API_BASE}/models?pipeline_tag=${task}` +
+        `&sort=likes&direction=-1&limit=1000&expand=inferenceProviderMapping`;
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) {
+        throw new Error(`HF catalog error for ${task}: ${response.status} ${response.statusText}`);
+      }
+      const raw = (await response.json()) as unknown;
+      if (!Array.isArray(raw)) {
+        throw new Error(`HF catalog response for ${task} was not an array.`);
+      }
+      for (const item of raw) {
+        const entry = projectHfModel(item, task);
+        if (entry) collected.push(entry);
+      }
+    } catch {
+      failed.push(task);
     }
   }
   if (collected.length === 0) {
-    throw new Error("HF catalog contained no usable model entries.");
+    throw new Error(`HF catalog: all task pages failed (${failed.join(", ")}).`);
   }
   return collected;
 }

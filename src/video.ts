@@ -8,10 +8,9 @@
  * werden direkt durchgereicht.
  *
  * Alle Modell-Limits (Dauer, Resolution, Aspect, Audio, Endframe) werden VOR
- * dem Call gegen statische Tabellen aus den APIDOCS (v0.3.0) und dem
- * Live-Katalog (GET /video/models) validiert: harte Fehler werfen (fail fast
- * statt abgerechnetem Fehlcall), weiche werden als Note gemeldet. Phase 2
- * ersetzt die Tabellen durch den Live-Katalog.
+ * dem Call gegen den Live-Katalog (/video/models) validiert, mit den
+ * statischen Tabellen unten als Offline-Fallback. Harte Fehler werfen
+ * (fail fast statt abgerechnetem Fehlcall), weiche werden als Note gemeldet.
  */
 
 export type VideoTier = "draft" | "standard" | "final";
@@ -160,33 +159,42 @@ export function resolveVideoTarget(
   }
   const lookup = model.toLowerCase();
 
-  // Live-Katalog schlaegt statische Tabellen (Alias-Keys sind in der Map
-  // enthalten, deshalb findet auch eine Alias-ID ihren Eintrag).
+  // Live-Katalog schlaegt statische Tabellen — aber NUR pro Feld, das der
+  // Katalog tatsaechlich liefert (nicht-leer). Ein sparsamer Eintrag darf
+  // nicht strenger sein als gar keiner: fehlende Felder fallen auf die
+  // statischen Tabellen zurueck, voellig unbekannte Modelle laufen durch.
+  // (Alias-Keys sind in der Map enthalten, deshalb findet auch eine Alias-ID
+  // ihren Eintrag.) Aspect-Ratios liefert der Katalog nicht — die bleiben
+  // statisch/Doku-Stand.
   const liveEntry = live?.get(lookup);
-  const known = liveEntry
-    ? true
-    : lookup in KNOWN_DURATIONS ||
-      lookup in KNOWN_RESOLUTIONS ||
-      END_FRAME_MODELS.has(lookup) ||
-      AUDIO_CAPABLE_MODELS.has(lookup);
-  const dur: KnownDurations | undefined = liveEntry &&
+  const nonEmpty = <T>(v: T[] | undefined): v is T[] => Array.isArray(v) && v.length > 0;
+  const staticDur = KNOWN_DURATIONS[lookup];
+  const liveDur = liveEntry &&
     (liveEntry.min_duration !== undefined ||
       liveEntry.max_duration !== undefined ||
-      liveEntry.allowed_durations)
+      nonEmpty(liveEntry.allowed_durations))
     ? {
-        min: liveEntry.min_duration ?? 1,
-        max: liveEntry.max_duration ?? 120,
-        allowed: liveEntry.allowed_durations,
-        step: liveEntry.duration_step,
+        min: liveEntry.min_duration ?? staticDur?.min ?? 1,
+        max: liveEntry.max_duration ?? staticDur?.max ?? 120,
+        allowed: nonEmpty(liveEntry.allowed_durations) ? liveEntry.allowed_durations : staticDur?.allowed,
+        step: liveEntry.duration_step ?? staticDur?.step,
       }
-    : KNOWN_DURATIONS[lookup];
-  const resolutions: string[] | undefined = liveEntry?.resolutions ?? KNOWN_RESOLUTIONS[lookup];
-  const endCapable = liveEntry
-    ? (liveEntry.video_capabilities ?? []).includes("end_frame")
+    : staticDur;
+  const dur: KnownDurations | undefined = liveDur;
+  const resolutions: string[] | undefined = nonEmpty(liveEntry?.resolutions)
+    ? liveEntry.resolutions
+    : KNOWN_RESOLUTIONS[lookup];
+  // Leeres capabilities-Array liefert nichts — dann gilt die statische Tabelle.
+  // (Nicht-leer ohne end_frame heisst dagegen wirklich: kein Endframe.)
+  const liveCaps = liveEntry?.video_capabilities;
+  const caps = nonEmpty(liveCaps) ? liveCaps : undefined;
+  const endCapable = caps
+    ? caps.includes("end_frame")
     : END_FRAME_MODELS.has(lookup);
-  const audioCapable = liveEntry
-    ? (liveEntry.video_capabilities ?? []).includes("audio_output")
+  const audioCapable = caps
+    ? caps.includes("audio_output")
     : AUDIO_CAPABLE_MODELS.has(lookup);
+  const known = liveEntry ? true : liveDur !== undefined || resolutions !== undefined;
 
   if (dur) {
     if (dur.allowed && !dur.allowed.includes(input.duration)) {

@@ -475,6 +475,8 @@ const VIDEO_CATALOG_FILE = "video-catalog.json";
 const VIDEO_CATALOG_URL = "https://gen.pollinations.ai/video/models";
 const VIDEO_CATALOG_TTL_MS = 12 * 60 * 60 * 1000;
 const VIDEO_FAILED_RETRY_BACKOFF_MS = 10 * 60 * 1000;
+/** Eigene Envelope-Version: Image-Schema-Bumps invalidieren den Video-Cache nicht mit. */
+const VIDEO_CACHE_VERSION = 1;
 
 export interface PollinationsVideoModelCapabilities {
   name: string;
@@ -571,7 +573,7 @@ async function loadVideoCapabilities(): Promise<
   Map<string, PollinationsVideoModelCapabilities>
 > {
   const now = Date.now();
-  const disk = readNamedCatalogCache(VIDEO_CATALOG_FILE);
+  const disk = readNamedCatalogCache(VIDEO_CATALOG_FILE, VIDEO_CACHE_VERSION);
 
   if (disk && now - disk.fetchedAt < VIDEO_CATALOG_TTL_MS) {
     const map = videoCapabilitiesFromCache(disk);
@@ -590,7 +592,7 @@ async function loadVideoCapabilities(): Promise<
       throw new Error("Pollinations video catalog contained no usable model entries.");
     }
     const fetchedAt = Date.now();
-    writeNamedCatalogCache(VIDEO_CATALOG_FILE, raw, fetchedAt);
+    writeNamedCatalogCache(VIDEO_CATALOG_FILE, raw, fetchedAt, VIDEO_CACHE_VERSION);
     lastVideoFetchFailureAt = 0;
     return rememberVideoCapabilities(map, fetchedAt);
   } catch (error) {
@@ -627,7 +629,7 @@ export function getPollinationsVideoCatalogCacheInfo(): {
   models: number;
   lastFetchFailureAt: Date | null;
 } {
-  const disk = readNamedCatalogCache(VIDEO_CATALOG_FILE);
+  const disk = readNamedCatalogCache(VIDEO_CATALOG_FILE, VIDEO_CACHE_VERSION);
   const now = Date.now();
   let models = 0;
   if (disk) {

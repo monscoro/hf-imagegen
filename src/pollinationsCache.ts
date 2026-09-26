@@ -40,16 +40,18 @@ export function getCatalogCacheFile(): string {
 
 /**
  * Benannte Variante fuer weitere Kataloge (Video): gleiche Envelope-Form,
- * gleiche Atomar-Garantie, andere Datei. Die Standard-Funktionen unten
- * delegieren mit dem Image-Katalog-Namen.
+ * gleiche Atomar-Garantie, andere Datei — aber EIGENE Version: ein
+ * Image-Schema-Bump darf den Video-Cache nicht stillschweigend mit
+ * invalidieren (und umgekehrt). Die Standard-Funktionen unten
+ * delegieren mit Image-Name + Image-Version.
  */
-export function readNamedCatalogCache(fileName: string): CatalogCacheEnvelope | null {
+export function readNamedCatalogCache(fileName: string, version: number = CACHE_VERSION): CatalogCacheEnvelope | null {
   try {
     const file = getCacheFile(fileName);
     if (!fs.existsSync(file)) return null;
     const parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as Partial<CatalogCacheEnvelope> | null;
     if (!parsed || typeof parsed !== "object") return null;
-    if (parsed.version !== CACHE_VERSION) return null;
+    if (parsed.version !== version) return null;
     if (typeof parsed.fetchedAt !== "number" || !Array.isArray(parsed.models)) return null;
     return {
       version: parsed.version,
@@ -61,12 +63,17 @@ export function readNamedCatalogCache(fileName: string): CatalogCacheEnvelope | 
   }
 }
 
-export function writeNamedCatalogCache(fileName: string, models: unknown[], fetchedAt?: number): boolean {
+export function writeNamedCatalogCache(
+  fileName: string,
+  models: unknown[],
+  fetchedAt?: number,
+  version: number = CACHE_VERSION
+): boolean {
   try {
     const file = getCacheFile(fileName);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const envelope: CatalogCacheEnvelope = {
-      version: CACHE_VERSION,
+      version,
       fetchedAt: fetchedAt ?? Date.now(),
       models,
     };

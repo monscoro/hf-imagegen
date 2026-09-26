@@ -422,7 +422,9 @@ function toModelInfo(
     speed: hfSpeedFromLatency(latency) ?? "medium",
     access: "free",
     source,
-    image_edit: entry ? entry.task === "image-to-image" : undefined,
+    // image_edit gilt nur fuer Bild-Tasks: auf einer Video-Liste waere ein
+    // false ("bekannt nicht editierbar") fuer ein Feld, das dort nichts soll.
+    image_edit: entry ? (source === "video" ? undefined : entry.task === "image-to-image") : undefined,
     // Bei source='provider' belegt die Query selbst die Verfuegbarkeit. Der
     // Katalog kennt das Modell dann vielleicht nicht (ausserhalb der Top-1000
     // nach Likes) — statt das Feld zu leeren, wird der abgefragte Provider
@@ -556,7 +558,10 @@ export async function getHfVideoModels(
   // Provider-Filter kaeme beim ersten Call nach jedem Reload nur Schrott.
   // Platten-Cache macht das im Normalfall netzfrei.
   await ensureCatalogBestEffort();
-  const models = keepUsableModels([...seen.values()], limit);
+  // Tag-Reihenfolge (T2V vor I2V) sagt nichts ueber Qualitaet — likes ueber
+  // beide Tags sortiert, damit kein I2V-only-Treffer unter allen T2V landet.
+  const byLikes = [...seen.values()].sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0));
+  const models = keepUsableModels(byLikes, limit);
 
   const result = models.map((m) =>
     toModelInfo(m, "video", `${m.id} — Video model (HuggingFace pipeline_tag)`)
@@ -708,18 +713,33 @@ export async function getLoRAsForModel(
       if (loraBase.includes(searchBase) || loraBase.includes(modelShort)) return true;
       // Video-LoRAs deklarieren die Familie statt der Version
       // ("Comfy-Org/MiniMax-H3" statt "MiniMax-H3-Turbo") — Familien-Match,
-      // sonst wuerde der Versionsfilter fast alles verwerfen.
-      const family = VIDEO_MODEL_FAMILIES.find((f) => searchBase.includes(f));
-      return family ? loraBase.includes(family) : false;
+      // sonst wuerde der Versionsfilter fast alles verwerfen. Token-Praefix
+      // (kein Substring), damit "swan" nicht zu "wan" wird.
+      const family = matchesVideoFamily(baseModel);
+      return family ? matchesVideoFamily(loraBase) === family : false;
     });
 }
 
 /** Video-Basis-Modell? Entscheidet Query-Formulierung und Usage-Texte. */
 const VIDEO_MODEL_FAMILIES = ["wan", "ltx", "hunyuan", "cogvideo", "minimax"];
 
+/**
+ * Familien-Match per Token-Praefix statt Substring: "wan2" gehoert zu "wan",
+ * "swan" nicht (Substring wuerde treffen). Nutzt repoNameTokens wie die
+ * Artefakt-Filter.
+ */
+function matchesVideoFamily(modelId: string): string | null {
+  const tokens = repoNameTokens(modelId);
+  for (const f of VIDEO_MODEL_FAMILIES) {
+    for (const t of tokens) {
+      if (t === f || t.startsWith(f)) return f;
+    }
+  }
+  return null;
+}
+
 export function isVideoBaseModelId(modelId: string): boolean {
-  const key = modelId.toLowerCase();
-  return VIDEO_MODEL_FAMILIES.some((f) => key.includes(f));
+  return matchesVideoFamily(modelId) !== null;
 }
 
 /** Familien-Tags (Bild + Video) fuer das tags-Feld. */
@@ -738,9 +758,9 @@ const LORA_FAMILY_TAGS = [
   "video",
 ];
 
-/** Rauschen raus: Lizenzen, Regionen, base_model-Tags, Sprachcodes, Task-/Runtime-Tags. */
+/** Rauschen raus: Lizenzen, Regionen, base_model-Tags, Sprachcodes (ausser "xl"), Task-/Runtime-Tags. */
 const LORA_TAG_NOISE =
-  /^(arxiv:|license:|region:|base_model:)|^[a-z]{2}$|^(diffusers|comfyui|safetensors|transformers|pytorch|text-to-video|image-to-video|text-to-image|image-to-image)$/;
+  /^(arxiv:|license:|region:|base_model:)|^(?!xl$)[a-z]{2}$|^(diffusers|comfyui|safetensors|transformers|pytorch|text-to-video|image-to-video|text-to-image|image-to-image)$/;
 
 /**
  * Kurzbeschreibung aus Listen-Daten: Die List-Response enthaelt kein cardData,

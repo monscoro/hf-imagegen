@@ -152,9 +152,12 @@ function buildPollinationsVideoRows(
     if (vcaps.length) parts.push(vcaps.join("+"));
     const rate = cap.pricing?.completionVideoSeconds;
     const cost = typeof rate === "number" ? `${rate} pollen/s` : undefined;
+    // Degraded-Upstream transparent machen: wer einen angeschlagenen Upstream waehlt,
+    // soll es vor dem bezahlten Call sehen (z.B. seedance-2.0).
+    const degraded = cap.health?.status === "degraded" ? " (degraded upstream)" : "";
     rows.push({
       id: cap.name,
-      description: parts.length > 0 ? `${cap.name} — ${parts.join(", ")}` : cap.name,
+      description: (parts.length > 0 ? `${cap.name} — ${parts.join(", ")}` : cap.name) + degraded,
       style: "varies",
       speed: "medium",
       access: cap.paid_only ? "pro" : "free",
@@ -1237,7 +1240,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         tier: z.enum(["draft", "standard", "final"]).default("standard").describe(
           "Model tier when model_id is blank: draft = bytedance/seedance-1-pro-fast (cheapest), " +
           "standard = minimax/minimax-h3-max-turbo (sweet spot, audio), " +
-          "final = x-ai/grok-video-pro (most tolerant filters). Pick is reported in notes."
+          "final = x-ai/grok-imagine-video (most tolerant filters). Pick is reported in notes."
         ),
         duration: z.number().int().min(1).max(120).default(5).describe(
           "Clip length in seconds. Validated against the model's limits (fails fast with the " +
@@ -1599,7 +1602,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           .min(5)
           .max(50)
           .default(20)
-          .describe("Maximum number of models (only for provider/trending/downloads/video; ignored for curated/pollinations). Filtering (quantizations, LoRAs, pre-SDXL, models without live provider) may return fewer — see requested_limit/returned."),
+          .describe("Maximum number of models (only for provider/trending/downloads/video; ignored for curated/pollinations). 'limit' caps the HF half; the Pollinations half of 'video' always lists all live models (~18, stable size). Filtering (quantizations, LoRAs, pre-SDXL, models without live provider) may return fewer — see requested_limit/returned."),
         include_loras: z.boolean()
           .default(false)
           .describe("Include compatible LoRAs per model (HF image sources only, skipped for source='pollinations'/'video'; slower, needs API calls)."),
@@ -1655,8 +1658,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             // Zwei Herkuenfte, eine Liste: Pollinations live (direkt nutzbar,
             // generate_video rendert heute nur dort) zuerst, dann HF live
             // (Provider-anreichert, Vorschein auf das kuenftige HF-Backend).
-            // Faellt der Video-Katalog aus, bleiben die HF-Rows allein stehen.
-            const hfVideo = await getHfVideoModels(limit, token || undefined);
+            // Jede Haelfte faellt eigenstaendig aus: HF-Fehler duerfen die
+            // Pollinations-Rows nicht mitreissen und umgekehrt (dort via null).
+            let hfVideo: ModelInfo[] = [];
+            try {
+              hfVideo = await getHfVideoModels(limit, token || undefined);
+            } catch {
+              // HF weg — Pollinations-Rows allein sind besser als tool_error.
+            }
             models = [
               ...buildPollinationsVideoRows(await loadPollinationsVideoCapabilities()),
               ...hfVideo,
@@ -1702,8 +1711,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           source === "video";
 
         // Preise: eine Quelle braucht genau eine Haelfte. curated/image-edit/
-        // provider/trending/downloads zeigen HF-Modelle, nur source=pollinations
-        // zeigt Pollinations-Preise aus dem Live-Katalog.
+        // provider/trending/downloads/video zeigen HF-Modelle, nur source=pollinations
+        // zeigt Pollinations-Preise aus dem Live-Katalog. (Video-Pollinations-Rows
+        // tragen ihren Preis direkt in cost, siehe buildPollinationsVideoRows.)
         const costMap = isPollinations ? await getPollinationsCostMap() : getHfCosts();
 
         const catalogState = isPollinations ? getCatalogState() : null;
@@ -1773,7 +1783,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           // (Quantisierung, LoRA, pre-SDXL, ohne live-Provider) verwirft aus bis
           // zu 500 API-Zeilen — returned < requested_limit ist normal, kein Fehler.
           ...(usesModelCache ? { requested_limit: limit, returned: models.length } : {}),
-          current_default_model: currentDefault,
+          // Bild-Default in einer Video-Antwort wuerde zum Missbrauch einladen
+          // (is_default waere nie true) — video meldet keinen Default.
+          ...(source === "video" ? {} : { current_default_model: currentDefault }),
           ...(isPollinations
             ? { pollinations_default_model: POLLINATIONS_DEFAULT_MODEL }
             : {}),
@@ -1797,6 +1809,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   provider: modelCacheInfo.provider,
                   trending: modelCacheInfo.trending,
                   downloads: modelCacheInfo.downloads,
+                  video: modelCacheInfo.video,
                 },
               }
             : {}),

@@ -82,6 +82,14 @@ import {
   type PollinationsEditModelCapabilities,
 } from "./pollinations";
 import { getHfCosts, getPollinationsCostMap, getCatalogState } from "./costCache";
+import {
+  resolveVideoModel,
+  resolveVideoDuration,
+  uploadStillToPollinations,
+  buildVideoRequestUrl,
+  downloadVideo,
+  type VideoTier,
+} from "./video";
 import { getModelCacheInfo } from "./modelCache";
 import {
   getAllDirectives,
@@ -1121,6 +1129,226 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           },
           ctx
         );
+      }),
+    }),
+
+    tool({
+      name: "generate_video",
+      description: text`
+        Animate a still image into a short video clip (image-to-video, Pollinations only).
+        Typical chain: generate_image / compose_images → generate_video.
+
+        • 'image' (required): start frame — absolute file_path from an earlier result (preferred),
+          bare filename (output dir), relative path or public URL. Local files are uploaded to the
+          Pollinations media store first (unlisted, 30-day lifecycle); public URLs skip the upload.
+        • 'motion' OR 'cuts' (one required): 'motion' renders one clip; 'cuts' (2–6) renders an
+          exploration set of the SAME still with different motions, sequentially — one failed cut
+          doesn't kill the set. Blank motion = you write it: camera move + subject motion, scaled
+          to the duration ("5s: slow dolly-in, fabric sways in wind").
+        • 'tier' picks the model when model_id is blank: draft (cheapest exploration),
+          standard (sweet spot with audio), final (most tolerant filters). Explicit model_id wins.
+        • 'duration' is validated against the model's limits and fails fast (veo 4/6/8, wan 2–15 …).
+        • 'resolution': tier string per model ("480p"/"720p"/"1080p") — 480p default keeps
+          exploration cheap, raise for finals. 'aspect_ratio': "16:9"/"9:16" (blank = server decides).
+        • 'end_image' (optional): end frame (models with end_frame capability). 'audio' where supported.
+
+        BACKEND is always Pollinations (needs pollinationsApiKey); HF video comes later.
+        Renders take minutes. Each clip counts one daily-guard unit and is billed per second.
+      `,
+      parameters: {
+        image: z.string().trim().min(1).describe(
+          "Start frame — absolute file_path from an earlier generate_image/compose_images result " +
+          "(preferred), bare filename (output dir), relative path or public http(s) URL."
+        ),
+        end_image: z.string().default("").describe(
+          "Optional end frame (same path rules as 'image'). Only models with end_frame capability " +
+          "use it; others ignore it with a note."
+        ),
+        motion: z.string().default("").describe(
+          "Motion prompt for ONE clip (camera + subject movement, scaled to 'duration'). " +
+          "Required unless 'cuts' is set. Blank with empty 'cuts' fails."
+        ),
+        cuts: z.array(z.string().trim().min(1)).max(6).default([]).describe(
+          "Exploration set: 2–6 motion variants of the SAME still, rendered sequentially " +
+          "(cheap: use tier='draft', resolution='480p' — a 4-cut set costs ~0.30 pollen). " +
+          "One failed cut doesn't kill the set; each cut returns file_path or error."
+        ),
+        model_id: z.string().default("").describe(
+          "Model override — always wins over 'tier'. Blank = tier pick. Full IDs " +
+          "(aliases like image models are NOT documented for video — use full IDs)."
+        ),
+        tier: z.enum(["draft", "standard", "final"]).default("standard").describe(
+          "Model tier when model_id is blank: draft = bytedance/seedance-1-pro-fast (cheapest), " +
+          "standard = minimax/minimax-h3-max-turbo (sweet spot, audio), " +
+          "final = x-ai/grok-video-pro (most tolerant filters). Pick is reported in notes."
+        ),
+        duration: z.number().int().min(1).max(120).default(5).describe(
+          "Clip length in seconds. Validated against the model's limits (fails fast with the " +
+          "valid values instead of burning a billed call)."
+        ),
+        aspect_ratio: z.string().default("").describe(
+          'Orientation, e.g. "16:9" or "9:16" (fashion portrait). Blank = server decides. ' +
+          "h3-max-turbo also supports 21:9/4:3/1:1/3:4."
+        ),
+        resolution: z.string().default("480p").describe(
+          "Resolution tier per model (480p/720p/1080p; minimax uses 768p instead of 720p). " +
+          "480p keeps exploration cheap; raise for finals. Higher tiers bill more per second."
+        ),
+        audio: z.boolean().default(false).describe(
+          "Generate audio with the video (only models with audio_output; some always add audio)."
+        ),
+        name: z.string().default("").describe(
+          "Optional filename label (e.g. 'runway-turn'). Sanitized like image results: " +
+          "pv-2026-09-26_12-00-00_runway-turn.mp4. Blank = timestamp only."
+        ),
+      },
+      implementation: safe_impl("generate_video", async (args, ctx) => {
+        const pollinationsKey = getPollinationsKey();
+        if (!pollinationsKey) {
+          throw new Error(
+            "Pollinations API key is not set (required since Sep 2026). " +
+            "Set pollinationsApiKey in plugin config (get one at https://enter.pollinations.ai/keys)."
+          );
+        }
+        const rateLimitResult = checkRateLimit(getRateLimitConfig());
+        if (!rateLimitResult.ok) {
+          throw new Error(rateLimitResult.error);
+        }
+        // Gleiche Account-Rate wie generate_image (~1 Request pro 5s).
+        const pollinationsCooldownMs = 5_000;
+        const waited = Date.now() - lastPollinationsCall;
+        if (waited < pollinationsCooldownMs) {
+          throw new Error(
+            `Pollinations allows ~1 request per ${pollinationsCooldownMs / 1000}s on your tier. ` +
+            `Wait ${Math.ceil((pollinationsCooldownMs - waited) / 1000)}s and retry.`
+          );
+        }
+
+        const motions = args.cuts.length > 0 ? [...args.cuts] : [args.motion.trim()].filter((m) => m);
+        if (motions.length < (args.cuts.length > 0 ? 2 : 1)) {
+          throw new Error(
+            "Provide 'motion' for one clip or 'cuts' (2–6 motion variants) for an exploration set. " +
+            "Blank motion with empty cuts cannot render."
+          );
+        }
+
+        const outputDir = getOutputDir();
+        await mkdir(outputDir, { recursive: true });
+
+        const startInput = await resolveImageInput(args.image, [outputDir]);
+        const endInput = args.end_image.trim()
+          ? await resolveImageInput(args.end_image, [outputDir])
+          : null;
+
+        const { model: modelToUse, autoNote } = resolveVideoModel(args.model_id, args.tier as VideoTier);
+        const duration = resolveVideoDuration(modelToUse, args.duration);
+
+        const notes: string[] = [];
+        if (autoNote) notes.push(autoNote);
+        notes.push(
+          "Pollinations video is billed per generated second (model pricing: GET /video/models). " +
+          `This call rendered ${motions.length} clip(s) of ${duration}s.`
+        );
+
+        // Lokale Stills hochladen (unlisted Media-URL als Startframe); bereits
+        // oeffentliche URLs werden als Bytes erneut hochgeladen — ein Upload,
+        // keine zweite Logik. Endframe nur mitgeben, sonst ignorieren (Note).
+        ctx.status("Uploading start frame…");
+        const startUrl = await uploadStillToPollinations(startInput.buffer, startInput.mimeType, pollinationsKey);
+        const endUrl = endInput
+          ? await uploadStillToPollinations(endInput.buffer, endInput.mimeType, pollinationsKey)
+          : null;
+        const imageUrls = endUrl ? [startUrl, endUrl] : [startUrl];
+        if (!endUrl && args.end_image.trim()) {
+          notes.push("No end frame supplied — single start frame used.");
+        }
+
+        if (isGenerating) {
+          throw new Error("Another generation is already in progress. Wait for it to finish.");
+        }
+        isGenerating = true;
+
+        try {
+          const stamp = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
+          const slug = slugifyFilename(args.name);
+          const clips: { motion: string; file_path?: string; file_size_bytes?: number; error?: string }[] = [];
+
+          for (let i = 0; i < motions.length; i++) {
+            const motionText = motions[i];
+            const tag = motions.length > 1 ? ` (cut ${i + 1}/${motions.length})` : "";
+            try {
+              const url = buildVideoRequestUrl({
+                motion: motionText,
+                model: modelToUse,
+                duration,
+                aspectRatio: args.aspect_ratio,
+                resolution: args.resolution,
+                audio: args.audio,
+                imageUrls,
+                apiKey: pollinationsKey,
+              });
+              ctx.status(`Rendering video${tag} (${modelToUse}, ~minutes)…`);
+              const buffer = await downloadVideo(url, pollinationsKey);
+              const filename = `pv-${stamp}${slug ? `-${slug}` : ""}${motions.length > 1 ? `-cut${i + 1}` : ""}.mp4`;
+              const filePath = path.join(outputDir, filename);
+              await writeFile(filePath, buffer);
+              recordGeneration();
+              lastPollinationsCall = Date.now();
+              clips.push({ motion: motionText, file_path: filePath, file_size_bytes: buffer.length });
+            } catch (cutErr: unknown) {
+              const msg = cutErr instanceof Error ? cutErr.message : String(cutErr);
+              clips.push({ motion: motionText, error: msg });
+            }
+          }
+
+          const quota = checkRateLimit(getRateLimitConfig());
+          const succeeded = clips.filter((c) => c.file_path);
+          const quotaBlock = {
+            guard: "plugin daily limit (config), not Pollen budget",
+            limit: quota.limit,
+            used: quota.used,
+            remaining: quota.remaining,
+            resets_in_hours: quota.resetInHours,
+          };
+          const base = {
+            success: succeeded.length > 0,
+            output_dir: outputDir,
+            backend: "pollinations",
+            model_used: modelToUse,
+            duration,
+            aspect_ratio: args.aspect_ratio || null,
+            resolution: args.resolution,
+            audio: args.audio,
+            start_image: args.image,
+            end_image: args.end_image.trim() || null,
+            mime_type: "video/mp4",
+            quota: quotaBlock,
+            notes: notes.length > 0 ? notes : undefined,
+          };
+          if (motions.length === 1) {
+            const clip = clips[0];
+            return json({
+              ...base,
+              file_path: clip.file_path,
+              filename: clip.file_path ? path.basename(clip.file_path) : undefined,
+              file_size_bytes: clip.file_size_bytes,
+              motion: clip.motion,
+              error: clip.error,
+              message: clip.file_path
+                ? `Video saved to ${clip.file_path}`
+                : `Video failed: ${clip.error}`,
+            });
+          }
+          return json({
+            ...base,
+            rendered: succeeded.length,
+            failed: clips.length - succeeded.length,
+            clips,
+            message: `${succeeded.length}/${clips.length} cuts rendered to ${outputDir}`,
+          });
+        } finally {
+          isGenerating = false;
+        }
       }),
     }),
 

@@ -61,7 +61,7 @@ Compiled `.js` files are build output and intentionally **not** tracked in git (
 
 ---
 
-## Tools (8)
+## Tools (9)
 
 ### `generate_image` — Generate from text
 
@@ -128,6 +128,14 @@ Use it when the result has to **merge** sources — "image 1 is the subject, ima
 | `name` | `""` | Optional filename slug, same rules as `generate_image`. |
 
 `backend` is deliberately **not** a parameter. HF Inference accepts exactly one reference and rejects the rest, so a second image is impossible there — exposing the switch would only offer a guaranteed error. The tool is Pollinations by construction and needs `pollinationsApiKey`. That also means `provider`, `negative_prompt` and `lora_id` are absent: all three are HF-only, and HF cannot do this task.
+
+### `generate_video` — Animate a still into a clip (pollinations)
+
+```
+generate_video(image, end_image?, motion?, cuts?, model_id?, tier?, duration?, aspect_ratio?, resolution?, audio?, name?)
+```
+
+Still → Startframe-Upload (unlisted Media-URL) → `GET /video/{motion}` → MP4 nach `~/images` (`pv-…mp4`). Ein Clip pro Call oder ein Explorations-Satz: `cuts` (2–6 Motion-Varianten desselben Stills, sequenziell, Einzelfehler killen den Satz nicht). `motion` leer = LLM schreibt Kamera+Subjekt-Bewegung, dauer-skaliert. `tier` bei leerer `model_id`: `draft` (`seedance-1-pro-fast`, billigste Exploration), `standard` (`h3-max-turbo`, Sweet Spot mit Audio), `final` (`grok-video-pro`, toleranteste Filter) — Wahl steht in den Notes. `duration` wird gegen Modell-Limits validiert (fail fast statt abgerechnetem Fehlcall), `resolution` pro Modell-Tier (`480p` = billige Exploration), `aspect_ratio` (`16:9`/`9:16`), `audio` wo unterstützt. Jeder Clip zählt eine Daily-Guard-Einheit, abgerechnet wird pro Sekunde. Backend ist Pollinations per Konstruktion (HF-Video folgt).
 
 ### `list_models` — Browse models per backend
 
@@ -290,6 +298,8 @@ Two limits the catalog number doesn't show, so they are carried in a `note` fiel
 **Own style library:** *"Create these Neigungsprompts: cinematic-noir, dreamy-pastel"* → LLM builds entries → `inclination_prompt_manage({action:"activate"})` activates them.
 
 **Community-alpha fallback (Pollinations):** if a `community/*` model fails, retry with `klein` or `flux`.
+
+**Animate:** still (`file_path` aus `generate_image`/`compose_images`) + motion → `generate_video`. Exploration: `cuts` mit 3–4 Motion-Ideen in `480p`/`tier:"draft"` (~0.30 Pollen), sichten, dann Final mit `tier:"final"` in `720p`/`1080p`.
 
 **Find results:** `list_image_directory({limit:1})` → `output_directory` + `filename` (absolute path) → straight into `image_edit`. Images outside the output dir: `list_image_directory({directories:["<folderA>","<folderB>"]})`, then `compose_images` with one absolute path per folder.
 

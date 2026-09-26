@@ -1218,9 +1218,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           exploration cheap, raise for finals. 'aspect_ratio': "16:9"/"9:16" (blank = server decides).
         • 'end_image' (optional): end frame (models with end_frame capability). 'audio' where supported.
 
-        BACKENDS: 'pollinations' (default, needs pollinationsApiKey) — full feature set above.
-        'hf' (needs HF token): image-to-video via Inference Providers (default Wan2.2-TI2V-5B,
-        provider 'auto' or fal-ai/replicate/wavespeed). HF v1 uses model defaults for length
+        BACKENDS: 'pollinations' (default, needs pollinationsApiKey) — full feature set above, verified live.
+        'hf' (needs HF token with Inference-Providers permission): image-to-video via Inference Providers
+        (default Wan2.2-TI2V-5B, provider 'auto' or fal-ai/replicate/wavespeed) — EXPERIMENTAL, not yet
+        verified live (no working token in dev). HF v1 uses model defaults for length
         and size — duration/resolution/aspect_ratio/audio/end_image/tier are Pollinations-only
         and noted as ignored; video LoRAs need a live-verified provider path first (follow-up).
         Video requests send safe=false (filters off, documented default). If both 'motion' and 'cuts'

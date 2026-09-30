@@ -4,6 +4,7 @@ import {
 } from "@lmstudio/sdk";
 import { getActiveDirectives } from "./directiveStore";
 import { getActiveRecords } from "./libraryStore";
+import { isBallerinaBook, isBallerinaProfile } from "./curatedLibrary";
 import { pluginConfigSchematics } from "./config";
 
 const SYSTEM_RULES = `\
@@ -136,10 +137,14 @@ function stripInclinationRules(rules: string): string {
 }
 
 /** Scope-Split: "both" steht in beiden Bloecken (muss motion-safe formuliert sein). */
-function buildActiveDirectiveBlock(configText: string): string {
+function buildActiveDirectiveBlock(configText: string, includeBallerina = true): string {
   try {
-    const actives = getActiveDirectives(configText);
-    const activeRecords = getActiveRecords();
+    const rawActives = getActiveDirectives(configText);
+    const rawRecords = getActiveRecords();
+    // Experiment-Schalter aus: Ballerina-Eintraege wirken wie nicht aktiv
+    // (Stack bleibt gespeichert und lebt bei Re-Enable wieder auf).
+    const actives = includeBallerina ? rawActives : rawActives.filter((a) => !isBallerinaProfile(a.id));
+    const activeRecords = includeBallerina ? rawRecords : rawRecords.filter((r) => !isBallerinaBook(r.book));
     const isVideo = (s?: string) => s === "video" || s === "both";
     const isImage = (s?: string) => s !== "video";
     const imageProfiles = actives.filter((a) => isImage(a.scope));
@@ -179,14 +184,17 @@ export async function promptPreprocessor(
   let inclinationsEnabled = true;
   // Config-Schalter für Video (default an): ohne generate_video kein Routing.
   let videoEnabled = true;
+  // Experiment-Schalter fürs Ballerina-Lorebook (default an).
+  let ballerinaEnabled = true;
   try {
     const cfg = ctl.getPluginConfig(pluginConfigSchematics);
     inclinationsEnabled = cfg.get("enableInclinationPrompts") !== false;
     videoEnabled = cfg.get("enableVideo") !== false;
+    ballerinaEnabled = cfg.get("enableBallerinaLorebook") !== false;
   } catch {
     // Config nicht lesbar → bisheriges Verhalten (an) beibehalten.
   }
-  const activeBlock = inclinationsEnabled ? buildActiveDirectiveBlock("") : "";
+  const activeBlock = inclinationsEnabled ? buildActiveDirectiveBlock("", ballerinaEnabled) : "";
   let rules = inclinationsEnabled ? SYSTEM_RULES : stripInclinationRules(SYSTEM_RULES);
   if (!videoEnabled) {
     // Video-Routing raus (Tool ist dann nicht registriert) — eine Zeile,

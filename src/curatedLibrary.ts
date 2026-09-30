@@ -49,6 +49,16 @@ export const LIBRARY_ASPECTS = [
   "technique",
 ] as const;
 
+/** Experimentelles Buch + Profil (per Config-Schalter blendbar, siehe pluginConfigSchematics). */
+export const BALLERINA_BOOK_ID = "ballerina";
+export const BALLERINA_PROFILE_ID = "ballerina-lorebook";
+export function isBallerinaBook(bookId: string): boolean {
+  return bookId.trim().toLowerCase() === BALLERINA_BOOK_ID;
+}
+export function isBallerinaProfile(profileId: string): boolean {
+  return profileId.trim().toLowerCase() === BALLERINA_PROFILE_ID;
+}
+
 export const CURATED_BOOKS: LibraryBook[] = [
   {
     id: "skillset",

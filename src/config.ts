@@ -65,4 +65,13 @@ export const pluginConfigSchematics = createConfigSchematics()
       "for browsing). Video renders bill per second — turn off to avoid accidental " +
       "credit spend. Default: on.",
   }, true)
+  .field("enableBallerinaLorebook", "boolean", {
+    displayName: "Enable Ballerina Lorebook (experimental)",
+    subtitle:
+      "Switch for the experimental Ballerina-Lorebook (book 'ballerina' + profile " +
+      "'ballerina-lorebook': positions, turns, jumps, pointe work). " +
+      "Off hides the book, its records and the profile from list/library/manage " +
+      "and stops injecting them. Active entries stay stored and resume when " +
+      "re-enabled. Default: on.",
+  }, true)
   .build();

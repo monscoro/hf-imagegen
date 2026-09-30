@@ -101,6 +101,28 @@ check(
   tp.includes("FLAT per image") && pp.includes("COST vs CAPABILITY")
 );
 
+// 8. Ballerina-Experiment: Config-Schalter blendet Buch/Profil überall aus.
+const cfg = read("config.ts");
+const cl = read("curatedLibrary.ts");
+check(
+  "Config kennt enableBallerinaLorebook",
+  cfg.includes("enableBallerinaLorebook")
+);
+check(
+  "Ballerina-Praedikate existieren",
+  cl.includes("BALLERINA_BOOK_ID") && cl.includes("isBallerinaBook")
+);
+check(
+  "toolsProvider filtert Ballerina (list/library/manage)",
+  tp.includes('cfg.get("enableBallerinaLorebook")') &&
+    tp.includes("isBallerinaBook") &&
+    tp.includes("isBallerinaProfile")
+);
+check(
+  "Preprocessor filtert Ballerina-Injektion",
+  pp.includes("includeBallerina") && pp.includes("isBallerinaBook")
+);
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed.`);
   process.exit(1);

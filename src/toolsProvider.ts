@@ -51,7 +51,7 @@ import {
 import { checkRateLimit, recordGeneration } from "./rateLimit";
 import { resolveImageInput } from "./imageInput";
 import { listOutputImages } from "./workspace";
-import { lookupLibrary } from "./curatedLibrary";
+import { lookupLibrary, isBallerinaBook, isBallerinaProfile } from "./curatedLibrary";
 import {
   getAllBooks,
   getAllRecords,
@@ -414,6 +414,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
   const inclinationsEnabled = cfg.get("enableInclinationPrompts") !== false;
   // Config-Schalter für Video (default an): generate_video kostet pro Sekunde.
   const videoEnabled = cfg.get("enableVideo") !== false;
+  // Experiment-Schalter fürs Ballerina-Lorebook (default an): aus blendet Buch,
+  // Records und Profil aus list/library/manage aus (Stack bleibt, pausiert nur).
+  const ballerinaEnabled = cfg.get("enableBallerinaLorebook") !== false;
+  const ballerinaOff = () =>
+    new Error(
+      "Ballerina-Lorebook ist experimentell und in der Config deaktiviert " +
+      "(enableBallerinaLorebook). Zum Nutzen in den Plugin-Einstellungen einschalten."
+    );
 
   let isGenerating = false;
   let lastPollinationsCall = 0;
@@ -2153,11 +2161,21 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       implementation: safe_impl("inclination_prompt_list", async ({ filter = "", detail = "compact" }) => {
         const full = detail === "full";
         const f = filter.trim().toLowerCase();
-        const profiles = getAllDirectives("");
-        const activeProfileIds = getActiveIds();
-        const activeRefs = getActiveRecordRefs();
-        const books = getAllBooks();
-        const records = getAllRecords();
+        const profiles = ballerinaEnabled
+          ? getAllDirectives("")
+          : getAllDirectives("").filter((d) => !isBallerinaProfile(d.id));
+        const activeProfileIds = ballerinaEnabled
+          ? getActiveIds()
+          : getActiveIds().filter((id) => !isBallerinaProfile(id));
+        const activeRefs = ballerinaEnabled
+          ? getActiveRecordRefs()
+          : getActiveRecordRefs().filter((ref) => !isBallerinaBook(ref.split("/")[0] ?? ""));
+        const books = ballerinaEnabled
+          ? getAllBooks()
+          : getAllBooks().filter((b) => !isBallerinaBook(b.id));
+        const records = ballerinaEnabled
+          ? getAllRecords()
+          : getAllRecords().filter((r) => !isBallerinaBook(r.book));
 
         const matchProfile = (d: (typeof profiles)[number]) =>
           !f || d.id.includes(f) || d.description.toLowerCase().includes(f);
@@ -2358,6 +2376,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
           if (store === "profile") {
             if (!cleanName) throw new Error('name (Profil-Id) ist Pflicht bei store:"profile".');
+            if (!ballerinaEnabled && isBallerinaProfile(cleanName)) throw ballerinaOff();
             switch (action) {
               case "create": {
                 if (!description.trim()) throw new Error("description ist Pflicht für profile.create.");
@@ -2442,6 +2461,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
 
           if (store === "book") {
             if (!cleanName) throw new Error('name (Buch-Id) ist Pflicht bei store:"book".');
+            if (!ballerinaEnabled && isBallerinaBook(cleanName)) throw ballerinaOff();
             switch (action) {
               case "create": {
                 const created = createBook(cleanName, description);
@@ -2542,6 +2562,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           // store === "record"
           if (!cleanBook) throw new Error('book (Buch-Id) ist Pflicht bei store:"record".');
           if (!cleanName) throw new Error('name (Record-Id) ist Pflicht bei store:"record".');
+          if (!ballerinaEnabled && isBallerinaBook(cleanBook)) throw ballerinaOff();
           const ref = refOf(cleanBook, cleanName);
           switch (action) {
             case "create": {
@@ -2638,7 +2659,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "inclination_prompt_library",
       description: text`
-        Nachschlagewerk für Technik-/Stil-Records — Bücher "skillset" (A01–A33), "lorebook" (Masken, Reiche, Töne, Filter) und "ballerina" (Positionen, Drehungen, Sprünge, Spitze) plus eigene Bücher – einheitlicher Prefix inclination_prompt_. READ-ONLY, verändert nichts.
+        Nachschlagewerk für Technik-/Stil-Records — Bücher "skillset" (A01–A33), "lorebook" (Masken, Reiche, Töne, Filter) und "ballerina" (Positionen, Drehungen, Sprünge, Spitze; experimentell, per enableBallerinaLorebook schaltbar) plus eigene Bücher – einheitlicher Prefix inclination_prompt_. READ-ONLY, verändert nichts.
 
         - query "" → kompakter Katalog (ref, id, book, aspect, keys) + facets + books.
         - query = exakte id ('A08', 'realm-combos', 'tone-rage') oder Keyword ('impact', 'aftercare') → voller Record.
@@ -2657,10 +2678,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         aspect: z.string().default("").describe("Optional: nur diese Facette (session, role, positions, bondage, sensation, play, training, tones, aftercare, spaces, safety, realm, technique)."),
       },
       implementation: safe_impl("inclination_prompt_library", async ({ query = "", book = "", aspect = "" }) => {
-        const all = getAllRecords();
-        const books = getAllBooks();
-        const activeRefs = getActiveRecordRefs();
         const cleanBook = book.trim().toLowerCase();
+        if (!ballerinaEnabled && cleanBook && isBallerinaBook(cleanBook)) throw ballerinaOff();
+        const all = ballerinaEnabled
+          ? getAllRecords()
+          : getAllRecords().filter((r) => !isBallerinaBook(r.book));
+        const books = ballerinaEnabled
+          ? getAllBooks()
+          : getAllBooks().filter((b) => !isBallerinaBook(b.id));
+        const activeRefs = getActiveRecordRefs();
         const cleanAspect = aspect.trim().toLowerCase();
         const res = lookupLibrary(all, { query, book, aspect });
 

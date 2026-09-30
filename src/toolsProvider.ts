@@ -82,6 +82,7 @@ import {
   getPollinationsVideoCatalogCacheInfo,
   listPollinationsCatalogExtras,
   detectImageMime,
+  getPollinationsKnownCost,
   POLLINATIONS_DEFAULT_MODEL,
   POLLINATIONS_DEFAULT_EDIT_MODEL,
   type PollinationsEditModelCapabilities,
@@ -205,6 +206,19 @@ function facetSummary(records: readonly { aspect: string }[]): string {
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([aspect, n]) => (n > 1 ? `${aspect}×${n}` : aspect))
     .join(", ");
+}
+
+/**
+ * Kostenschaetzung fuer Render-Results (Planungshilfe fuer die Tool-LLM).
+ * Pollinations-Bildpreise sind pauschal pro Bild (keine Groessenstaffel) aus der
+ * kuratierten Tabelle; HF laeuft ueber Provider-Credits. Meldet ehrlich "unknown"
+ * statt zu raten — dann list_models fragen.
+ */
+function estimateImageCost(backend: string, modelToUse: string): string {
+  if (backend === "pollinations") {
+    return getPollinationsKnownCost(modelToUse) ?? "unknown — see list_models source='pollinations'";
+  }
+  return getHfCosts()[modelToUse]?.cost ?? "provider credit (HF, see list_models)";
 }
 
 /**
@@ -639,6 +653,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           output_dir: outputDir,
           backend: usePollinations ? "pollinations" : "hf",
           model_used: modelToUse,
+          estimated_cost: estimateImageCost(usePollinations ? "pollinations" : "hf", modelToUse),
           input_image: imageInputs.length === 1 ? imageInputs[0] : imageInputs,
           input_image_count: imageInputs.length,
           input_source: primaryInput.source,
@@ -696,10 +711,21 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         PARAMETERS:
         • prompt: descriptive text — subject, style, lighting, mood, quality terms.
         • width/height: pollinations only. POST needs BOTH (a single dimension is ignored).
+          Sizes do NOT change the price — Pollinations bills flat per image.
         • seed: POST never sends seed — any seed value is ignored (note in result).
         • quality: only for gptimage/grok-imagine-image-2.0 family; ignored otherwise.
         • negative_prompt: HF only, ignored with pollinations.
         • lora_id: HF only, rejected with error on pollinations.
+
+        COST vs CAPABILITY (plan before rendering — every call bills):
+        • Pollinations image prices are FLAT per image (flux ~0.002, klein ~0.005,
+          kontext ~0.03, seedream ~0.035, grok ~0.053 pollen; gpt-image-2/gemini
+          token-based). Smaller sizes do NOT save money. Live costs: list_models.
+        • Cheap models fail complex scenes: flux.1-schnell is for simple/fast drafts,
+          NOT for multi-figure choreography, fine hands, or dense fashion-editorial —
+          those need FLUX.1-dev (hf), grok-imagine-image-quality or gpt-image-2.
+          A failed cheap call + a retry costs MORE than one capable call.
+        • The result carries 'estimated_cost' — use it to budget sets before rendering.
 
         FILES: saved under plugin output directory (config 'Output Directory'). Optional
         'name' appends a readable filename slug (sanitized) after the timestamp — set it
@@ -908,6 +934,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             output_dir: outputDir,
             backend: usePollinations ? "pollinations" : "hf",
             model_used: modelToUse,
+            estimated_cost: estimateImageCost(usePollinations ? "pollinations" : "hf", modelToUse),
             lora_used: cleanLora || null,
             lora_scale: cleanLora ? lora_scale : null,
             prompt,
@@ -1522,6 +1549,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             output_dir: outputDir,
             backend: usePollinations ? "pollinations" : "hf",
             model_used: modelToUse,
+            estimated_cost: usePollinations
+              ? `${motions.length} clip(s) × ${duration}s billed at the model rate (pollen/s — see list_models source='video')`
+              : "provider credit (HF)",
             duration,
             aspect_ratio: aspectRatio,
             resolution,

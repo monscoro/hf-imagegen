@@ -144,6 +144,26 @@ export function getPollinationsModels(): ModelInfo[] {
   return POLLINATIONS_KNOWN_MODELS;
 }
 
+/** Kurze Aliase auf kanonische IDs (wie in den Tool-Descriptions dokumentiert). */
+const POLLINATIONS_KNOWN_ALIASES: Record<string, string> = {
+  flux: "black-forest-labs/flux.1-schnell",
+  kontext: "black-forest-labs/flux.1-kontext-pro",
+  seedream5: "bytedance/seedream-5.0-lite",
+  aurora: "x-ai/grok-imagine-image-quality",
+  "nanobanana-pro": "google/gemini-3-pro-image",
+};
+
+/**
+ * Kostenschaetzung aus der kuratierten Tabelle — synchron, ohne Katalogzugriff,
+ * damit Render-Results sie immer tragen koennen. Preise sind pauschal pro Bild
+ * (keine Groessenstaffel); unbekannte Modelle → undefined (dann list_models fragen).
+ */
+export function getPollinationsKnownCost(modelId: string): string | undefined {
+  const key = modelId.trim().toLowerCase();
+  const canonical = POLLINATIONS_KNOWN_ALIASES[key] ?? modelId.trim();
+  return POLLINATIONS_KNOWN_MODELS.find((m) => m.id.toLowerCase() === canonical.toLowerCase())?.cost;
+}
+
 export interface PollinationsGenerateOptions {
   prompt: string;
   model: string;

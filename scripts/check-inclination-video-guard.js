@@ -87,6 +87,20 @@ check(
   tp.includes("Motion vocabulary") && tp.includes("slow dolly-in")
 );
 
+// 7. Kostentransparenz: Results tragen estimated_cost, Planung kennt flat pricing.
+check(
+  "Results tragen estimated_cost (image + video)",
+  tp.includes("estimated_cost: estimateImageCost") && tp.includes("clip(s) ×")
+);
+check(
+  "Kosten-Helper loest Kurstabelle + Aliase auf",
+  read("pollinations.ts").includes("getPollinationsKnownCost")
+);
+check(
+  "Planungshinweis: flat per image + cheap-fail-Warnung",
+  tp.includes("FLAT per image") && pp.includes("COST vs CAPABILITY")
+);
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed.`);
   process.exit(1);

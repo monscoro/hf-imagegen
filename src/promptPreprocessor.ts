@@ -63,6 +63,7 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - Use negative_prompt to exclude unwanted elements: "blurry, low quality, text, watermark, distorted"
 - HF backend: FLUX.1-dev (good quality, free), FLUX.1-schnell (fastest free), FLUX.2-dev (best, license needed), SDXL (stable).
 - FIRST CHOICE for complex prompts: use backend="hf" with FLUX.1-dev — best quality.
+- COST vs CAPABILITY (Pollinations bills FLAT per image — size never saves money): cheap models fail complex scenes, and a failed cheap call + retry costs MORE than one capable call. flux.1-schnell = simple/fast drafts only; multi-figure choreography, fine hands, dense fashion-editorial need FLUX.1-dev (hf), grok-imagine-image-quality or gpt-image-2. Every result reports 'estimated_cost' — budget sets before rendering.
 - Pollinations supports high-quality models too: x-ai/grok-imagine-image-quality with quality: medium, google/gemini-3-pro-image (4K).
   For permissive fashion-editorial without strict content filters, prefer grok-imagine-image-quality.
 - image_edit works on both backends: hf (FLUX.2-dev etc.) and pollinations — for one reference

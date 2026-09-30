@@ -2,8 +2,9 @@ import type { ImageDirective } from "./types";
 
 /**
  * Kuratierte Beispiel-Directives – bewusst exemplarisch, nicht enzyklopädisch.
- * Je eine pro Kategorie (Pose/Action, Interaktion, Setting, Narrativ) + eine knappe Kameratechnik.
- * Alle read-only, exemplarisch – Hauptbibliothek ist User-Config [ro]/[rw] + LLM-generiert.
+ * Je eine pro Kategorie (Pose/Action, Interaktion, Setting, Narrativ) + eine knappe Kameratechnik,
+ * dazu Editorial-, Voice- und Lorebook-Profile (dominatrix, ballerina) als Library-Funktion.
+ * Alle read-only, exemplarisch – Hauptbibliothek wächst user-seitig via inclination_prompt_manage.
  * Methodik siehe Prompt-Inclination-Techniques.md
  */
 export const CURATED_DIRECTIVES: ImageDirective[] = [
@@ -86,5 +87,14 @@ export const CURATED_DIRECTIVES: ImageDirective[] = [
       "inclination: dominatrix skillset — LIBRARY FUNCTION: technique detail lives in the keyword archive, fetch records via inclination_prompt_library ('' = catalog, book:'skillset', aspect-Filter). Facets: session, role, positions, bondage, sensation, play, training, tones, aftercare, spaces, safety, realm. Always-on core: kneel shoulders-width, hands on thighs, gaze lowered; impact warm-up hand or flogger then paddle, crop, cane on warm tissue; targets upper back, glutes, thighs — never kidneys, spine, joints, face; quick-release cuffs, circulation check every 8-10 min; sight first, voice stays the anchor, gags riskiest; ceremonial collar-off, water, next-day check. keyword → inclination_prompt_library → record → composed image prompt.",
     source: "curated",
     readonly: true,
+  },
+  {
+    id: "ballerina-lorebook",
+    description: "Ballerina-Lorebook – Bibliothek ballerina (class-arc, Positionen, Drehungen, Sprünge), motion-safe, Always-on-Technik-Kern",
+    prompt:
+      "inclination: ballerina lorebook — LIBRARY FUNCTION: technique detail lives in the keyword archive, fetch records via inclination_prompt_library ('' = catalog, book:'ballerina', aspect-Filter). Facets: session, positions, training, tones, technique, role, spaces, safety, aftercare. Always-on core: turnout from hips never knees, knees over toes in plié, weight centered, spotting on every turn, plié into and out of every jump, épaulement finishes every phrase, révérence closes every session. class-arc as visual story: barre (placement) → center (adagio line) → petit allegro → grand allegro diagonal → révérence. keyword → inclination_prompt_library → record → composed image prompt or one motion cut per record.",
+    source: "curated",
+    readonly: true,
+    scope: "both",
   },
 ];

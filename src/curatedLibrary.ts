@@ -3,6 +3,9 @@
  * - skillset : A01–A33 + zwei Slugs (switching-kenosis, faith-father)
  * - lorebook : Session-Bogen, Lorelei-Masken, Seven Realm Arts + Realm-Kombis,
  *              Töne, Kristina-Filter (bewusst OHNE die Skillset-Techniken — die stecken schon in skillset)
+ * - ballerina : Ballerina-Lorebook — class-arc, Positionen, Barre-Fundament, Drehungen,
+ *              Sprünge, Spitze, Pas de deux, Safety (alle scope both, motion-safe; Recherche: ABT Dictionary,
+ *              Britannica Ballett-Positionen, KC-Ballet-Syllabi, Wikipedia Ballett-Glossar)
  *
  * On-demand-Lookup via inclination_prompt_library — nicht Every-Turn-injiziert.
  * User-Bücher/-Records kommen aus libraryStore.ts (directives.json-Pendant library.json).
@@ -29,7 +32,7 @@ export interface LibraryRecord {
   scope?: import("./types").InclinationScope;
 }
 
-/** Facetten-Index (Auszug aus dem alten Prosa-Index im dominatrix-skillset-Profil). */
+/** Facetten-Index (Auszug aus dem alten Prosa-Index im dominatrix-skillset-Profil; "technique" aus dem Ballerina-Buch). */
 export const LIBRARY_ASPECTS = [
   "session",
   "role",
@@ -43,6 +46,7 @@ export const LIBRARY_ASPECTS = [
   "spaces",
   "safety",
   "realm",
+  "technique",
 ] as const;
 
 export const CURATED_BOOKS: LibraryBook[] = [
@@ -55,6 +59,12 @@ export const CURATED_BOOKS: LibraryBook[] = [
   {
     id: "lorebook",
     description: "Kristina Lorebook – Session-Bogen, Lorelei-Masken, Seven Realm Arts, Töne, Filter (Style/Charakter-Layer)",
+    source: "curated",
+    readonly: true,
+  },
+  {
+    id: "ballerina",
+    description: "Ballerina-Lorebook – Fünf Positionen, Barre-Fundament, Drehungen, Sprünge, Spitze, Pas de deux, Safety (Körper als Sprache, motion-safe: alle Records scope both)",
     source: "curated",
     readonly: true,
   },
@@ -78,6 +88,18 @@ const l = (id: string, aspect: string, keys: string[], content: string): Library
   content,
   source: "curated",
   readonly: true,
+});
+
+/** Ballerina-Records: reine Körpersprache ohne Kamera-Begriffe → motion-safe, scope both (Still + Video). */
+const b = (id: string, aspect: string, keys: string[], content: string): LibraryRecord => ({
+  id,
+  book: "ballerina",
+  aspect,
+  keys,
+  content,
+  source: "curated",
+  readonly: true,
+  scope: "both",
 });
 
 export const CURATED_RECORDS: LibraryRecord[] = [
@@ -194,6 +216,38 @@ export const CURATED_RECORDS: LibraryRecord[] = [
     `Zuhause: Ritual vor Spiel, Switching-Fenster, Monogamie-Regel, spiritueller Debrief. Mental Bondage und Inspection tragen den Alltag.`),
   l("kristina-filter", "safety", ["monogamie", "hard limits", "nicht verhandelbar", "nachsorge", "glaube"],
     `Nicht verhandelbar: private Monogamie bleibt heilig; professionelle sexuelle Elemente sind Arbeit, kein privates Öffnen; Switching ist Kenosis (Reich V) mit Rückkehr in Dominanz (Reich I); Glaube darf Ritual sein, nie Zwang gegenüber dem Partner; Technik ohne Nachsorge gilt als Charakterbruch; Reich VI nur mit explizitem Vertrag; kippt die Klarheit: drosseln, nicht härter werden.`),
+
+  // -- Ballerina-Lorebook (Aktionsfolge wie Session-Bogen: barre → center → allegro → révérence) --
+  b("class-arc", "session", ["stunden-ablauf", "barre", "center", "allegro", "reverence"],
+    `Fünf Stationen: Barre (plié, tendu, dégagé, rond de jambe, fondu — Platzierung) → Center (port de bras, adagio) → petit allegro → grand allegro → Révérence (Verbeugung, Cool-down). Jede Übung beginnt und endet in einer der fünf Positionen; Counts halten (plié 4 counts: 2 runter, 2 rauf). Motion: pro Station ein Cut.`),
+  b("five-positions", "positions", ["erste position", "zweite", "dritte", "vierte", "fünfte", "turnout"],
+    `1st: Fersen zusammen, Zehen auswärts (Turnout aus dem Hüftgelenk, Anfänger 90°, Ziel 180°). 2nd: ein Fuß Abstand, Linie halten. 3rd: Ferse ans Fußgewölbe. 4th: ein Fuß nach vorn, ein Fuß Abstand. 5th: Ferse an Zehen, parallel. Gewicht mittig, Oberschenkel auswärts, Knie über Fußmitte, Schultern unten, Arme rund. Alle Beinbewegungen starten und enden hier (Beauchamp 1680, Britannica).`),
+  b("port-de-bras", "positions", ["armhaltung", "bras bas", "epaulement", "croise", "efface"],
+    `Arme: bras bas/5th en bas, 1st, 2nd, 5th en haut, allongé. Wechsel immer über das Gateway (5th en avant/1st), Bewegung aus der Schulter, Ellbogen unsichtbar, Hände schlicht nie blumig. Épaulement (croisé/effacé, Kopf über der vorderen Schulter) gibt jeder Bewegung den künstlerischen Schluss (ABT). Motion: Arme schweben 1st → 5th en haut in 5s.`),
+  b("barre-foundation", "training", ["plie", "tendu", "degage", "rond de jambe", "fondu"],
+    `Barre baut Artikulation vor Elevation: demi-/grand plié (Knie über Zehen), tendu (gestreckt am Boden), dégagé/glissé (abgehoben), rond de jambe à terre en dehors/dedans, fondu (schmelzend beugen und strecken). Erst sauber platziert tanzen, dann port de bras und Kopf dazu (KC Ballet). Motion: langsames tendu devant → seconde, Gewicht bleibt mittig.`),
+  b("adagio-line", "tones", ["adagio", "developpe", "arabesque", "attitude", "releve"],
+    `Adagio = langsam getragen: développé über passé auf 90°+, relevé lent, arabesque (Stützbein gerade oder demi-plié, Spielbein hinten gestreckt, längste Linie Fingerspitzen bis Zehen; Vaganova vier, Cecchetti fünf), attitude (Spielbein gebeugt ca. 90°, Knie über Fuß). Arabesque schließt Phrasen ab — im Adagio wie im Allegro. Motion: 10s slow développé, Bein steigt, Arme öffnen.`),
+  b("pirouette", "technique", ["drehung", "retire", "spotting", "en dehors", "en dedans"],
+    `Ganze Körperdrehung auf einem Bein (pointe/demi-pointe), Spielbein meist retiré devant. En dehors (weg vom Stützbein) oder en dedans (hin). Körper zentriert über Stützbein, Hüfte und Schulter aligned, Schwung aus den Armen (danach still). Kopf spottet: zuletzt weg, zuerst zurück, Blick auf Augenhöhe fixiert. Motion: Vorbereitung 4th, eine saubere Umdrehung, Landung 5th.`),
+  b("fouette", "technique", ["peitsche", "fouette en tournant", "a la seconde"],
+    `Fouetté = Peitsche: Bein oder Körper schnellt um — développé devant, Peitsche nach seconde, zurück in passé; Öffnen und Schließen von Bein und Arm erzeugt den Spin. En tournant auf pointe/demi-pointe, meist en dedans, Finish in attitude oder arabesque. Richtungswechsel 90°/180° (tour jeté, valse en tournant). Motion: wiederholte Peitsche, Oberkörper ruhig.`),
+  b("petit-allegro", "technique", ["saute", "changement", "assemble", "jete", "sprung klein"],
+    `Petit allegro = kleine schnelle Sprünge: sauté (beidbeinig ab und auf), changement (Beinwechsel in der Luft, 5th in 5th), assemblé (versammelt landen), jeté ordinaire (gebürstet einbeinig ab, anderbeinig auf, Landung tombé, Spielbein cou-de-pied). Immer federndes plié hinein, kontrolliertes plié hinaus. Motion: 5s Serie kleiner Sprünge auf der Stelle.`),
+  b("grand-allegro", "technique", ["grand jete", "tour jete", "spagat luft", "sprung gross"],
+    `Grand allegro = große weite Sprünge: grand jeté (beide Beine 90° grand battement, Spagat in der Luft, Landung auf dem vorderen Bein; Anlauf glissade/chassé/pas couru), tour jeté (drehend, Fouetté 180°, Landung arabesque). Höhe aus Abstoß, Weite aus Vorschwung; Anlauf nie unterschlagen, Diagonale freihalten. Motion: Anlauf von der Ecke, ein großer Sprung über die Diagonale.`),
+  b("pointe-work", "training", ["spitze", "demi-pointe", "spitzenschuhe", "artikulation"],
+    `Relevé (weiches Hochsteigen, französisch kontinuierlich) vor Elevation; demi-pointe (Ballen) vor pointe (Spitze, nur mit Spitzenschuhen). Stützfuß à terre, sur pointe oder demi frei wählbar. Nie Turnout erzwingen, nie sicklen (Knöchel kippt). Artikulation täglich üben, bei Schmerz pausieren und kühlen. Motion: slow relevé in 5th, Arme 1st → 5th en haut.`),
+  b("partnering", "role", ["pas de deux", "duo", "heben", "promenade"],
+    `Pas de deux = Schritt zu zweit, Mechanik unsichtbar: Promenade, gestützte Pirouette, Lifts/Fangen/Tragen, Sprünge absichern. Harmonie der Koordination vor Effekt; Blickkontakt und Timing tragen, Kraft bleibt versteckt. Motion: langsame Promenade im Kreis, Blick gehalten, ein Lift ohne Schwung.`),
+  b("dancer-role", "role", ["corps", "solistin", "prima", "musikalitaet"],
+    `Corps (Linie, Synchronität), Soloistin (Variation), Erste (Adagio tragen). Épaulement als Finish jeder Bewegung, Musikalität als Pflicht: die Eins finden, Phrase der Lehrerin halten, aus der Ecke beginnen. Technik trägt Ausdruck, nie umgekehrt. Motion: Solo-Phrase 10s — adagio-Auftakt, eine Drehung, arabesque-Schluss.`),
+  b("studio-stage", "spaces", ["saal", "buehne", "barre", "spiegel", "kulisse"],
+    `Studio: Barre, Spiegel, Markierungen — Platzierung lernen. Bühne: Kulissen, ggf. geneigter Boden, Licht (nicht blenden lassen), Laufwege für grand allegro freihalten. Auftritt von der Ecke, Schluss mit Révérence. Motion: Traveling über die Diagonale, Raumtiefe nutzen.`),
+  b("turnout-safety", "safety", ["knie", "huefte", "sickle", "aufwaermen", "schonung"],
+    `Turnout kommt aus dem Hüftgelenk (90° erarbeiten, nie Knie drehen); plié immer Knie über Zehenmitte; arabesque-Hyperextension (Hüfte/Wirbelsäule) dosieren; Blasen und Druckstellen pflegen, Übertraining pausieren. Schmerz schlägt Szene — wie Safeword vor Szene.`),
+  b("reverence-close", "aftercare", ["verbeugung", "cool-down", "schluss", "zeremonie"],
+    `Révérence schließt jede Stunde wie das Collar-off die Session: port de bras tief, Verbeugung zu Lehrer, Musiker und Publikum, Dehnen, Wasser. Danach wieder Alltagsmenschen. Worte erst nach Halt und Atem. Motion: langsame Verbeugung, Arme senken, Blick heben, halten.`),
 ];
 
 export interface LibraryLookupOptions {

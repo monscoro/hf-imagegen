@@ -2272,7 +2272,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         ),
         book: z.string().default("").describe("Buch-Id — Pflicht bei store:'record'."),
         aspect: z.string().default("").describe(
-          "Facette für records: session, role, positions, bondage, sensation, play, training, tones, aftercare, spaces, safety, realm (oder eigener Slug)."
+          "Facette für records: session, role, positions, bondage, sensation, play, training, tones, aftercare, spaces, safety, realm, technique (oder eigener Slug)."
         ),
         description: z.string().default("").describe("Kurzbeschreibung/Titel — profile.create/update, book.create/update."),
         prompt: z.string().default("").describe("Neigungsprompt-Text (indirekt, nicht Bildinhalt) — profile.create/update."),
@@ -2608,7 +2608,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
     tool({
       name: "inclination_prompt_library",
       description: text`
-        Nachschlagewerk für Technik-/Stil-Records — Bücher "skillset" (A01–A33) und "lorebook" (Masken, Reiche, Töne, Filter) plus eigene Bücher – einheitlicher Prefix inclination_prompt_. READ-ONLY, verändert nichts.
+        Nachschlagewerk für Technik-/Stil-Records — Bücher "skillset" (A01–A33), "lorebook" (Masken, Reiche, Töne, Filter) und "ballerina" (Positionen, Drehungen, Sprünge, Spitze) plus eigene Bücher – einheitlicher Prefix inclination_prompt_. READ-ONLY, verändert nichts.
 
         - query "" → kompakter Katalog (ref, id, book, aspect, keys) + facets + books.
         - query = exakte id ('A08', 'realm-combos', 'tone-rage') oder Keyword ('impact', 'aftercare') → voller Record.
@@ -2624,7 +2624,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
       parameters: {
         query: z.string().default("").describe("Record-Id, Keyword oder Wortteil; '' = kompakter Katalog."),
         book: z.string().default("").describe("Optional: nur dieses Buch (z.B. 'skillset', 'lorebook' oder eigene Buch-Id)."),
-        aspect: z.string().default("").describe("Optional: nur diese Facette (session, role, positions, bondage, sensation, play, training, tones, aftercare, spaces, safety, realm)."),
+        aspect: z.string().default("").describe("Optional: nur diese Facette (session, role, positions, bondage, sensation, play, training, tones, aftercare, spaces, safety, realm, technique)."),
       },
       implementation: safe_impl("inclination_prompt_library", async ({ query = "", book = "", aspect = "" }) => {
         const all = getAllRecords();

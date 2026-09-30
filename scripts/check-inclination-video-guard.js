@@ -21,6 +21,9 @@ function check(name, cond) {
 
 const pp = read("promptPreprocessor.ts");
 const tp = read("toolsProvider.ts");
+const types = read("types.ts");
+const ds = read("directiveStore.ts");
+const ls = read("libraryStore.ts");
 
 // 1. STIMMUNG-Sektion ist auf Standbilder gescoped, Video explizit ausgenommen.
 check(
@@ -30,7 +33,7 @@ check(
 );
 check(
   "STIMMUNG nimmt generate_video motion/cuts aus",
-  pp.includes("F\u00fcr generate_video (motion/cuts) gelten sie NICHT")
+  pp.includes("F\u00fcr generate_video (motion/cuts) gelten") && pp.includes("NICHT")
 );
 check(
   "STIMMUNG warnt vor Still-Fotobegriffen in motion",
@@ -54,6 +57,34 @@ check(
   "stripInclinationRules matcht '== IMAGE SYSTEM PROMPT'",
   pp.includes('line.startsWith("== IMAGE SYSTEM PROMPT")') &&
     pp.includes("== IMAGE SYSTEM PROMPT / STIMMUNG ==")
+);
+
+// 5. Scope-Feld: Trennung Bild/Video ist im Code verankert (nicht nur Prosa).
+check(
+  "types.ts kennt InclinationScope (image|video|both)",
+  types.includes('InclinationScope = "image" | "video" | "both"')
+);
+check(
+  "directiveStore verwaltet scope (sanitize/create/update)",
+  ds.includes("sanitizeScope") && ds.includes("scope?: InclinationScope")
+);
+check(
+  "libraryStore verwaltet scope (sanitize/create/update)",
+  ls.includes("sanitizeScope") && ds.includes("scope")
+);
+check(
+  "Preprocessor splittet ACTIVE VIDEO CHOREOGRAPHY ab",
+  pp.includes("== ACTIVE VIDEO CHOREOGRAPHY ==")
+);
+check(
+  "manage kennt scope-Parameter (image|video|both)",
+  tp.includes('z.enum(["image", "video", "both"])')
+);
+
+// 6. Bewegungsvokabular am generate_video-Tool (Kamera + Subjekt, durationsskaliert).
+check(
+  "generate_video-Description nennt Motion vocabulary",
+  tp.includes("Motion vocabulary") && tp.includes("slow dolly-in")
 );
 
 if (failures > 0) {

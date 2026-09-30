@@ -1210,6 +1210,12 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           exploration set of the SAME still with different motions, sequentially — one failed cut
           doesn't kill the set. Blank motion = you write it: camera move + subject motion, scaled
           to the duration ("5s: slow dolly-in, fabric sways in wind").
+          Motion vocabulary (keep each cut to ONE move + ONE subject action):
+          camera: static hold, slow dolly-in/out, slow orbit left/right, gentle tilt up/down,
+          handheld sway, rack-focus pull; subject: gaze shift, head turn, breath/sway, fabric/hair
+          moves in wind, step forward, kneel/rise, hand gesture, slow approach. Scale to duration
+          (5s = one gesture, 10-15s = build + peak). Never still-photo terms (lens, DOF, bokeh,
+          grain, megapixels) — those belong to the start-frame prompt, not motion.
         • 'tier' picks the model when model_id is blank (Pollinations only): draft (cheapest
           exploration), standard (sweet spot with audio), final (most tolerant filters).
           Explicit model_id wins.
@@ -2140,6 +2146,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             description: d.description,
             source: d.source,
             readonly: d.readonly,
+            scope: d.scope ?? "image",
             is_active: activeProfileIds.includes(d.id),
             ...(full ? { prompt: d.prompt } : {}),
           }))
@@ -2165,13 +2172,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             ...(activeTotal === 0
               ? { hint: "Nichts aktiv — es wird kein Stimmungsprompt/Record injiziert." }
               : {}),
-            profiles: activeProfileIds.map((id) => ({
-              id,
-              description: profiles.find((p) => p.id === id)?.description ?? "",
-            })),
+            profiles: activeProfileIds.map((id) => {
+              const p = profiles.find((x) => x.id === id);
+              return { id, description: p?.description ?? "", scope: p?.scope ?? "image" };
+            }),
             records: activeRefs.map((ref) => {
               const r = records.find((x) => refOf(x.book, x.id) === ref);
-              return { ref, aspect: r?.aspect ?? "" };
+              return { ref, aspect: r?.aspect ?? "", scope: r?.scope ?? "image" };
             }),
           },
           profiles: {
@@ -2247,6 +2254,8 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         - update / delete / get: wie erwartet; curated (skillset, lorebook, Beispiel-Profile) bleiben read-only.
         - activate / deactivate: Ziel hängt am store; store:"book" aktiviert/deaktiviert ALLE Records des Buchs.
         - clear: leert BEIDE Stacks (profile-Stack + Record-Stack), store wird ignoriert.
+        - scope ("image"|"video"|"both", Default "image"): Wirkungsbereich bei create/update;
+          "video"/"both"-Einträge landen im separaten VIDEO-Block und dürfen motion/cuts färben.
         Jede Mutation meldet active_profiles + active_records (Stack-Sichtbarkeit).
 
         Nur lesen: inclination_prompt_list (Gesamtübersicht) und inclination_prompt_library (Record-Volltext).
@@ -2269,6 +2278,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         prompt: z.string().default("").describe("Neigungsprompt-Text (indirekt, nicht Bildinhalt) — profile.create/update."),
         content: z.string().default("").describe("Record-Volltext — record.create/update."),
         keys: z.string().default("").describe("Komma-getrennte Suchschlüssel — record.create/update."),
+        scope: z.enum(["image", "video", "both"]).optional().describe(
+          "Wirkungsbereich — profile/record.create/update. Default image (Standbilder); video/both landen im VIDEO-Block für motion/cuts."
+        ),
       },
       implementation: safe_impl(
         "inclination_prompt_manage",
@@ -2282,6 +2294,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           prompt = "",
           content = "",
           keys = "",
+          scope = undefined,
         }) => {
           const stack = () => ({
             active_profiles: getActiveIds(),
@@ -2319,7 +2332,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               case "create": {
                 if (!description.trim()) throw new Error("description ist Pflicht für profile.create.");
                 if (!prompt.trim()) throw new Error("prompt ist Pflicht für profile.create.");
-                const created = createDirective(cleanName, description, prompt, "");
+                const created = createDirective(cleanName, description, prompt, "", scope);
                 return json({
                   success: true,
                   store,
@@ -2332,13 +2345,15 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               case "update": {
                 const hasDesc = description.trim().length > 0;
                 const hasPrompt = prompt.trim().length > 0;
-                if (!hasDesc && !hasPrompt)
-                  throw new Error("Für profile.update mindestens description oder prompt mitgeben.");
+                const hasScope = scope === "image" || scope === "video" || scope === "both";
+                if (!hasDesc && !hasPrompt && !hasScope)
+                  throw new Error("Für profile.update mindestens description, prompt oder scope mitgeben.");
                 const updated = updateDirective(
                   cleanName,
                   hasDesc ? description : undefined,
                   hasPrompt ? prompt : undefined,
-                  ""
+                  "",
+                  hasScope ? scope : undefined
                 );
                 return json({ success: true, store, action, directive: updated, ...stack(), message: `Profil "${updated.id}" aktualisiert.` });
               }
@@ -2509,6 +2524,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 aspect,
                 keys: splitKeys(keys),
                 content,
+                ...(scope === "image" || scope === "video" || scope === "both" ? { scope } : {}),
               });
               const newRef = refOf(record.book, record.id);
               return json({
@@ -2527,12 +2543,14 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               const hasAspect = aspect.trim().length > 0;
               const hasKeys = keys.trim().length > 0;
               const hasContent = content.trim().length > 0;
-              if (!hasAspect && !hasKeys && !hasContent)
-                throw new Error("Für record.update mindestens aspect, keys oder content mitgeben.");
+              const hasScope = scope === "image" || scope === "video" || scope === "both";
+              if (!hasAspect && !hasKeys && !hasContent && !hasScope)
+                throw new Error("Für record.update mindestens aspect, keys, content oder scope mitgeben.");
               const updated = updateRecord(cleanBook, cleanName, {
                 ...(hasAspect ? { aspect } : {}),
                 ...(hasKeys ? { keys: splitKeys(keys) } : {}),
                 ...(hasContent ? { content } : {}),
+                ...(hasScope ? { scope } : {}),
               });
               return json({ success: true, store, action, record: updated, ...stack(), message: `Record "${refOf(updated.book, updated.id)}" aktualisiert.` });
             }
@@ -2560,10 +2578,16 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 success: true,
                 store,
                 action,
-                activated: { ref: refOf(record.book, record.id), book: record.book, id: record.id, aspect: record.aspect },
+                activated: { ref: refOf(record.book, record.id), book: record.book, id: record.id, aspect: record.aspect, scope: record.scope ?? "image" },
                 estimated_words: words(record.content),
                 ...stack(),
-                message: `Record "${ref}" aktiviert (${words(record.content)} Wörter). Wird indirekt bei generate_image/image_edit verwebt.`,
+                message: `Record "${ref}" aktiviert (${words(record.content)} Wörter). ${
+                  (record.scope ?? "image") === "video"
+                    ? "Wirkt im VIDEO-Block bei generate_video motion/cuts."
+                    : (record.scope ?? "image") === "both"
+                      ? "Wirkt in beiden Blöcken (Standbild + Video)."
+                      : "Wird indirekt bei generate_image/image_edit verwebt."
+                }`,
               });
             }
             case "deactivate": {
@@ -2616,6 +2640,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           book: r.book,
           aspect: r.aspect,
           keys: r.keys,
+          scope: r.scope ?? "image",
           is_active: activeRefs.includes(refOf(r.book, r.id)),
         });
 
@@ -2653,11 +2678,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           const r = res.records[0];
           return json({
             mode: "record",
-            record: { ref: refOf(r.book, r.id), id: r.id, book: r.book, aspect: r.aspect, keys: r.keys, content: r.content, source: r.source },
+            record: { ref: refOf(r.book, r.id), id: r.id, book: r.book, aspect: r.aspect, keys: r.keys, content: r.content, source: r.source, scope: r.scope ?? "image" },
             is_active: activeRefs.includes(refOf(r.book, r.id)),
             usage:
-              "Staging-Guidance: indirekt in den nächsten generate_image/image_edit-Prompt einweben " +
-              "(nicht wörtlich präfixen). On-demand, nicht injiziert — dauerhaft aktiv über " +
+              (r.scope === "video" || r.scope === "both"
+                ? "Video-Choreo: als reine Bewegungsbeschreibung in generate_video motion/cuts weben. "
+                : "Staging-Guidance: indirekt in den nächsten generate_image/image_edit-Prompt einweben (nicht wörtlich präfixen). ") +
+              "On-demand, nicht injiziert — dauerhaft aktiv über " +
               `inclination_prompt_manage({store:"record", action:"activate", book:"${r.book}", name:"${r.id}"}).`,
           });
         }

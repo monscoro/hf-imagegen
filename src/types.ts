@@ -63,10 +63,14 @@ export interface LoRAListResult {
 
 export type DirectiveSource = "curated" | "config" | "user";
 
+/** Wirkungsbereich: "image" = Standbilder (Default), "video" = nur Motion/Choreo, "both" = beides. */
+export type InclinationScope = "image" | "video" | "both";
+
 export interface ImageDirective {
   id: string;
   description: string;
   prompt: string;
   source: DirectiveSource;
   readonly: boolean;
+  scope?: InclinationScope;
 }

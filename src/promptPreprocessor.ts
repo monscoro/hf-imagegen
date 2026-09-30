@@ -84,9 +84,9 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - Content filter: kontext/seedream5 have STRICT filters — fashion-editorial often flagged. grok-imagine-image-quality does NOT.
 
 == IMAGE SYSTEM PROMPT / STIMMUNG ==
-- Neigungsprompts (Profile) und Bibliotheks-Records wirken INDIREKT und NUR für Standbilder:
+- Neigungsprompts (Profile) und Bibliotheks-Records wirken INDIREKT und per scope: scope "image" (Default) gilt NUR für Standbilder —
   leite daraus ab wie du generate_image/image_edit/compose_images prompts formulierst (Mood, Stil, Ausrichtung, theatralische Inszenierung). Nicht wortwörtlich präfixen, sondern stilistisch einweben. Mehrere können gleichzeitig aktiv sein = Stacking.
-  Für generate_video (motion/cuts) gelten sie NICHT: motion beschreibt nur Kamera- + Subjektbewegung des Startframes, keine Still-Fotografie-Begriffe (Lens, DOF, Bokeh, Grain, etc.) aus Inclinations übernehmen.
+  Für generate_video (motion/cuts) gelten Image-Einträge NICHT: motion beschreibt nur Kamera- + Subjektbewegung des Startframes, keine Still-Fotografie-Begriffe (Lens, DOF, Bokeh, Grain, etc.) übernehmen. Ausnahme: Einträge mit scope "video"/"both" stehen im separaten VIDEO-Block und sind motion-safe formuliert.
 - Übersicht (was existiert, was ist aktiv): inclination_prompt_list — active.state "leer" = es wird nichts injiziert;
   active zuerst, dann profiles (aktive Einträge zuerst, source/readonly am Abschnittskopf), dann library mit Facetten pro Buch.
   detail:"full" liefert alle Texte.
@@ -134,25 +134,36 @@ function stripInclinationRules(rules: string): string {
   return out.join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
+/** Scope-Split: "both" steht in beiden Bloecken (muss motion-safe formuliert sein). */
 function buildActiveDirectiveBlock(configText: string): string {
   try {
     const actives = getActiveDirectives(configText);
     const activeRecords = getActiveRecords();
-    const total = actives.length + activeRecords.length;
-    if (total === 0) return "";
-    const sections = [
-      ...actives.map(
-        (a) =>
-          `Name: ${a.id} — ${a.description}\nStimmungsprompt: ${a.prompt}\nQuelle: ${a.source}${a.readonly ? " (read-only)" : ""}`
-      ),
-      ...activeRecords.map(
-        (r) =>
-          `Name: ${r.book}/${r.id} (aspect ${r.aspect}) — ${r.keys.slice(0, 4).join(", ")}\nStimmungsprompt: ${r.content}\nQuelle: library/${r.book}${r.readonly ? " (read-only)" : ""}`
-      ),
-    ].join("\n---\n");
-    const stackingNote =
-      total > 1 ? `(Stacking: ${total} Einträge aktiv — verwebe alle.)\n` : "";
-    return `\n\n== ACTIVE IMAGE SYSTEM PROMPT ==\n${stackingNote}${sections}\nAnweisung: Wende die aktiven Stimmungsprompts indirekt an wenn du generate_image/image_edit/compose_images prompts formulierst (Mood, Kunststil, Ausrichtung, Inszenierung). Verwebe sie stilistisch, nicht als stures Präfix. Für generate_video motion/cuts NICHT anwenden — motion bleibt reine Bewegungsbeschreibung zum Startframe.`;
+    const isVideo = (s?: string) => s === "video" || s === "both";
+    const isImage = (s?: string) => s !== "video";
+    const imageProfiles = actives.filter((a) => isImage(a.scope));
+    const imageRecords = activeRecords.filter((r) => isImage(r.scope));
+    const videoProfiles = actives.filter((a) => isVideo(a.scope));
+    const videoRecords = activeRecords.filter((r) => isVideo(r.scope));
+    const imageTotal = imageProfiles.length + imageRecords.length;
+    const videoTotal = videoProfiles.length + videoRecords.length;
+    if (imageTotal === 0 && videoTotal === 0) return "";
+    const fmtProfile = (a: (typeof actives)[number]) =>
+      `Name: ${a.id} — ${a.description}\nStimmungsprompt: ${a.prompt}\nQuelle: ${a.source}${a.readonly ? " (read-only)" : ""}${a.scope ? ` (scope ${a.scope})` : ""}`;
+    const fmtRecord = (r: (typeof activeRecords)[number]) =>
+      `Name: ${r.book}/${r.id} (aspect ${r.aspect}) — ${r.keys.slice(0, 4).join(", ")}\nStimmungsprompt: ${r.content}\nQuelle: library/${r.book}${r.readonly ? " (read-only)" : ""}${r.scope ? ` (scope ${r.scope})` : ""}`;
+    let out = "";
+    if (imageTotal > 0) {
+      const sections = [...imageProfiles.map(fmtProfile), ...imageRecords.map(fmtRecord)].join("\n---\n");
+      const stackingNote = imageTotal > 1 ? `(Stacking: ${imageTotal} Einträge aktiv — verwebe alle.)\n` : "";
+      out += `\n\n== ACTIVE IMAGE SYSTEM PROMPT ==\n${stackingNote}${sections}\nAnweisung: Wende die aktiven Stimmungsprompts indirekt an wenn du generate_image/image_edit/compose_images prompts formulierst (Mood, Kunststil, Ausrichtung, Inszenierung). Verwebe sie stilistisch, nicht als stures Präfix. Für generate_video motion/cuts NICHT anwenden — motion bleibt reine Bewegungsbeschreibung zum Startframe.`;
+    }
+    if (videoTotal > 0) {
+      const sections = [...videoProfiles.map(fmtProfile), ...videoRecords.map(fmtRecord)].join("\n---\n");
+      const stackingNote = videoTotal > 1 ? `(Stacking: ${videoTotal} Einträge aktiv — verwebe alle.)\n` : "";
+      out += `\n\n== ACTIVE VIDEO CHOREOGRAPHY ==\n${stackingNote}${sections}\nAnweisung: Nur diese Einträge dürfen generate_video motion/cuts färben — als reine Bewegungsbeschreibung (Kamera + Subjekt, durationsskaliert). Keine Still-Fotografie-Begriffe übernehmen.`;
+    }
+    return out;
   } catch {
     return "";
   }

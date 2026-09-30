@@ -58,6 +58,14 @@ function sanitizeBook(raw: unknown): LibraryBook | null {
   };
 }
 
+const VALID_SCOPES = ["image", "video", "both"] as const;
+type Scope = (typeof VALID_SCOPES)[number];
+function sanitizeScope(raw: unknown): Scope | undefined {
+  return typeof raw === "string" && (VALID_SCOPES as readonly string[]).includes(raw.trim().toLowerCase())
+    ? (raw.trim().toLowerCase() as Scope)
+    : undefined;
+}
+
 function sanitizeRecord(raw: unknown): LibraryRecord | null {
   const r = raw as Partial<LibraryRecord>;
   if (!r || typeof r.id !== "string" || typeof r.book !== "string") return null;
@@ -68,6 +76,7 @@ function sanitizeRecord(raw: unknown): LibraryRecord | null {
   const keys = Array.isArray(r.keys)
     ? r.keys.filter((k): k is string => typeof k === "string" && !!k.trim()).map((k) => k.trim())
     : [];
+  const scope = sanitizeScope(r.scope);
   return {
     id,
     book,
@@ -76,6 +85,7 @@ function sanitizeRecord(raw: unknown): LibraryRecord | null {
     content: r.content.trim(),
     source: "user",
     readonly: false,
+    ...(scope ? { scope } : {}),
   };
 }
 
@@ -237,6 +247,7 @@ export function createRecord(params: {
   aspect: string;
   keys: string[];
   content: string;
+  scope?: Scope;
 }): CreateRecordResult {
   const bookId = params.book.trim().toLowerCase();
   const id = params.id.trim().toLowerCase();
@@ -262,6 +273,7 @@ export function createRecord(params: {
     content: params.content.trim(),
     source: "user",
     readonly: false,
+    ...(params.scope && (VALID_SCOPES as readonly string[]).includes(params.scope) ? { scope: params.scope } : {}),
   };
   cache.records.push(record);
   persist();
@@ -271,7 +283,7 @@ export function createRecord(params: {
 export function updateRecord(
   book: string,
   id: string,
-  changes: { aspect?: string; keys?: string[]; content?: string }
+  changes: { aspect?: string; keys?: string[]; content?: string; scope?: Scope }
 ): LibraryRecord {
   const ref = refOf(book.trim().toLowerCase(), id.trim().toLowerCase());
   const curated = CURATED_RECORDS.find((r) => refOf(r.book, r.id) === ref);
@@ -289,6 +301,9 @@ export function updateRecord(
   }
   if (changes.content !== undefined && changes.content.trim()) {
     target.content = changes.content.trim();
+  }
+  if (changes.scope && (VALID_SCOPES as readonly string[]).includes(changes.scope)) {
+    target.scope = changes.scope;
   }
   persist();
   return target;

@@ -25,6 +25,8 @@ export interface LibraryRecord {
   content: string;
   source: LibrarySource;
   readonly: boolean;
+  /** Wirkungsbereich wie bei Profilen: undefined = "image" (Default, Standbilder). */
+  scope?: import("./types").InclinationScope;
 }
 
 /** Facetten-Index (Auszug aus dem alten Prosa-Index im dominatrix-skillset-Profil). */

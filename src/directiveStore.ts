@@ -1,6 +1,13 @@
 import * as fs from "fs";
 import * as path from "path";
-import type { ImageDirective, DirectiveSource } from "./types";
+import type { ImageDirective, DirectiveSource, InclinationScope } from "./types";
+
+const VALID_SCOPES: InclinationScope[] = ["image", "video", "both"];
+function sanitizeScope(raw: unknown): InclinationScope | undefined {
+  return typeof raw === "string" && (VALID_SCOPES as string[]).includes(raw.trim().toLowerCase())
+    ? (raw.trim().toLowerCase() as InclinationScope)
+    : undefined;
+}
 import { CURATED_DIRECTIVES } from "./curatedDirectives";
 import { getCacheFile, resolveExistingCacheFile, dropLegacyCacheFile } from "./cachePaths";
 
@@ -35,6 +42,9 @@ function loadPersisted(): PersistedStore {
             prompt: String(d.prompt ?? ""),
             source: "user" as DirectiveSource,
             readonly: false,
+            ...(sanitizeScope((d as { scope?: unknown }).scope)
+              ? { scope: sanitizeScope((d as { scope?: unknown }).scope) as InclinationScope }
+              : {}),
           }));
         const fromArray = Array.isArray(parsed.activeIds)
           ? parsed.activeIds.filter((id): id is string => typeof id === "string" && !!id.trim())
@@ -292,7 +302,8 @@ export function createDirective(
   id: string,
   description: string,
   prompt: string,
-  configText: string
+  configText: string,
+  scope?: InclinationScope
 ): ImageDirective {
   const norm = id.trim().toLowerCase();
   if (!/^[a-z0-9_-]{1,64}$/.test(norm))
@@ -306,6 +317,7 @@ export function createDirective(
     prompt: prompt.trim(),
     source: "user",
     readonly: false,
+    ...(scope && VALID_SCOPES.includes(scope) ? { scope } : {}),
   };
   cache.directives.push(dir);
   savePersisted(cache);
@@ -316,7 +328,8 @@ export function updateDirective(
   id: string,
   description: string | undefined,
   prompt: string | undefined,
-  configText: string
+  configText: string,
+  scope?: InclinationScope
 ): ImageDirective {
   const norm = id.trim().toLowerCase();
   const curated = CURATED_DIRECTIVES.find((d) => d.id === norm);
@@ -350,6 +363,7 @@ export function updateDirective(
       const p = prompt.trim();
       if (p) cache.directives[idx].prompt = p;
     }
+    if (scope && VALID_SCOPES.includes(scope)) cache.directives[idx].scope = scope;
     savePersisted(cache);
     return cache.directives[idx];
   }
@@ -365,6 +379,7 @@ export function updateDirective(
     const p = prompt.trim();
     if (p) cache.directives[idx].prompt = p;
   }
+  if (scope && VALID_SCOPES.includes(scope)) cache.directives[idx].scope = scope;
   savePersisted(cache);
   return cache.directives[idx];
 }

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "lms dev",
     "push": "lms push",
-    "build": "tsc"
+    "build": "tsc",
+    "test:guard": "node scripts/check-inclination-video-guard.js"
   },
   "keywords": [
     "lmstudio",

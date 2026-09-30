@@ -84,8 +84,9 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - Content filter: kontext/seedream5 have STRICT filters — fashion-editorial often flagged. grok-imagine-image-quality does NOT.
 
 == IMAGE SYSTEM PROMPT / STIMMUNG ==
-- Neigungsprompts (Profile) und Bibliotheks-Records wirken INDIREKT:
-  leite daraus ab wie du generate_image prompts formulierst (Mood, Stil, Ausrichtung, theatralische Inszenierung). Nicht wortwörtlich präfixen, sondern stilistisch einweben. Mehrere können gleichzeitig aktiv sein = Stacking.
+- Neigungsprompts (Profile) und Bibliotheks-Records wirken INDIREKT und NUR für Standbilder:
+  leite daraus ab wie du generate_image/image_edit/compose_images prompts formulierst (Mood, Stil, Ausrichtung, theatralische Inszenierung). Nicht wortwörtlich präfixen, sondern stilistisch einweben. Mehrere können gleichzeitig aktiv sein = Stacking.
+  Für generate_video (motion/cuts) gelten sie NICHT: motion beschreibt nur Kamera- + Subjektbewegung des Startframes, keine Still-Fotografie-Begriffe (Lens, DOF, Bokeh, Grain, etc.) aus Inclinations übernehmen.
 - Übersicht (was existiert, was ist aktiv): inclination_prompt_list — active.state "leer" = es wird nichts injiziert;
   active zuerst, dann profiles (aktive Einträge zuerst, source/readonly am Abschnittskopf), dann library mit Facetten pro Buch.
   detail:"full" liefert alle Texte.
@@ -151,7 +152,7 @@ function buildActiveDirectiveBlock(configText: string): string {
     ].join("\n---\n");
     const stackingNote =
       total > 1 ? `(Stacking: ${total} Einträge aktiv — verwebe alle.)\n` : "";
-    return `\n\n== ACTIVE IMAGE SYSTEM PROMPT ==\n${stackingNote}${sections}\nAnweisung: Wende die aktiven Stimmungsprompts indirekt an wenn du generate_image prompts formulierst (Mood, Kunststil, Ausrichtung, Inszenierung). Verwebe sie stilistisch, nicht als stures Präfix.`;
+    return `\n\n== ACTIVE IMAGE SYSTEM PROMPT ==\n${stackingNote}${sections}\nAnweisung: Wende die aktiven Stimmungsprompts indirekt an wenn du generate_image/image_edit/compose_images prompts formulierst (Mood, Kunststil, Ausrichtung, Inszenierung). Verwebe sie stilistisch, nicht als stures Präfix. Für generate_video motion/cuts NICHT anwenden — motion bleibt reine Bewegungsbeschreibung zum Startframe.`;
   } catch {
     return "";
   }

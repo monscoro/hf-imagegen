@@ -1227,6 +1227,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Video requests send safe=false (filters off, documented default). If both 'motion' and 'cuts'
         are set, 'cuts' wins. Renders take minutes. Each clip counts one daily-guard
         unit and is billed per second (Pollinations) or provider credit (HF).
+        Active inclination prompts do NOT apply to 'motion'/'cuts' — keep motion a pure
+        movement description for the start frame (camera + subject motion), no still-photo
+        terms (lens, DOF, bokeh, grain) from inclinations.
       `,
       parameters: {
         image: z.string().trim().min(1).describe(

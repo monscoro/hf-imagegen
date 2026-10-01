@@ -6,3 +6,4 @@ node_modules/
 !scripts/**/*.js
 tmp/
 test-output/
+.image-gen-inclinations.json

@@ -66,6 +66,21 @@ export type DirectiveSource = "curated" | "config" | "user";
 /** Wirkungsbereich: "image" = Standbilder (Default), "video" = nur Motion/Choreo, "both" = beides. */
 export type InclinationScope = "image" | "video" | "both";
 
+/**
+ * Einzige Quelle fuer die Scope-Werte. Die Gueltigkeitspruefung steht hier
+ * bewusst neben dem Typ: der Typ lebt nur im Compiler, die Stores validieren
+ * aber fremdes JSON (directives.json / library.json), wo jeder String stehen
+ * kann. Beides muss zusammenpassen, also an einem Ort.
+ */
+export const INCLINATION_SCOPES: readonly InclinationScope[] = ["image", "video", "both"];
+
+/** Liest einen fremden Scope-Wert; None-Str und Unbekanntes werden verworfen. */
+export function sanitizeInclinationScope(raw: unknown): InclinationScope | undefined {
+  if (typeof raw !== "string") return undefined;
+  const v = raw.trim().toLowerCase();
+  return (INCLINATION_SCOPES as readonly string[]).includes(v) ? (v as InclinationScope) : undefined;
+}
+
 export interface ImageDirective {
   id: string;
   description: string;

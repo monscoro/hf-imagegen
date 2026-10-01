@@ -70,6 +70,7 @@ import {
   clearActiveRecords,
   listAspects,
   refOf,
+  bindActiveScope as bindRecordScope,
 } from "./libraryStore";
 import {
   getPollinationsModels,
@@ -108,7 +109,14 @@ import {
   updateDirective,
   deleteDirective,
   getDirectiveById,
+  bindActiveScope as bindProfileScope,
+  getActiveScopeKey as getProfileScopeKey,
 } from "./directiveStore";
+import {
+  type WorkingDirCapable,
+  workingDirLabel,
+  NO_WORKING_DIR_KEY,
+} from "./workspace";
 
 function json(obj: unknown): string {
   return JSON.stringify(obj, null, 2);
@@ -134,6 +142,19 @@ async function loadPollinationsCapabilities(): Promise<
  * Aliase deduped. Absichtlich schlank — Dauer/Resolution/Caps/Preis in EINER
  * Beschreibungszeile, damit die Liste nicht pro Modell explodiert.
  */
+/**
+ * Pollinations liefert `pricing.completionVideoSeconds` je nach Endpunkt als
+ * Zahl ODER als String ("0.01"). Ohne Ueberleitung wuerde der String-Vorrat
+ * stillschweigend als "kein Preis" behandelt — die Zeile stellte sich gratis
+ * dar, der Call kostet trotzdem. Deshalb: erst parse, dann entscheiden.
+ */
+function parsePollenRate(raw: unknown): number | undefined {
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : undefined;
+  if (typeof raw !== "string") return undefined;
+  const n = Number(raw.trim());
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
 function buildPollinationsVideoRows(
   caps: Map<string, PollinationsVideoModelCapabilities> | null
 ): ModelInfo[] {
@@ -156,8 +177,8 @@ function buildPollinationsVideoRows(
     if (cap.resolutions?.length) parts.push(cap.resolutions.join("/"));
     const vcaps = (cap.video_capabilities ?? []).filter((c) => c !== "start_frame");
     if (vcaps.length) parts.push(vcaps.join("+"));
-    const rate = cap.pricing?.completionVideoSeconds;
-    const cost = typeof rate === "number" ? `${rate} pollen/s` : undefined;
+    const rate = parsePollenRate(cap.pricing?.completionVideoSeconds);
+    const cost = rate !== undefined ? `${rate} pollen/s` : undefined;
     // Degraded-Upstream transparent machen: wer einen angeschlagenen Upstream waehlt,
     // soll es vor dem bezahlten Call sehen (z.B. seedance-2.0).
     const degraded = cap.health?.status === "degraded" ? " (degraded upstream)" : "";
@@ -270,6 +291,35 @@ function normalizeImageEditReferences(image: string, images?: string[]): string[
   return refs;
 }
 
+/**
+ * Tools, die den aktiven Inclination-Stack lesen oder veraendern. Nur fuer
+ * diese wird der Stack an den Working Dir des Chats gebunden — generate_image
+ * und Co. sollen den Stack nicht unnoetig wechseln.
+ */
+const INCLINATION_TOOLS = new Set([
+  "inclination_prompt_list",
+  "inclination_prompt_manage",
+  "inclination_prompt_library",
+]);
+
+/**
+ * Bindet beide Stacks (Profile + Library-Records) an den Working Dir des
+ * aktuellen Chats. Beide Stores teilen sich denselben Bucket-Key; jeder merkt
+ * sich, ob sein Key vom letzten Aufruf abweicht, und laedt dann neu.
+ *
+ * Ohne ctx fliessen die Stores auf den vom PromptPreprocessor gemeldeten
+ * Key (siehe workspace.ts) — Tools bekommen den Working Dir vom SDK nicht
+ * durchgereicht.
+ */
+function bindInclinationScope(ctx?: WorkingDirCapable | null): string {
+  // Beide Stores bekommen dasselbe Argument und `resolveWorkingDirKey` ist
+  // deterministisch — die zurueckgegebenen Keys sind identisch, ein
+  // Nachpruefen ist damit gegenstandslos. Beide muessen aber aufgerufen
+  // werden: jeder merkt sich seinen eigenen letzten Key und laedt nur dann neu.
+  bindProfileScope(ctx ?? null);
+  return bindRecordScope(ctx ?? null);
+}
+
 function safe_impl<T extends Record<string, unknown>>(
   name: string,
   fn: (params: T, ctx: ToolCallContext) => Promise<string>
@@ -278,6 +328,10 @@ function safe_impl<T extends Record<string, unknown>>(
     if (ctx.signal.aborted) {
       return JSON.stringify({ tool_error: true, tool: name, error: "cancelled" });
     }
+    // Der aktive Inclination-Stack haengt am Working Dir des Chats. Bindung
+    // VOR dem Impl-Aufruf, sonst laeuft ein Tool gegen den Stack des
+    // vorherigen Verzeichnisses (Cache im Modul, nicht pro Aufruf).
+    if (INCLINATION_TOOLS.has(name)) bindInclinationScope();
     try {
       return await fn(params, ctx);
     } catch (err: unknown) {
@@ -558,6 +612,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           }
 
           ctx.status(`Editing with Pollinations (${modelToUse})…`);
+          // Zeitstempel VOR dem Request: die API ist auch dann beruehrt, wenn
+          // der Call fehlschlaegt (Rate-Limit, Timeout, Non-Image-Antwort).
+          // Waere der Stempel erst im Erfolgsfall gesetzt, laeuft der Cooldown
+          // nach einem Fehlschlag sofort weiter und wuerde das Limit treiben.
+          lastPollinationsCall = Date.now();
           const res = await fetch(url, {
             method: "POST",
             headers,
@@ -603,7 +662,6 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               throw new Error(`Pollinations returned non-image content (${mimeType}): ${preview}`);
             }
           }
-          lastPollinationsCall = Date.now();
           notes.push("Pollinations API (gen.pollinations.ai POST /v1/images/edits): safe=false, private, no watermark with key. Credit consumed.");
         } else {
           const token = getToken();
@@ -881,6 +939,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               notes.push("POST size needs width AND height (WIDTHxHEIGHT); a single dimension was ignored. Use both for exact size.");
             }
             ctx.status(`Calling Pollinations API (${modelToUse}, quality=${quality ?? "medium"}, auth=key)…`);
+            // Siehe image_edit: Stempel vor dem Request, damit auch Fehlschlaege
+            // den Cooldown bezahlen und das Konto nicht ausbremst.
+            lastPollinationsCall = Date.now();
             const res = await fetch(url, {
               method: "POST",
               headers,
@@ -908,7 +969,6 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               throw new Error(`Pollinations returned non-image content (${mimeType}): ${preview}`);
             }
             notes.push("Pollinations API (gen.pollinations.ai POST): safe=false, private (hidden from public feed), no watermark with key. Credit consumed.");
-            lastPollinationsCall = Date.now();
           } else {
             const token = getToken();
             modelToUse = model_id.trim() || getModel();
@@ -1268,9 +1328,11 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         Video requests send safe=false (filters off, documented default). If both 'motion' and 'cuts'
         are set, 'cuts' wins. Renders take minutes. Each clip counts one daily-guard
         unit and is billed per second (Pollinations) or provider credit (HF).
-        Active inclination prompts do NOT apply to 'motion'/'cuts' — keep motion a pure
-        movement description for the start frame (camera + subject motion), no still-photo
-        terms (lens, DOF, bokeh, grain) from inclinations.
+        Inclinations are scope-separated: entries with scope 'image' do NOT apply to
+        'motion'/'cuts' — keep motion a pure movement description for the start frame
+        (camera + subject motion), no still-photo terms (lens, DOF, bokeh, grain) from them.
+        Entries with scope 'video' or 'both' DO apply, and those are the ones listed in the
+        ACTIVE VIDEO CHOREOGRAPHY block — apply them as movement only, never as image style.
       `,
       parameters: {
         image: z.string().trim().min(1).describe(
@@ -1513,8 +1575,10 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   imageUrls,
                 });
                 ctx.status(`Rendering video${tag} (${modelToUse}, ~minutes)…`);
-                buffer = await downloadVideo(url, pollinationsKey);
+                // Vor dem Request, aus demselben Grund wie bei den Bild-Calls:
+                // auch ein abgebrochener Video-Call belegt den Slot.
                 lastPollinationsCall = Date.now();
+                buffer = await downloadVideo(url, pollinationsKey);
               } else {
                 const providerToUse = (args.provider.trim() || "auto") as
                   "auto" | "fal-ai" | "replicate" | "wavespeed";
@@ -1557,8 +1621,13 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             output_dir: outputDir,
             backend: usePollinations ? "pollinations" : "hf",
             model_used: modelToUse,
+            // Faktisch gerenderte Clips abrechnen, nicht die angeforderte Zahl:
+            // ein abgebrochener Cut wurde nicht generiert und faellt daher auch
+            // nicht beim Provider an. `succeeded` ist die Menge, die wirklich
+            // geschrieben wurde — mit motions.length zu rechnen, uebernimmt
+            // fehlgeschlagene Cuts in die Kalkulation.
             estimated_cost: usePollinations
-              ? `${motions.length} clip(s) × ${duration}s billed at the model rate (pollen/s — see list_models source='video')`
+              ? `${succeeded.length} clip(s)${succeeded.length < motions.length ? ` (von ${motions.length} angeforderten)` : ""} × ${duration}s billed at the model rate (pollen/s — see list_models source='video')`
               : "provider credit (HF)",
             duration,
             aspect_ratio: aspectRatio,
@@ -1572,11 +1641,23 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           };
           if (motions.length === 1) {
             const clip = clips[0];
-            // Single-Fehler werfen oben (tool_error) — hier gibt es nur Erfolg.
+            // Single-Fehler werfen oben (tool_error). Der einzige verbleibende
+            // Fehlerfall ist der Abbruch vor dem Render — dann gibt es keine
+            // Datei, und eine Erfolgsmeldung mit `undefined` waere eine
+            // erfundene Ausgabe.
+            if (!clip?.file_path) {
+              return json({
+                ...base,
+                success: false,
+                error: clip?.error ?? "cancelled",
+                motion: clip?.motion,
+                message: "Video generation cancelled before the clip was rendered.",
+              });
+            }
             return json({
               ...base,
               file_path: clip.file_path,
-              filename: clip.file_path ? path.basename(clip.file_path) : undefined,
+              filename: path.basename(clip.file_path),
               file_size_bytes: clip.file_size_bytes,
               motion: clip.motion,
               message: `Video saved to ${clip.file_path}`,
@@ -1881,6 +1962,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
             last_fetch_failure: raw.lastFetchFailureAt?.toISOString() ?? null,
             models: raw.models,
             models_with_providers: raw.modelsWithProviders,
+            // Leere Liste = Katalog vollstaendig. Sonst sind die Modelle dieser
+            // Tasks nicht als providerlos belegt, nur nicht abgefragt.
+            incomplete_tasks: raw.incompleteTasks,
           };
         }
 
@@ -2212,14 +2296,43 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
         const profileMeta = uniformMeta(profileEntries);
         const activeTotal = activeProfileIds.length + activeRefs.length;
 
+        // Beide Antworten teilen denselben Scope-Bericht: wo der Stack gilt und
+        // ob er ueberhaupt wirkt. Ohne das haelt das LLM eine Aktivierung fuer
+        // global und wundert sich im anderen Verzeichnis ueber die Wirkung.
+        const scopeReport = () => {
+          const scope = getProfileScopeKey() ?? NO_WORKING_DIR_KEY;
+          const noWorkingDir = scope === NO_WORKING_DIR_KEY;
+          return {
+            working_dir: workingDirLabel(scope),
+            applies_to: "nur dieses Verzeichnis",
+            no_working_dir: noWorkingDir,
+            // (none)-Bucket: gespeichert, aber NICHT injiziert (siehe
+            // promptPreprocessor). Deshalb ist der Stack dort nur halb wahr.
+            applied: !noWorkingDir,
+            ...(noWorkingDir
+              ? {
+                  note:
+                    "Chat ohne Arbeitsverzeichnis: Einträge werden gespeichert, aber nicht injiziert — " +
+                    "aktuell wirkt nichts.",
+                }
+              : {}),
+          };
+        };
+
         return json({
+          scope: scopeReport(),
           active: {
-            state: activeTotal === 0 ? "leer" : "geladen",
+            // "geladen" waere im (none)-Bucket irrefuehrend: gespeichert,
+            // aber nicht injiziert — das wirkt trotzdem wie "etwas aktiv".
+            state:
+              activeTotal === 0 ? "leer" : scopeReport().applied ? "geladen" : "gespeichert, nicht aktiv",
             profile_count: activeProfileIds.length,
             record_count: activeRefs.length,
             ...(activeTotal === 0
               ? { hint: "Nichts aktiv — es wird kein Stimmungsprompt/Record injiziert." }
-              : {}),
+              : !scopeReport().applied
+                ? { hint: "Gespeichert, aber ohne Arbeitsverzeichnis wird nichts injiziert." }
+                : {}),
             profiles: activeProfileIds.map((id) => {
               const p = profiles.find((x) => x.id === id);
               return { id, description: p?.description ?? "", scope: p?.scope ?? "image" };
@@ -2263,6 +2376,9 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   aspect: r.aspect,
                   keys: r.keys,
                   is_active: activeRefs.includes(refOf(r.book, r.id)),
+                  // Scope mitliefern: ohne ihn ist beim Volltext-Lesen nicht
+                  // erkennbar, ob ein Record motion-relevant ist.
+                  scope: r.scope ?? "image",
                   content: r.content,
                 })),
               }
@@ -2344,10 +2460,30 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
           keys = "",
           scope = undefined,
         }) => {
-          const stack = () => ({
-            active_profiles: getActiveIds(),
-            active_records: getActiveRecordRefs(),
-          });
+          const stack = () => {
+            const scope = getProfileScopeKey() ?? NO_WORKING_DIR_KEY;
+            const noWorkingDir = scope === NO_WORKING_DIR_KEY;
+            return {
+              active_profiles: getActiveIds(),
+              active_records: getActiveRecordRefs(),
+              // Der aktive Stack gilt NUR fuer diesen Working Dir. Ohne diesen
+              // Hinweis haelt das LLM eine Aktivierung fuer global und
+              // wundert sich in einem anderen Verzeichnis ueber die Wirkung.
+              scope: {
+                working_dir: workingDirLabel(scope),
+                applies_to: "nur dieses Verzeichnis",
+                no_working_dir: noWorkingDir,
+                applied: !noWorkingDir,
+                ...(noWorkingDir
+                  ? {
+                      note:
+                        "Chat ohne Arbeitsverzeichnis: Einträge werden gespeichert, aber nicht injiziert — " +
+                        "aktuell wirkt nichts.",
+                    }
+                  : {}),
+              },
+            };
+          };
           const cleanName = name.trim().toLowerCase();
           const cleanBook = book.trim().toLowerCase();
           const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
@@ -2413,7 +2549,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
               case "get": {
                 const found = getDirectiveById(cleanName, "");
                 if (!found) throw profileNotFound(cleanName);
-                return json({ success: true, store, action, directive: found, is_active: getActiveIds().includes(found.id) });
+                return json({ success: true, store, action, directive: found, is_active: getActiveIds().includes(found.id), ...stack() });
               }
               case "activate": {
                 const found = getDirectiveById(cleanName, "");
@@ -2505,6 +2641,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                   active_count: own.filter((r) => refs.includes(refOf(r.book, r.id))).length,
                   records: own.map((r) => ({ id: r.id, aspect: r.aspect, keys: r.keys, is_active: refs.includes(refOf(r.book, r.id)) })),
                   note: "Volltexte: inclination_prompt_library({book:\"" + found.id + "\"}).",
+                  scope: stack().scope,
                 });
               }
               case "activate": {
@@ -2618,6 +2755,7 @@ export const toolsProvider: ToolsProvider = async (ctl) => {
                 action,
                 record: { ref: refOf(found.book, found.id), ...found },
                 is_active: getActiveRecordRefs().includes(refOf(found.book, found.id)),
+                scope: stack().scope,
               });
             }
             case "activate": {

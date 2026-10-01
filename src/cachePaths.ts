@@ -74,3 +74,39 @@ export function dropLegacyCacheFile(name: string): void {
     // beste-effort
   }
 }
+
+/**
+ * Entfernt den alten globalen Aktivierungs-Stand aus directives.json /
+ * library.json. Der aktive Stack liegt jetzt pro Working Dir; wer die alte
+ * Datei nach einem Downgrade liest, wuerde sonst wieder einen globalen Stack
+ * sehen, den es nicht mehr gibt. Die Profil-/Record-Definitionen bleiben
+ * unangetastet — nur die Aktivierungsfelder werden entfernt.
+ *
+ * Beim Laden des Stores aufgerufen, nicht beim Speichern: beim Speichern liegt
+ * die gerade geschriebene Datei ohne Aktivierungsfelder vor, ein Read-Modify-
+ * Write wuerde dort nie greifen.
+ *
+ * Anders als `dropLegacyCacheFile` braucht es hier keinen Override-Schutz: es
+ * zielt nur auf `getCacheFile(name)` (den aktuellen Cache), nie auf den
+ * Legacy-Pfad im homedir — bei gesetztem IMAGE_GEN_CACHE_DIR ist das die
+ * temporaere Datei, die ohnehin niemandem gehoert.
+ */
+export function dropLegacyActiveState(name: "directives.json" | "library.json"): void {
+  try {
+    const file = getCacheFile(name);
+    if (!fs.existsSync(file)) return;
+    const parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return;
+    const hadActive =
+      Array.isArray(parsed.activeIds) ||
+      Array.isArray(parsed.activeRecords) ||
+      "activeId" in parsed;
+    if (!hadActive) return;
+    delete parsed.activeIds;
+    delete parsed.activeRecords;
+    delete parsed.activeId;
+    fs.writeFileSync(file, JSON.stringify(parsed, null, 2), "utf-8");
+  } catch {
+    // beste-effort: eine kaputte Altdatei darf den Start nicht verhindern
+  }
+}

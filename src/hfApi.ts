@@ -18,6 +18,7 @@ import {
   fetchHfCatalog,
   getHfCatalogCacheFile,
   type HFCatalogEntry,
+  type HFTask,
 } from "./hfCatalogCache";
 
 const HF_API_BASE = "https://huggingface.co/api";
@@ -122,6 +123,9 @@ export function isLoRAArtifact(modelId: string): boolean {
  *     (`?inference_provider=fal-ai`), das Ergebnis belegt also ein Mapping.
  *     Kennt der Katalog das Modell, gilt sein Status (live noetig). Kennt er
  *     es nicht (ausserhalb der 1000 meistgelikten je Task), bleibt es drin.
+ *   - Fehlte beim Abruf genau die Task-Seite dieser Liste (`coversTasks` in
+ *     `incompleteTasks`), gilt derselbe Schluss: nicht gelistet heisst nicht
+ *     abgefragt, nicht "providerlos".
  *
  * In den uebrigen Quellen gilt: was der Katalog nicht kennt, kann nicht
  * belegt werden und fliegt raus — dort gibt es keinen Query-Beweis.
@@ -129,9 +133,14 @@ export function isLoRAArtifact(modelId: string): boolean {
 function keepUsableModels<T extends { id: string; createdAt?: string }>(
   models: T[],
   limit: number,
-  providerQueried: boolean = false
+  providerQueried: boolean = false,
+  coversTasks: readonly HFTask[] = []
 ): T[] {
   const catalogLoaded = hfCatalogIndex !== null;
+  // Deckt der Katalog die Task dieser Liste ueberhaupt nicht ab, darf die
+  // Unbekannt-Regel nicht greifen — sonst verliert die Liste genau die
+  // Modelle, die ein Timeout der Task-Seite verursacht hat.
+  const taskPageMissing = coversTasks.some((t) => hfCatalogIncompleteTasks.has(t));
   const kept = models.filter((m) => {
     if (isQuantizationArtifact(m.id)) return false;
     if (isLoRAArtifact(m.id)) return false;
@@ -139,7 +148,7 @@ function keepUsableModels<T extends { id: string; createdAt?: string }>(
     if (catalogLoaded) {
       const known = getHfCatalogEntry(m.id) !== null;
       if (known && getHfLiveProviders(m.id).length === 0) return false;
-      if (!known && !providerQueried) return false;
+      if (!known && !providerQueried && !taskPageMissing) return false;
     }
     return true;
   });
@@ -180,6 +189,12 @@ let hfCatalogIndex: Map<string, HFCatalogEntry> | null = null;
 let hfCatalogFetchedAt = 0;
 let hfCatalogPromise: Promise<Map<string, HFCatalogEntry>> | null = null;
 let lastHfFetchFailureAt = 0;
+/**
+ * Task-Seiten, die beim letzten erfolgreichen Abruf fehlten. Fuer diese Tasks
+ * ist der Katalog lueckenhaft: ein Modell, das er nicht kennt, wurde nie
+ * abgefragt und darf nicht als providerlos verworfen werden.
+ */
+let hfCatalogIncompleteTasks: ReadonlySet<HFTask> = new Set<HFTask>();
 
 /**
  * Baut den Lookup-Index. Ein Modell kann in beiden Task-Seiten stehen
@@ -211,18 +226,26 @@ function indexHfCatalog(entries: HFCatalogEntry[]): Map<string, HFCatalogEntry> 
 
 function rememberHfCatalog(
   index: Map<string, HFCatalogEntry>,
-  fetchedAt: number
+  fetchedAt: number,
+  incompleteTasks: ReadonlySet<HFTask>
 ): Map<string, HFCatalogEntry> {
   hfCatalogIndex = index;
   hfCatalogFetchedAt = fetchedAt;
+  hfCatalogIncompleteTasks = incompleteTasks;
   return index;
 }
 
-function indexFromDisk(): { index: Map<string, HFCatalogEntry>; fetchedAt: number } | null {
+function indexFromDisk(): {
+  index: Map<string, HFCatalogEntry>;
+  fetchedAt: number;
+  incompleteTasks: ReadonlySet<HFTask>;
+} | null {
   const disk = readHfCatalogCache();
   if (!disk) return null;
   const index = indexHfCatalog(disk.models);
-  return index.size > 0 ? { index, fetchedAt: disk.fetchedAt } : null;
+  return index.size > 0
+    ? { index, fetchedAt: disk.fetchedAt, incompleteTasks: new Set(disk.incompleteTasks) }
+    : null;
 }
 
 async function loadHfCatalog(): Promise<Map<string, HFCatalogEntry>> {
@@ -231,31 +254,34 @@ async function loadHfCatalog(): Promise<Map<string, HFCatalogEntry>> {
 
   // 1) Frischer Platten-Cache: gar kein Netzwerkzugriff.
   if (disk && now - disk.fetchedAt < HF_CATALOG_TTL_MS) {
-    return rememberHfCatalog(disk.index, disk.fetchedAt);
+    return rememberHfCatalog(disk.index, disk.fetchedAt, disk.incompleteTasks);
   }
 
   // 2) Veraltet, aber vor kurzem erst gescheitert: veraltete Daten bedienen,
   //    statt bei toter Verbindung jeden Aufruf erneut zu versuchen.
   if (disk && now - lastHfFetchFailureAt < HF_CATALOG_BACKOFF_MS) {
-    return rememberHfCatalog(disk.index, disk.fetchedAt);
+    return rememberHfCatalog(disk.index, disk.fetchedAt, disk.incompleteTasks);
   }
 
   // 3) Neu holen.
   try {
     const raw = await fetchHfCatalog();
-    const index = indexHfCatalog(raw);
+    const index = indexHfCatalog(raw.models);
     if (index.size === 0) {
       throw new Error("HF model catalog contained no usable model entries.");
     }
     const fetchedAt = Date.now();
-    writeHfCatalogCache(raw, fetchedAt);
+    // Auch ein unvollstaendiger Katalog wird geschrieben (die drei gelungenen
+    // Seiten sind mehr wert als ein Komplettverlust) — incompleteTasks wandert
+    // mit, damit die Filterkette die Luecke nicht als "kein Provider" liest.
+    writeHfCatalogCache(raw.models, raw.incompleteTasks, fetchedAt);
     lastHfFetchFailureAt = 0;
-    return rememberHfCatalog(index, fetchedAt);
+    return rememberHfCatalog(index, fetchedAt, new Set(raw.incompleteTasks));
   } catch (error) {
     lastHfFetchFailureAt = Date.now();
     // 4) lieber veraltete Katalogdaten liefern als gar keine. Ohne Platten-Cache
     //    bleibt es bei den kuratierten Modellen (Aufrufer-Fallback).
-    if (disk) return rememberHfCatalog(disk.index, disk.fetchedAt);
+    if (disk) return rememberHfCatalog(disk.index, disk.fetchedAt, disk.incompleteTasks);
     throw error;
   }
 }
@@ -347,6 +373,7 @@ export function getHfCatalogCacheInfo(): {
   models: number;
   modelsWithProviders: number;
   lastFetchFailureAt: Date | null;
+  incompleteTasks: HFTask[];
 } {
   const disk = readHfCatalogCache();
   const now = Date.now();
@@ -375,6 +402,9 @@ export function getHfCatalogCacheInfo(): {
     models: seen.size,
     modelsWithProviders,
     lastFetchFailureAt: lastHfFetchFailureAt > 0 ? new Date(lastHfFetchFailureAt) : null,
+    // Aus dem Speicher, nicht von der Platte: nach einem In-Memory-Refetch
+    // koennen die beiden auseinanderlaufen, und gefragt ist der aktive Stand.
+    incompleteTasks: [...hfCatalogIncompleteTasks],
   };
 }
 
@@ -458,7 +488,7 @@ export async function getProviderModels(
 
   // providerQueried=true: die ?inference_provider=-Query belegt selbst die
   // Verfuegbarkeit, unbekannte Modelle bleiben drin (siehe keepUsableModels).
-  const models = keepUsableModels((await res.json()) as HFModel[], limit, true);
+  const models = keepUsableModels((await res.json()) as HFModel[], limit, true, ["text-to-image"]);
 
   await ensureCatalogBestEffort();
   const result = models.map((m) =>
@@ -485,13 +515,15 @@ export async function getTrendingModels(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(HF_LIST_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = keepUsableModels((await res.json()) as HFModel[], limit);
+  // coversTasks deckt sich mit dem pipeline_tag der URL oben — nicht mit dem
+  // Namen der Liste. Eine Liste ohne pipeline_tag wuerde hier alle vier
+  // Katalog-Tasks nennen muessen.
+  const models = keepUsableModels((await res.json()) as HFModel[], limit, false, ["text-to-image"]);
 
   await ensureCatalogBestEffort();
   const result = models.map((m) =>
     toModelInfo(m, "trending", `${m.id} — Trending text-to-image model`)
   );
-
   setCachedTrendingModels(limit, result);
   return result;
 }
@@ -512,7 +544,7 @@ export async function getDownloadedModels(
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(HF_LIST_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`HF API error: ${res.status} ${res.statusText}`);
 
-  const models = keepUsableModels((await res.json()) as HFModel[], limit);
+  const models = keepUsableModels((await res.json()) as HFModel[], limit, false, ["text-to-image"]);
 
   await ensureCatalogBestEffort();
   const result = models.map((m) =>
@@ -575,7 +607,7 @@ export async function getHfVideoModels(
   // Tag-Reihenfolge (T2V vor I2V) sagt nichts ueber Qualitaet — likes ueber
   // beide Tags sortiert, damit kein I2V-only-Treffer unter allen T2V landet.
   const byLikes = [...seen.values()].sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0));
-  const models = keepUsableModels(byLikes, limit);
+  const models = keepUsableModels(byLikes, limit, false, HF_VIDEO_TAGS);
 
   const result = models.map((m) =>
     toModelInfo(m, "video", `${m.id} — Video model (HuggingFace pipeline_tag)`)

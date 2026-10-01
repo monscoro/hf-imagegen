@@ -1,6 +1,13 @@
 import * as fs from "fs";
 import * as path from "path";
-import { getCacheFile, resolveExistingCacheFile, dropLegacyCacheFile } from "./cachePaths";
+import { INCLINATION_SCOPES, sanitizeInclinationScope, type InclinationScope } from "./types";
+import { getCacheFile, resolveExistingCacheFile, dropLegacyCacheFile, dropLegacyActiveState } from "./cachePaths";
+import {
+  resolveWorkingDirKey,
+  activeStackFileFor,
+  NO_WORKING_DIR_KEY,
+  type WorkingDirCapable,
+} from "./workspace";
 import {
   CURATED_BOOKS,
   CURATED_RECORDS,
@@ -58,13 +65,6 @@ function sanitizeBook(raw: unknown): LibraryBook | null {
   };
 }
 
-const VALID_SCOPES = ["image", "video", "both"] as const;
-type Scope = (typeof VALID_SCOPES)[number];
-function sanitizeScope(raw: unknown): Scope | undefined {
-  return typeof raw === "string" && (VALID_SCOPES as readonly string[]).includes(raw.trim().toLowerCase())
-    ? (raw.trim().toLowerCase() as Scope)
-    : undefined;
-}
 
 function sanitizeRecord(raw: unknown): LibraryRecord | null {
   const r = raw as Partial<LibraryRecord>;
@@ -76,7 +76,7 @@ function sanitizeRecord(raw: unknown): LibraryRecord | null {
   const keys = Array.isArray(r.keys)
     ? r.keys.filter((k): k is string => typeof k === "string" && !!k.trim()).map((k) => k.trim())
     : [];
-  const scope = sanitizeScope(r.scope);
+  const scope = sanitizeInclinationScope(r.scope);
   return {
     id,
     book,
@@ -91,6 +91,10 @@ function sanitizeRecord(raw: unknown): LibraryRecord | null {
 
 function loadPersisted(): PersistedLibrary {
   try {
+    // Alter globaler Aktivierungs-Stand zuerst aus der Datei entfernen — er
+    // darf nicht gelesen und nach einem Downgrade nicht wieder geschrieben
+    // werden. Muss VOR dem Einlesen passieren (siehe cachePaths).
+    dropLegacyActiveState("library.json");
     const file = resolveExistingCacheFile("library.json", [path.join(LEGACY_PROJECT_TMP, "library.json")]);
     if (fs.existsSync(file)) {
       const raw = fs.readFileSync(file, "utf-8");
@@ -102,12 +106,10 @@ function loadPersisted(): PersistedLibrary {
         const records = (parsed.records ?? [])
           .map(sanitizeRecord)
           .filter((r): r is LibraryRecord => r !== null);
-        const activeRecords = Array.isArray(parsed.activeRecords)
-          ? parsed.activeRecords
-              .filter((r): r is string => typeof r === "string" && !!r.trim())
-              .map((r) => r.trim().toLowerCase())
-          : [];
-        return { books, records, activeRecords: [...new Set(activeRecords)] };
+        // activeRecords wird bewusst nicht mehr gelesen: der aktive Stack ist
+        // pro Working Dir (siehe bindActiveScope), ein alter globaler Stand
+        // wird verworfen.
+        return { books, records, activeRecords: [] };
       }
     }
   } catch {
@@ -116,10 +118,15 @@ function loadPersisted(): PersistedLibrary {
   return { books: [], records: [], activeRecords: [] };
 }
 
+/** Schreibt nur Bücher und Records — der aktive Stack liegt pro Working Dir. */
 function savePersisted(store: PersistedLibrary): void {
   try {
     fs.mkdirSync(path.dirname(STORE_FILE), { recursive: true });
-    fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2), "utf-8");
+    fs.writeFileSync(
+      STORE_FILE,
+      JSON.stringify({ books: store.books, records: store.records }, null, 2),
+      "utf-8"
+    );
     dropLegacyCacheFile("library.json");
   } catch {
     // best-effort
@@ -132,8 +139,85 @@ function reloadCache(): void {
   cache = loadPersisted();
 }
 
+/**
+ * Aktiver Stack pro Working Dir (siehe workspace.ts) — Parallel zum
+ * Profil-Store, beide teilen sich denselben Bucket-Key und dieselbe Datei.
+ */
+let currentScopeKey: string | null = null;
+
+interface ActiveStack {
+  dir: string;
+  activeIds?: string[];
+  activeRecords: string[];
+}
+
+function loadActiveStack(scopeKey: string): string[] {
+  try {
+    const file = activeStackFileFor(scopeKey);
+    if (!fs.existsSync(file)) return [];
+    const parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as Partial<ActiveStack>;
+    if (parsed && Array.isArray(parsed.activeRecords)) {
+      return [
+        ...new Set(
+          parsed.activeRecords
+            .filter((r): r is string => typeof r === "string" && !!r.trim())
+            .map((r) => r.trim().toLowerCase())
+        ),
+      ];
+    }
+  } catch {
+    // fehlend/kaputt = nichts aktiv
+  }
+  return [];
+}
+
+function saveActiveStack(scopeKey: string, activeRecords: string[]): void {
+  try {
+    const file = activeStackFileFor(scopeKey);
+    // Bestehende Datei zuerst lesen: der directiveStore schreibt activeIds in
+    // dieselbe Datei, die duerfen sich nicht gegenseitig wegschreiben.
+    let existing: Partial<ActiveStack> = {};
+    try {
+      if (fs.existsSync(file)) existing = JSON.parse(fs.readFileSync(file, "utf-8")) as Partial<ActiveStack>;
+    } catch {
+      existing = {};
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const payload: ActiveStack = {
+      dir: scopeKey === NO_WORKING_DIR_KEY ? "" : scopeKey,
+      activeRecords,
+      ...(Array.isArray((existing as { activeIds?: unknown }).activeIds)
+        ? { activeIds: (existing as { activeIds: string[] }).activeIds }
+        : {}),
+    };
+    fs.writeFileSync(file, JSON.stringify(payload, null, 2), "utf-8");
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Bindet den aktiven Record-Stack an den Working Dir des aktuellen Chats. Von
+ * jedem Tool und vom PromptPreprocessor aufzurufen, bevor gelesen/geschrieben
+ * wird — sonst stuende nach einem Verzeichniswechsel der Stack des
+ * vorherigen Verzeichnisses weiter.
+ */
+export function bindActiveScope(ctl: WorkingDirCapable | undefined | null): string {
+  const key = resolveWorkingDirKey(ctl);
+  if (key !== currentScopeKey) {
+    currentScopeKey = key;
+    cache.activeRecords = loadActiveStack(key);
+  }
+  return key;
+}
+
+export function getActiveScopeKey(): string | null {
+  return currentScopeKey;
+}
+
 function persist(): void {
   savePersisted(cache);
+  if (currentScopeKey !== null) saveActiveStack(currentScopeKey, cache.activeRecords);
 }
 
 // ---------------------------------------------------------------------------
@@ -247,7 +331,7 @@ export function createRecord(params: {
   aspect: string;
   keys: string[];
   content: string;
-  scope?: Scope;
+  scope?: InclinationScope;
 }): CreateRecordResult {
   const bookId = params.book.trim().toLowerCase();
   const id = params.id.trim().toLowerCase();
@@ -273,7 +357,7 @@ export function createRecord(params: {
     content: params.content.trim(),
     source: "user",
     readonly: false,
-    ...(params.scope && (VALID_SCOPES as readonly string[]).includes(params.scope) ? { scope: params.scope } : {}),
+    ...(params.scope && INCLINATION_SCOPES.includes(params.scope) ? { scope: params.scope } : {}),
   };
   cache.records.push(record);
   persist();
@@ -283,7 +367,7 @@ export function createRecord(params: {
 export function updateRecord(
   book: string,
   id: string,
-  changes: { aspect?: string; keys?: string[]; content?: string; scope?: Scope }
+  changes: { aspect?: string; keys?: string[]; content?: string; scope?: InclinationScope }
 ): LibraryRecord {
   const ref = refOf(book.trim().toLowerCase(), id.trim().toLowerCase());
   const curated = CURATED_RECORDS.find((r) => refOf(r.book, r.id) === ref);
@@ -302,7 +386,7 @@ export function updateRecord(
   if (changes.content !== undefined && changes.content.trim()) {
     target.content = changes.content.trim();
   }
-  if (changes.scope && (VALID_SCOPES as readonly string[]).includes(changes.scope)) {
+  if (changes.scope && INCLINATION_SCOPES.includes(changes.scope)) {
     target.scope = changes.scope;
   }
   persist();

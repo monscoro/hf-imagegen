@@ -2,8 +2,9 @@ import {
   type ChatMessage,
   type PromptPreprocessorController,
 } from "@lmstudio/sdk";
-import { getActiveDirectives } from "./directiveStore";
-import { getActiveRecords } from "./libraryStore";
+import { getActiveDirectives, bindActiveScope as bindProfileScope } from "./directiveStore";
+import { getActiveRecords, bindActiveScope as bindRecordScope } from "./libraryStore";
+import { resolveWorkingDirKey, setPredictionScopeKey, NO_WORKING_DIR_KEY } from "./workspace";
 import { isBallerinaBook, isBallerinaProfile } from "./curatedLibrary";
 import { pluginConfigSchematics } from "./config";
 
@@ -92,6 +93,11 @@ You have tools to generate images via Hugging Face or Pollinations.ai.
 - Übersicht (was existiert, was ist aktiv): inclination_prompt_list — active.state "leer" = es wird nichts injiziert;
   active zuerst, dann profiles (aktive Einträge zuerst, source/readonly am Abschnittskopf), dann library mit Facetten pro Buch.
   detail:"full" liefert alle Texte.
+  Startzustand ist IMMER leer: es ist kein Stimmungsprompt vorausgewählt, auch nicht aus früheren Chats. Aktivieren musst du selbst.
+  Der aktive Stack hängt am Working Dir des Chats und gilt NUR dort — in einem anderen Verzeichnis ist wieder nichts aktiv.
+  scope.applied = false (Chat ohne Arbeitsverzeichnis) heißt: Einträge werden gespeichert, aber NICHT injiziert —
+  aktuell wirkt nichts, unabhängig davon wie viele Profile aktiv gemeldet werden. active.state steht dann auf "gespeichert, nicht aktiv".
+  Ein nicht wirksamer Stack ist kein Fehler und braucht kein deactivate; er wird aktiv, sobald der Chat ein Working Dir hat.
 - Ändern/Anlegen/Aktivieren: inclination_prompt_manage, store entscheidet über die Domäne:
   profile (injiziertes Stimmungsprompt) | book (Bibliotheks-Buch) | record (Bibliotheks-Eintrag mit aspect + keys).
   Der Id-Parameter heißt name (nicht id) — bei store:'record' zusätzlich book; aus einem ref "skillset/a01" wird also
@@ -137,7 +143,11 @@ function stripInclinationRules(rules: string): string {
 }
 
 /** Scope-Split: "both" steht in beiden Bloecken (muss motion-safe formuliert sein). */
-function buildActiveDirectiveBlock(configText: string, includeBallerina = true): string {
+function buildActiveDirectiveBlock(
+  configText: string,
+  includeBallerina = true,
+  videoEnabled = true
+): string {
   try {
     const rawActives = getActiveDirectives(configText);
     const rawRecords = getActiveRecords();
@@ -147,27 +157,68 @@ function buildActiveDirectiveBlock(configText: string, includeBallerina = true):
     const activeRecords = includeBallerina ? rawRecords : rawRecords.filter((r) => !isBallerinaBook(r.book));
     const isVideo = (s?: string) => s === "video" || s === "both";
     const isImage = (s?: string) => s !== "video";
+    // Video aus: der Choreografie-Block waere eine Einladung an ein Tool, das
+    // dann nicht registriert ist. Scope "video" faellt ersatzlos weg, "both"
+    // bleibt als Bild-Eintrag erhalten.
     const imageProfiles = actives.filter((a) => isImage(a.scope));
     const imageRecords = activeRecords.filter((r) => isImage(r.scope));
-    const videoProfiles = actives.filter((a) => isVideo(a.scope));
-    const videoRecords = activeRecords.filter((r) => isVideo(r.scope));
+    const videoAll = videoEnabled
+      ? {
+          profiles: actives.filter((a) => isVideo(a.scope)),
+          records: activeRecords.filter((r) => isVideo(r.scope)),
+        }
+      : { profiles: [], records: [] };
+    // "both" steht bereits vollstaendig im Bild-Block. Im Video-Block genuegt
+    // der Verweis — sonst steht jeder Text zweimal wortgleich im Prompt (bei
+    // aktivem Ballerina-Set 15 Records, ~70 Woerter das). "video"-eigene
+    // Eintraege kommen nur hier vor und brauchen den Volltext.
+    const videoOnlyProfiles = videoAll.profiles.filter((a) => a.scope === "video");
+    const videoOnlyRecords = videoAll.records.filter((r) => r.scope === "video");
+    const bothProfiles = videoAll.profiles.filter((a) => a.scope === "both");
+    const bothRecords = videoAll.records.filter((r) => r.scope === "both");
     const imageTotal = imageProfiles.length + imageRecords.length;
-    const videoTotal = videoProfiles.length + videoRecords.length;
+    const videoTotal = videoAll.profiles.length + videoAll.records.length;
     if (imageTotal === 0 && videoTotal === 0) return "";
     const fmtProfile = (a: (typeof actives)[number]) =>
       `Name: ${a.id} — ${a.description}\nStimmungsprompt: ${a.prompt}\nQuelle: ${a.source}${a.readonly ? " (read-only)" : ""}${a.scope ? ` (scope ${a.scope})` : ""}`;
     const fmtRecord = (r: (typeof activeRecords)[number]) =>
       `Name: ${r.book}/${r.id} (aspect ${r.aspect}) — ${r.keys.slice(0, 4).join(", ")}\nStimmungsprompt: ${r.content}\nQuelle: library/${r.book}${r.readonly ? " (read-only)" : ""}${r.scope ? ` (scope ${r.scope})` : ""}`;
+    // Kurzform fuer scope="both": Identitaet + Ort des Volltexts. "Keys" bzw.
+    // Stimmungsprompt fehlen bewusst — der Verweis traegt die Information.
+    const fmtProfileRef = (a: (typeof actives)[number]) =>
+      `Name: ${a.id} — ${a.description} (Stimmungsprompt: siehe IMAGE-Block, scope ${a.scope})`;
+    const fmtRecordRef = (r: (typeof activeRecords)[number]) =>
+      `Name: ${r.book}/${r.id} (aspect ${r.aspect}) — ${r.keys.slice(0, 4).join(", ")} (Stimmungsprompt: siehe IMAGE-Block, scope ${r.scope})`;
     let out = "";
     if (imageTotal > 0) {
       const sections = [...imageProfiles.map(fmtProfile), ...imageRecords.map(fmtRecord)].join("\n---\n");
       const stackingNote = imageTotal > 1 ? `(Stacking: ${imageTotal} Einträge aktiv — verwebe alle.)\n` : "";
-      out += `\n\n== ACTIVE IMAGE SYSTEM PROMPT ==\n${stackingNote}${sections}\nAnweisung: Wende die aktiven Stimmungsprompts indirekt an wenn du generate_image/image_edit/compose_images prompts formulierst (Mood, Kunststil, Ausrichtung, Inszenierung). Verwebe sie stilistisch, nicht als stures Präfix. Für generate_video motion/cuts NICHT anwenden — motion bleibt reine Bewegungsbeschreibung zum Startframe.`;
+      // Der motion-Satz hat nur Sinn, solange es generate_video gibt UND
+      // unten tatsaechlich ein VIDEO-Block entsteht — sonst verweist er auf
+      // etwas, das nicht da ist. (videoTotal>0 deckt beide Faelle ab.)
+      const motionNote =
+        videoEnabled && videoTotal > 0
+          ? " Einträge mit scope 'video'/'both' sind unten im VIDEO-Block separat für motion/cuts aufgeführt — dort gelten sie als Bewegungsbeschreibung. Alle scope 'image'-Einträge bleiben Standbilder."
+          : "";
+      out += `\n\n== ACTIVE IMAGE SYSTEM PROMPT ==\n${stackingNote}${sections}\nAnweisung: Wende die aktiven Stimmungsprompts indirekt an wenn du generate_image/image_edit/compose_images prompts formulierst (Mood, Kunststil, Ausrichtung, Inszenierung). Verwebe sie stilistisch, nicht als stures Präfix.${motionNote}`;
     }
     if (videoTotal > 0) {
-      const sections = [...videoProfiles.map(fmtProfile), ...videoRecords.map(fmtRecord)].join("\n---\n");
+      const sections = [
+        ...videoOnlyProfiles.map(fmtProfile),
+        ...videoOnlyRecords.map(fmtRecord),
+        ...bothProfiles.map(fmtProfileRef),
+        ...bothRecords.map(fmtRecordRef),
+      ].join("\n---\n");
       const stackingNote = videoTotal > 1 ? `(Stacking: ${videoTotal} Einträge aktiv — verwebe alle.)\n` : "";
-      out += `\n\n== ACTIVE VIDEO CHOREOGRAPHY ==\n${stackingNote}${sections}\nAnweisung: Nur diese Einträge dürfen generate_video motion/cuts färben — als reine Bewegungsbeschreibung (Kamera + Subjekt, durationsskaliert). Keine Still-Fotografie-Begriffe übernehmen.`;
+      // "nur diese" waere wieder unbedingt und widersprueche dem IMAGE-Block:
+      // die Verweise zaehlen mit, gelten aber inhaltlich nur fuer motion.
+      // Der IMAGE-Block kann fehlen (rein scope-"video"-Eintraege) — dann darf
+      // hier nicht auf ihn verwiesen werden.
+      const bothRef =
+        imageTotal > 0
+          ? " — auch die im IMAGE-Block referenzierten (scope 'both')"
+          : "";
+      out += `\n\n== ACTIVE VIDEO CHOREOGRAPHY ==\n${stackingNote}${sections}\nAnweisung: Diese Einträge${bothRef} färben generate_video motion/cuts, als reine Bewegungsbeschreibung (Kamera + Subjekt, durationsskaliert). Übernehme daraus keine Still-Fotografie-Begriffe, Komposition oder Bildstil; die motion entsteht aus dem Startframe, nicht aus diesen Texten.`;
     }
     return out;
   } catch {
@@ -179,6 +230,20 @@ export async function promptPreprocessor(
   ctl: PromptPreprocessorController,
   userMessage: ChatMessage,
 ): Promise<string | ChatMessage> {
+  // Der aktive Stack haengt am Working Dir des Chats. Muss VOR jedem Lesen
+  // passieren — sonst wuerde ein Turn im Verzeichnis B die Prompts aus A
+  // weiterinjizieren, weil der Modul-Cache noch auf A steht.
+  // setPredictionScopeKey macht den Key zudem fuer die Inclination-Tools
+  // verfuegbar: der SDK gibt ihnen den Working Dir nicht mit (workspace.ts).
+  const scopeKey = resolveWorkingDirKey(ctl);
+  setPredictionScopeKey(scopeKey);
+  bindProfileScope(ctl);
+  bindRecordScope(ctl);
+  // (none)-Bucket: es gibt kein Working Dir, an das die Aktivierung gehoerte.
+  // Die Stack-Datei wird gefuehrt (die Tools melden sie), aber nicht angewandt —
+  // sonst stunde in einem Chat ohne Ordner dauerhaft ein Prompt, den niemand
+  // fuer diesen Kontext aktiviert hat.
+  const hasScope = scopeKey !== NO_WORKING_DIR_KEY;
   const history = await ctl.pullHistory();
   // Config-Schalter für das Neigungsprompt-Subsystem (default an).
   let inclinationsEnabled = true;
@@ -194,7 +259,8 @@ export async function promptPreprocessor(
   } catch {
     // Config nicht lesbar → bisheriges Verhalten (an) beibehalten.
   }
-  const activeBlock = inclinationsEnabled ? buildActiveDirectiveBlock("", ballerinaEnabled) : "";
+  const activeBlock =
+    inclinationsEnabled && hasScope ? buildActiveDirectiveBlock("", ballerinaEnabled, videoEnabled) : "";
   let rules = inclinationsEnabled ? SYSTEM_RULES : stripInclinationRules(SYSTEM_RULES);
   if (!videoEnabled) {
     // Video-Routing raus (Tool ist dann nicht registriert) — eine Zeile,

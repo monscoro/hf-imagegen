@@ -1,15 +1,17 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { ImageDirective, DirectiveSource, InclinationScope } from "./types";
-
-const VALID_SCOPES: InclinationScope[] = ["image", "video", "both"];
-function sanitizeScope(raw: unknown): InclinationScope | undefined {
-  return typeof raw === "string" && (VALID_SCOPES as string[]).includes(raw.trim().toLowerCase())
-    ? (raw.trim().toLowerCase() as InclinationScope)
-    : undefined;
-}
+import { INCLINATION_SCOPES, sanitizeInclinationScope } from "./types";
 import { CURATED_DIRECTIVES } from "./curatedDirectives";
-import { getCacheFile, resolveExistingCacheFile, dropLegacyCacheFile } from "./cachePaths";
+import { getCacheFile, resolveExistingCacheFile, dropLegacyCacheFile, dropLegacyActiveState } from "./cachePaths";
+import {
+  resolveWorkingDirKey,
+  activeStackFileFor,
+  NO_WORKING_DIR_KEY,
+  type WorkingDirCapable,
+} from "./workspace";
+
+export { type WorkingDirCapable } from "./workspace";
 
 /** Altes project-lokales Verzeichnis, nur noch als Lese-Fallback (siehe cachePaths). */
 const LEGACY_PROJECT_TMP = path.join(__dirname, "tmp");
@@ -20,8 +22,90 @@ interface PersistedStore {
   directives: ImageDirective[];
 }
 
+/**
+ * Aktiver Stack pro Working Dir (siehe workspace.ts). Gehalten wird nur der
+ * Key des zuletzt benutzten Buckets, damit ein Working-Dir-Wechsel ohne
+ * Controller-Zugriff nicht versehentlich einen fremden Stack anwendet.
+ */
+let currentScopeKey: string | null = null;
+
+interface ActiveStack {
+  dir: string;
+  activeIds?: string[];
+  activeRecords?: string[];
+}
+
+function loadActiveStack(scopeKey: string): string[] {
+  try {
+    const file = activeStackFileFor(scopeKey);
+    if (!fs.existsSync(file)) return [];
+    const parsed = JSON.parse(fs.readFileSync(file, "utf-8")) as Partial<ActiveStack>;
+    if (parsed && Array.isArray(parsed.activeIds)) {
+      return [
+        ...new Set(
+          parsed.activeIds
+            .filter((id): id is string => typeof id === "string" && !!id.trim())
+            .map((id) => id.trim().toLowerCase())
+        ),
+      ];
+    }
+  } catch {
+    // fehlend/kaputt = nichts aktiv
+  }
+  return [];
+}
+
+function saveActiveStack(scopeKey: string, activeIds: string[]): void {
+  try {
+    const file = activeStackFileFor(scopeKey);
+    // Bestehende Datei zuerst lesen: der libraryStore schreibt activeRecords in
+    // dieselbe Datei, die duerfen sich nicht gegenseitig wegschreiben.
+    let existing: { dir?: string; activeIds?: string[]; activeRecords?: string[] } = {};
+    try {
+      if (fs.existsSync(file)) {
+        existing = JSON.parse(fs.readFileSync(file, "utf-8")) as typeof existing;
+      }
+    } catch {
+      existing = {};
+    }
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const payload: ActiveStack = {
+      dir: scopeKey === NO_WORKING_DIR_KEY ? "" : scopeKey,
+      activeIds,
+      ...(Array.isArray(existing.activeRecords) ? { activeRecords: existing.activeRecords } : {}),
+    };
+    fs.writeFileSync(file, JSON.stringify(payload, null, 2), "utf-8");
+  } catch {
+    // best-effort: eine nicht schreibbare Stack-Datei darf kein Tool scheitern lassen
+  }
+}
+
+/**
+ * Bindet den aktiven Stack an den Working Dir des aktuellen Chats. Von jedem
+ * Tool und vom PromptPreprocessor aufzurufen, BEVOR der Stack gelesen oder
+ * geschrieben wird — sonst stuende nach einem Verzeichniswechsel der Stack
+ * des vorherigen Verzeichnisses weiter.
+ */
+export function bindActiveScope(ctl: WorkingDirCapable | undefined | null): string {
+  const key = resolveWorkingDirKey(ctl);
+  if (key !== currentScopeKey) {
+    currentScopeKey = key;
+    cache.activeIds = loadActiveStack(key);
+  }
+  return key;
+}
+
+/** Nur fuer Diagnose: der Bucket, auf den der Stack gerade gebunden ist. */
+export function getActiveScopeKey(): string | null {
+  return currentScopeKey;
+}
+
 function loadPersisted(): PersistedStore {
   try {
+    // Alter globaler Aktivierungs-Stand zuerst aus der Datei entfernen — er
+    // darf nicht gelesen und nach einem Downgrade nicht wieder geschrieben
+    // werden. Muss VOR dem Einlesen passieren (siehe cachePaths).
+    dropLegacyActiveState("directives.json");
     const file = resolveExistingCacheFile("directives.json", [
       path.join(LEGACY_PROJECT_TMP, "directives.json"),
     ]);
@@ -36,24 +120,22 @@ function loadPersisted(): PersistedStore {
         // sanitize
         const dirs: ImageDirective[] = parsed.directives
           .filter((d) => d && typeof d.id === "string" && typeof d.prompt === "string")
-          .map((d) => ({
-            id: String(d.id).trim().toLowerCase(),
-            description: String(d.description ?? ""),
-            prompt: String(d.prompt ?? ""),
-            source: "user" as DirectiveSource,
-            readonly: false,
-            ...(sanitizeScope((d as { scope?: unknown }).scope)
-              ? { scope: sanitizeScope((d as { scope?: unknown }).scope) as InclinationScope }
-              : {}),
-          }));
-        const fromArray = Array.isArray(parsed.activeIds)
-          ? parsed.activeIds.filter((id): id is string => typeof id === "string" && !!id.trim())
-          : [];
-        const legacy = typeof parsed.activeId === "string" && parsed.activeId.trim()
-          ? [parsed.activeId]
-          : [];
-        const activeIds = [...new Set([...(fromArray.length ? fromArray : legacy)].map((id) => id.trim().toLowerCase()))];
-        return { activeIds, directives: dirs };
+          .map((d) => {
+            const scope = sanitizeInclinationScope((d as { scope?: unknown }).scope);
+            return {
+              id: String(d.id).trim().toLowerCase(),
+              description: String(d.description ?? ""),
+              prompt: String(d.prompt ?? ""),
+              source: "user" as DirectiveSource,
+              readonly: false,
+              ...(scope ? { scope } : {}),
+            };
+          });
+        // activeIds/activeId werden bewusst nicht mehr gelesen: der aktive
+        // Stack ist pro Working Dir (siehe bindActiveScope). Ein alter globaler
+        // Stand wird verworfen — das ist die gewollte Semantik, kein Working Dir
+        // darf den Stack eines anderen erben.
+        return { activeIds: [], directives: dirs };
       }
     }
   } catch {
@@ -62,19 +144,24 @@ function loadPersisted(): PersistedStore {
   return { activeIds: [], directives: [] };
 }
 
+/**
+ * Schreibt die Profil-Definitionen. Der aktive Stack wandert bewusst NICHT mit
+ * — er liegt pro Working Dir in `.image-gen-inclinations.json`.
+ */
 function savePersisted(store: PersistedStore): void {
   try {
     fs.mkdirSync(path.dirname(STORE_FILE), { recursive: true });
-    fs.writeFileSync(
-      STORE_FILE,
-      // activeId als Mirror für Abwärtskompatibilität (ältere Plugin-Versionen lesen nur dieses Feld)
-      JSON.stringify({ activeId: store.activeIds[0] ?? null, ...store }, null, 2),
-      "utf-8"
-    );
+    fs.writeFileSync(STORE_FILE, JSON.stringify({ directives: store.directives }, null, 2), "utf-8");
     dropLegacyCacheFile("directives.json");
   } catch {
     // best-effort
   }
+}
+
+/** Persistiert Definitionen und den aktiven Stack des gebundenen Buckets. */
+function persistAll(): void {
+  savePersisted(cache);
+  if (currentScopeKey !== null) saveActiveStack(currentScopeKey, cache.activeIds);
 }
 
 // In-memory cache, initialized once per plugin lifecycle
@@ -263,9 +350,9 @@ export function getActiveDirectives(configText: string): ImageDirective[] {
     if (all.some((d) => d.id === id) && !kept.includes(id)) kept.push(id);
   }
   if (kept.length !== cache.activeIds.length) {
-    // Dangling ids (z.B. gelöschter Config-Eintrag) prUNEN
+    // Dangling ids (z.B. gelöschter Config-Eintrag) prUNen
     cache.activeIds = kept;
-    savePersisted(cache);
+    persistAll();
   }
   return kept
     .map((id) => all.find((d) => d.id === id))
@@ -279,7 +366,7 @@ export function addActiveDirective(id: string, configText: string): ImageDirecti
   if (!found) throw new Error(`Stimmungsprompt "${id}" nicht gefunden. Nutze inclination_prompt_list für Namen oder inclination_prompt_manage({action:"create", …}) für ein neues Profil.`);
   if (!cache.activeIds.includes(found.id)) {
     cache.activeIds.push(found.id);
-    savePersisted(cache);
+    persistAll();
   }
   return found;
 }
@@ -288,14 +375,14 @@ export function removeActiveDirective(id: string): boolean {
   const norm = id.trim().toLowerCase();
   if (!cache.activeIds.includes(norm)) return false;
   cache.activeIds = cache.activeIds.filter((i) => i !== norm);
-  savePersisted(cache);
+  persistAll();
   return true;
 }
 
 export function clearActiveDirectives(): void {
   if (cache.activeIds.length === 0) return;
   cache.activeIds = [];
-  savePersisted(cache);
+  persistAll();
 }
 
 export function createDirective(
@@ -317,10 +404,10 @@ export function createDirective(
     prompt: prompt.trim(),
     source: "user",
     readonly: false,
-    ...(scope && VALID_SCOPES.includes(scope) ? { scope } : {}),
+    ...(scope && INCLINATION_SCOPES.includes(scope) ? { scope } : {}),
   };
   cache.directives.push(dir);
-  savePersisted(cache);
+  persistAll();
   return dir;
 }
 
@@ -351,7 +438,7 @@ export function updateDirective(
         readonly: false,
       };
       cache.directives.push(shadow);
-      savePersisted(cache);
+      persistAll();
       return shadow;
     }
     // update existing shadow
@@ -363,8 +450,8 @@ export function updateDirective(
       const p = prompt.trim();
       if (p) cache.directives[idx].prompt = p;
     }
-    if (scope && VALID_SCOPES.includes(scope)) cache.directives[idx].scope = scope;
-    savePersisted(cache);
+    if (scope && INCLINATION_SCOPES.includes(scope)) cache.directives[idx].scope = scope;
+    persistAll();
     return cache.directives[idx];
   }
 
@@ -379,8 +466,8 @@ export function updateDirective(
     const p = prompt.trim();
     if (p) cache.directives[idx].prompt = p;
   }
-  if (scope && VALID_SCOPES.includes(scope)) cache.directives[idx].scope = scope;
-  savePersisted(cache);
+  if (scope && INCLINATION_SCOPES.includes(scope)) cache.directives[idx].scope = scope;
+  persistAll();
   return cache.directives[idx];
 }
 
@@ -396,7 +483,7 @@ export function deleteDirective(id: string, configText: string): void {
       // Delete only the shadow, revert to config base
       cache.directives.splice(shadowIdx, 1);
       cache.activeIds = cache.activeIds.filter((i) => i !== norm);
-      savePersisted(cache);
+      persistAll();
       return;
     }
     if (fromConfig.readonly) {
@@ -408,7 +495,7 @@ export function deleteDirective(id: string, configText: string): void {
   if (idx === -1) throw new Error(`Profil "${norm}" nicht gefunden.`);
   cache.directives.splice(idx, 1);
   cache.activeIds = cache.activeIds.filter((i) => i !== norm);
-  savePersisted(cache);
+  persistAll();
 }
 
 export function getDirectiveById(id: string, configText: string): ImageDirective | null {

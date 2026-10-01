@@ -11,6 +11,8 @@
  * User-Bücher/-Records kommen aus libraryStore.ts (directives.json-Pendant library.json).
  */
 
+import type { InclinationScope } from "./types";
+
 export type LibrarySource = "curated" | "user";
 
 export interface LibraryBook {
@@ -29,7 +31,7 @@ export interface LibraryRecord {
   source: LibrarySource;
   readonly: boolean;
   /** Wirkungsbereich wie bei Profilen: undefined = "image" (Default, Standbilder). */
-  scope?: import("./types").InclinationScope;
+  scope?: InclinationScope;
 }
 
 /** Facetten-Index (Auszug aus dem alten Prosa-Index im dominatrix-skillset-Profil; "technique" aus dem Ballerina-Buch). */

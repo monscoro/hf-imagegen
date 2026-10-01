@@ -29,7 +29,7 @@ import { getCatalogCacheDir } from "./pollinationsCache";
  * Jede Funktion in diesem Modul ist fehlertolerant und wirft nie: ein kaputter
  * Cache darf keinen Tool-Aufruf scheitern lassen, er ist nur ein Cache.
  */
-const HF_CATALOG_VERSION = 2;
+const HF_CATALOG_VERSION = 3;
 
 const HF_API_BASE = "https://huggingface.co/api";
 
@@ -62,6 +62,13 @@ export interface HFCatalogEnvelope {
   version: number;
   fetchedAt: number;
   models: HFCatalogEntry[];
+  /**
+   * Task-Seiten, die beim Holen ausfielen. Der Katalog ist dann fuer diese
+   * Tasks unvollstaendig — "nicht gelistet" heisst dort "nicht abgefragt", nicht
+   * "kein Provider". Ohne diese Liste wuerde die Filterkette (keepUsableModels)
+   * genau diese Modelle als providerlos verwerfen.
+   */
+  incompleteTasks: HFTask[];
 }
 
 export function getHfCatalogCacheFile(): string {
@@ -81,6 +88,9 @@ export function readHfCatalogCache(): HFCatalogEnvelope | null {
       version: parsed.version,
       fetchedAt: parsed.fetchedAt,
       models: parsed.models as HFCatalogEntry[],
+      incompleteTasks: Array.isArray(parsed.incompleteTasks)
+        ? (parsed.incompleteTasks as HFTask[])
+        : [],
     };
   } catch {
     return null;
@@ -88,7 +98,11 @@ export function readHfCatalogCache(): HFCatalogEnvelope | null {
 }
 
 /** Schreibt atomar: erst in eine PID-spezifische Temp-Datei, dann rename. */
-export function writeHfCatalogCache(models: HFCatalogEntry[], fetchedAt?: number): boolean {
+export function writeHfCatalogCache(
+  models: HFCatalogEntry[],
+  incompleteTasks: HFTask[] = [],
+  fetchedAt?: number
+): boolean {
   try {
     const file = getHfCatalogCacheFile();
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -96,6 +110,7 @@ export function writeHfCatalogCache(models: HFCatalogEntry[], fetchedAt?: number
       version: HF_CATALOG_VERSION,
       fetchedAt: fetchedAt ?? Date.now(),
       models,
+      incompleteTasks,
     };
     const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(envelope), "utf-8");
@@ -159,26 +174,32 @@ export function projectHfModel(raw: unknown, task: HFTask): HFCatalogEntry | nul
 
 const CATALOG_TASKS: HFTask[] = ["text-to-image", "image-to-image", "text-to-video", "image-to-video"];
 
+export interface HFCatalogFetch {
+  models: HFCatalogEntry[];
+  /** Task-Seiten, die in diesem Durchgang ausfielen. */
+  incompleteTasks: HFTask[];
+}
+
 /**
  * Laedt alle Katalogseiten in einem Durchgang. Der Server liefert hoechstens
  * 1000 Modelle je Seite, was fuer die Provider-Menge deutlich ueber der
  * tatsaechlichen Groesse liegt (226 text-to-image, 244 image-to-image mit
  * Mapping; Video-Seiten sind kleiner) — deshalb genuegen vier Requests ohne
- * Paginierung. Version 2: Video-Tasks kamen dazu, alte Caches ohne sie werden
- * verworfen und neu geholt.
+ * Paginierung. Version 3: Video-Tasks kamen in v2 dazu, `incompleteTasks` in v3.
+ * Alte Caches werden verworfen und neu geholt.
  *
  * `sort=likes` statt `createdAt`: nach Aktualitaet sortiert liefert Modelle
  * ohne jegliche Nutzung, die Liste ist dann unbrauchbar. Eine vollstaendige
  * Abfrage ueber alle 110k T2I-Modelle waere nur mit Cursor-Paginierung moeglich
  * und waere fuer die Auswahl sinnlos.
  */
-export async function fetchHfCatalog(): Promise<HFCatalogEntry[]> {
+export async function fetchHfCatalog(): Promise<HFCatalogFetch> {
   // Pro Task best-effort: faellt EINE Seite aus (Timeout, 5xx), duerfen die
   // anderen drei nicht mit ihr sterben — sonst waere der alte Cache (durch den
   // Versions-Bump bereits verworfen) weg und die Listen gaenzlich ungefiltert.
   // Nur wenn ALLE Seiten scheitern, wirft der Aufruf (Aufrufer: stale/backoff).
   const collected: HFCatalogEntry[] = [];
-  const failed: string[] = [];
+  const failed: HFTask[] = [];
   for (const task of CATALOG_TASKS) {
     try {
       const url =
@@ -206,5 +227,5 @@ export async function fetchHfCatalog(): Promise<HFCatalogEntry[]> {
   if (collected.length === 0) {
     throw new Error(`HF catalog: all task pages failed (${failed.join(", ")}).`);
   }
-  return collected;
+  return { models: collected, incompleteTasks: failed };
 }
